@@ -1,0 +1,1528 @@
+/**
+ * Tally relational schema (§21).
+ *
+ * Conventions:
+ *  - Every user-owned table carries `userId` even when it could be reached
+ *    through a join. Tenant isolation is then a single predicate on every
+ *    query, not a property of getting the join right (§34).
+ *  - No binary media is stored here. Media lives in object storage; these
+ *    tables hold storage keys, metadata and provenance (§22).
+ *  - Provider credentials are stored as ciphertext produced by lib/crypto.
+ *  - Timestamps are `timestamptz`; the app never depends on server local time.
+ */
+import { relations, sql } from "drizzle-orm";
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  real,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core";
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/** §20 — the persisted project/video state machine. */
+export const projectStatusEnum = pgEnum("project_status", [
+  "IDEA",
+  "SCRIPT_GENERATING",
+  "SCRIPT_READY",
+  "ASSETS_GENERATING",
+  "ASSETS_READY",
+  "RENDERING",
+  "VIDEO_READY",
+  "THUMBNAIL_GENERATING",
+  "READY_TO_PUBLISH",
+  "SCHEDULED",
+  "PUBLISHING",
+  "PUBLISHED",
+  "FAILED",
+]);
+
+/** Pipeline stages, each independently trackable (§10, §38). */
+export const pipelineStageEnum = pgEnum("pipeline_stage", [
+  "RESEARCH",
+  "SCRIPT",
+  "SCENE_PLAN",
+  "VOICEOVER",
+  "VISUALS",
+  "MUSIC",
+  "CAPTIONS",
+  "TIMELINE",
+  "RENDER",
+  "QUALITY_CHECK",
+  "THUMBNAIL",
+  "METADATA",
+  "PUBLISH",
+]);
+
+export const jobStatusEnum = pgEnum("job_status", [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "blocked_not_configured",
+]);
+
+export const planTierEnum = pgEnum("plan_tier", ["starter", "studio", "scale"]);
+
+export const subscriptionStatusEnum = pgEnum("subscription_status", [
+  "active",
+  "trialing",
+  "past_due",
+  "canceled",
+  "incomplete",
+  "unpaid",
+]);
+
+export const automationLevelEnum = pgEnum("automation_level", [
+  /** Tally researches and drafts; user approves every step. */
+  "manual",
+  /** Tally produces a finished video; user approves before publishing. */
+  "assisted",
+  /** Tally researches, produces and publishes on schedule. */
+  "autopilot",
+]);
+
+export const assetKindEnum = pgEnum("asset_kind", [
+  "stock_video",
+  "stock_image",
+  "generated_image",
+  "generated_video",
+  "voiceover",
+  "music",
+  "sfx",
+  "caption_file",
+  "render_output",
+  "thumbnail",
+  "upload",
+]);
+
+export const publishVisibilityEnum = pgEnum("publish_visibility", [
+  "public",
+  "unlisted",
+  "private",
+]);
+
+export const publishJobStatusEnum = pgEnum("publish_job_status", [
+  "queued",
+  "scheduled",
+  "publishing",
+  "published",
+  "failed",
+  "cancelled",
+]);
+
+export const emailTokenPurposeEnum = pgEnum("email_token_purpose", [
+  "verify_email",
+  "reset_password",
+]);
+
+// ---------------------------------------------------------------------------
+// Identity & access (§4)
+// ---------------------------------------------------------------------------
+
+export const users = pgTable(
+  "users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: varchar("email", { length: 320 }).notNull(),
+    /** Lower-cased email used for uniqueness and lookup. */
+    emailNormalized: varchar("email_normalized", { length: 320 }).notNull(),
+    /** scrypt digest, formatted `scrypt$N$r$p$salt$hash`. Never plaintext. */
+    passwordHash: text("password_hash").notNull(),
+    name: varchar("name", { length: 120 }).notNull(),
+    emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
+    /** Set once §5 onboarding is finished; gates the dashboard. */
+    onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
+    /** Bumped on password change to invalidate every existing session. */
+    sessionEpoch: integer("session_epoch").notNull().default(0),
+    failedLoginCount: integer("failed_login_count").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex("users_email_normalized_key").on(t.emailNormalized)],
+);
+
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** SHA-256 of the opaque cookie token. The raw token is never stored. */
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    /** Session is invalid if this differs from users.session_epoch. */
+    epoch: integer("epoch").notNull().default(0),
+    userAgent: text("user_agent"),
+    ipAddress: varchar("ip_address", { length: 45 }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sessions_token_hash_key").on(t.tokenHash),
+    index("sessions_user_id_idx").on(t.userId),
+    index("sessions_expires_at_idx").on(t.expiresAt),
+  ],
+);
+
+/** Single-use tokens for email verification and password reset. */
+export const emailTokens = pgTable(
+  "email_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    purpose: emailTokenPurposeEnum("purpose").notNull(),
+    /** SHA-256 of the token that was emailed. */
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("email_tokens_token_hash_key").on(t.tokenHash),
+    index("email_tokens_user_purpose_idx").on(t.userId, t.purpose),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Plans & billing (§23, §24)
+// ---------------------------------------------------------------------------
+
+export const plans = pgTable("plans", {
+  /** Stable slug, also the enum value used in code. */
+  tier: planTierEnum("tier").primaryKey(),
+  name: varchar("name", { length: 64 }).notNull(),
+  priceCents: integer("price_cents").notNull(),
+  /** null = unlimited. Enforced server-side; frontend values are never trusted. */
+  maxChannels: integer("max_channels"),
+  maxVideosPerMonth: integer("max_videos_per_month"),
+  /** Feature flags: aiVoiceover, brollLibrary, thumbnailAbTest, autoPublish, ... */
+  features: jsonb("features")
+    .notNull()
+    .$type<Record<string, boolean>>()
+    .default(sql`'{}'::jsonb`),
+  /** Higher wins in the render queue (§23 priority render queue). */
+  queuePriority: integer("queue_priority").notNull().default(1),
+  stripePriceId: varchar("stripe_price_id", { length: 128 }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tier: planTierEnum("tier").notNull().default("starter"),
+    status: subscriptionStatusEnum("status").notNull().default("active"),
+    /** Authoritative source is the billing provider webhook, not the client. */
+    provider: varchar("provider", { length: 32 }).notNull().default("none"),
+    providerCustomerId: varchar("provider_customer_id", { length: 128 }),
+    providerSubscriptionId: varchar("provider_subscription_id", { length: 128 }),
+    currentPeriodStart: timestamp("current_period_start", {
+      withTimezone: true,
+    }),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("subscriptions_user_id_key").on(t.userId),
+    index("subscriptions_provider_sub_idx").on(t.providerSubscriptionId),
+  ],
+);
+
+/** Monthly quota counters, incremented server-side when work is committed. */
+export const usageCounters = pgTable(
+  "usage_counters",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** `YYYY-MM` in UTC. */
+    period: varchar("period", { length: 7 }).notNull(),
+    videosStarted: integer("videos_started").notNull().default(0),
+    videosPublished: integer("videos_published").notNull().default(0),
+    rendersCompleted: integer("renders_completed").notNull().default(0),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.period] })],
+);
+
+/**
+ * §5 onboarding answers, captured before any channel is connected.
+ *
+ * These are account-level *defaults*. Per-channel strategy lives in
+ * `channel_settings` and is seeded from here when a channel is connected, so
+ * §27 still holds: nothing is shared between channels after creation, and
+ * editing one channel never changes another.
+ */
+export const onboardingProfiles = pgTable("onboarding_profiles", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** The channel URL or handle the user told us about, before OAuth confirms it. */
+  declaredChannelUrl: text("declared_channel_url"),
+  niche: varchar("niche", { length: 160 }),
+  targetAudience: text("target_audience"),
+  contentLanguage: varchar("content_language", { length: 16 })
+    .notNull()
+    .default("en-US"),
+  preferredLengthSeconds: integer("preferred_length_seconds")
+    .notNull()
+    .default(480),
+  uploadsPerWeek: integer("uploads_per_week").notNull().default(1),
+  contentStyle: varchar("content_style", { length: 64 }),
+  voicePreference: varchar("voice_preference", { length: 64 }),
+  automationLevel: automationLevelEnum("automation_level")
+    .notNull()
+    .default("manual"),
+  publishDays: jsonb("publish_days")
+    .notNull()
+    .$type<number[]>()
+    .default(sql`'[1,3,5]'::jsonb`),
+  publishTimes: jsonb("publish_times")
+    .notNull()
+    .$type<string[]>()
+    .default(sql`'["18:00"]'::jsonb`),
+  timezone: varchar("timezone", { length: 64 }).notNull().default("UTC"),
+  /** Furthest step reached, so a refresh resumes rather than restarts (§45). */
+  lastStep: integer("last_step").notNull().default(0),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// ---------------------------------------------------------------------------
+// Channels (§6, §27, §28)
+// ---------------------------------------------------------------------------
+
+export const channels = pgTable(
+  "channels",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** YouTube channel id (UC...). */
+    youtubeChannelId: varchar("youtube_channel_id", { length: 64 }).notNull(),
+    title: varchar("title", { length: 200 }).notNull(),
+    handle: varchar("handle", { length: 120 }),
+    description: text("description"),
+    thumbnailUrl: text("thumbnail_url"),
+    /** Cached YouTube statistics, refreshed by a scheduled job (§25). */
+    subscriberCount: integer("subscriber_count"),
+    videoCount: integer("video_count"),
+    viewCount: numeric("view_count", { precision: 20, scale: 0 }),
+    statsRefreshedAt: timestamp("stats_refreshed_at", { withTimezone: true }),
+
+    /** AES-256-GCM ciphertext. Never sent to the frontend (§6). */
+    accessTokenEnc: text("access_token_enc"),
+    refreshTokenEnc: text("refresh_token_enc"),
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+    grantedScopes: text("granted_scopes"),
+    /** Set when the refresh token is rejected — UI must prompt re-auth (§30). */
+    reauthRequiredAt: timestamp("reauth_required_at", { withTimezone: true }),
+    lastTokenErrorMessage: text("last_token_error_message"),
+
+    connectedAt: timestamp("connected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // A YouTube channel may only be connected once per user.
+    uniqueIndex("channels_user_youtube_key").on(t.userId, t.youtubeChannelId),
+    index("channels_user_id_idx").on(t.userId),
+  ],
+);
+
+/** Per-channel content strategy (§5, §27). Never shared across channels. */
+export const channelSettings = pgTable(
+  "channel_settings",
+  {
+    channelId: uuid("channel_id")
+      .primaryKey()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    niche: varchar("niche", { length: 160 }),
+    targetAudience: text("target_audience"),
+    /** BCP-47 language tag for script + voiceover. */
+    contentLanguage: varchar("content_language", { length: 16 })
+      .notNull()
+      .default("en-US"),
+    /** Target duration in seconds. */
+    preferredLengthSeconds: integer("preferred_length_seconds")
+      .notNull()
+      .default(480),
+    uploadsPerWeek: integer("uploads_per_week").notNull().default(1),
+    contentStyle: varchar("content_style", { length: 64 }),
+    videoStyle: varchar("video_style", { length: 64 }),
+    thumbnailStyle: varchar("thumbnail_style", { length: 64 }),
+    voiceProviderVoiceId: varchar("voice_provider_voice_id", { length: 128 }),
+    voiceStyle: varchar("voice_style", { length: 64 }),
+    voiceSpeed: real("voice_speed").notNull().default(1),
+    /** Channels the user wants tracked as competitors (§7). */
+    competitorChannelIds: jsonb("competitor_channel_ids")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+    /** Topic keywords seeding research. */
+    keywords: jsonb("keywords")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+    /** Overrides for the §8 opportunity-score weights. */
+    scoreWeights: jsonb("score_weights").$type<Record<string, number>>(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("channel_settings_user_id_idx").on(t.userId)],
+);
+
+/** §28 — brand kit consumed by the video generator and thumbnail engine. */
+export const brandKits = pgTable(
+  "brand_kits",
+  {
+    channelId: uuid("channel_id")
+      .primaryKey()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    brandName: varchar("brand_name", { length: 120 }),
+    logoAssetId: uuid("logo_asset_id"),
+    primaryColor: varchar("primary_color", { length: 9 }),
+    secondaryColor: varchar("secondary_color", { length: 9 }),
+    fontPreference: varchar("font_preference", { length: 80 }),
+    introAssetId: uuid("intro_asset_id"),
+    outroAssetId: uuid("outro_asset_id"),
+    defaultCta: text("default_cta"),
+    captionStyle: jsonb("caption_style").$type<Record<string, unknown>>(),
+    thumbnailStyle: jsonb("thumbnail_style").$type<Record<string, unknown>>(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("brand_kits_user_id_idx").on(t.userId)],
+);
+
+/** §18, §19 — publishing cadence and automation rules, per channel. */
+export const automationSettings = pgTable(
+  "automation_settings",
+  {
+    channelId: uuid("channel_id")
+      .primaryKey()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    level: automationLevelEnum("level").notNull().default("manual"),
+    /** 0 = Sunday … 6 = Saturday. */
+    publishDays: jsonb("publish_days")
+      .notNull()
+      .$type<number[]>()
+      .default(sql`'[1,3,5]'::jsonb`),
+    /** `HH:MM` in the channel timezone. */
+    publishTimes: jsonb("publish_times")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'["18:00"]'::jsonb`),
+    timezone: varchar("timezone", { length: 64 }).notNull().default("UTC"),
+    videosPerWeek: integer("videos_per_week").notNull().default(3),
+    /** Requires the plan's autoPublish feature; re-checked at publish time. */
+    autoPublish: boolean("auto_publish").notNull().default(false),
+    requireApproval: boolean("require_approval").notNull().default(true),
+    lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("automation_settings_user_id_idx").on(t.userId),
+    index("automation_settings_next_run_idx").on(t.enabled, t.nextRunAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Research (§7, §8)
+// ---------------------------------------------------------------------------
+
+export const researchRuns = pgTable(
+  "research_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    status: jobStatusEnum("status").notNull().default("queued"),
+    /** `manual` | `automation` — who asked for this run. */
+    trigger: varchar("trigger", { length: 32 }).notNull().default("manual"),
+    niche: varchar("niche", { length: 160 }),
+    keywords: jsonb("keywords")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+    /** Which signal sources actually responded, for provenance (§29). */
+    sources: jsonb("sources")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+    /** Aggregate search-demand series rendered by the Research chart. */
+    demandSeries: jsonb("demand_series").$type<
+      Array<{ label: string; value: number }>
+    >(),
+    error: text("error"),
+    /**
+     * The `AppError` code behind `error`, when there was one.
+     *
+     * `status` alone is not enough to explain a stopped run: `blocked_not_configured`
+     * covers both a missing API key and a provider account with no credit, and the
+     * two need different words on screen. The UI branches on this rather than
+     * pattern-matching the message, which is prose and will be reworded.
+     */
+    errorCode: varchar("error_code", { length: 64 }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("research_runs_channel_created_idx").on(t.channelId, t.createdAt),
+    index("research_runs_user_id_idx").on(t.userId),
+  ],
+);
+
+/** Raw observed signals — the source videos behind an opportunity. */
+export const researchResults = pgTable(
+  "research_results",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => researchRuns.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    source: varchar("source", { length: 48 }).notNull(),
+    youtubeVideoId: varchar("youtube_video_id", { length: 32 }),
+    youtubeChannelId: varchar("youtube_channel_id", { length: 64 }),
+    channelTitle: varchar("channel_title", { length: 200 }),
+    title: text("title").notNull(),
+    /** Canonical watch URL — kept so the UI can link to the source video. */
+    url: text("url"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    viewCount: numeric("view_count", { precision: 20, scale: 0 }),
+    likeCount: integer("like_count"),
+    commentCount: integer("comment_count"),
+    /** Views per hour since publication — the velocity signal (§7). */
+    viewsPerHour: real("views_per_hour"),
+    engagementRate: real("engagement_rate"),
+    /** Extracted topic cluster this video belongs to. */
+    topic: varchar("topic", { length: 200 }),
+    raw: jsonb("raw").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("research_results_run_idx").on(t.runId),
+    index("research_results_channel_idx").on(t.channelId),
+    index("research_results_video_idx").on(t.youtubeVideoId),
+  ],
+);
+
+/** A Tally-generated original angle derived from research signals (§7). */
+export const ideas = pgTable(
+  "ideas",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => researchRuns.id, {
+      onDelete: "set null",
+    }),
+    title: text("title").notNull(),
+    angle: text("angle"),
+    rationale: text("rationale"),
+    /** The underlying topic opportunity, not a copy of a source title (§7). */
+    topic: varchar("topic", { length: 200 }),
+    targetKeywords: jsonb("target_keywords")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+    /** Research result ids this idea was derived from — provenance for §29. */
+    sourceResultIds: jsonb("source_result_ids")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+
+    // §8 component scores, 0-100. Tally-generated, not YouTube metrics.
+    trendScore: real("trend_score"),
+    opportunityScore: real("opportunity_score"),
+    competitionScore: real("competition_score"),
+    audienceFitScore: real("audience_fit_score"),
+    velocityScore: real("velocity_score"),
+    freshnessScore: real("freshness_score"),
+    /** Weighted composite — the "Tally Opportunity Score". */
+    tallyScore: real("tally_score"),
+    /** The weights used, so a historical score stays explainable. */
+    scoreBreakdown: jsonb("score_breakdown").$type<Record<string, number>>(),
+
+    /** `new` | `saved` | `rejected` | `used`. */
+    state: varchar("state", { length: 16 }).notNull().default("new"),
+    generatedBy: varchar("generated_by", { length: 48 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("ideas_channel_state_idx").on(t.channelId, t.state),
+    index("ideas_user_id_idx").on(t.userId),
+    index("ideas_score_idx").on(t.channelId, t.tallyScore),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Projects — one video in production (§20, §45)
+// ---------------------------------------------------------------------------
+
+export const projects = pgTable(
+  "projects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    ideaId: uuid("idea_id").references(() => ideas.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    status: projectStatusEnum("status").notNull().default("IDEA"),
+    /** Stage the project is currently working on, for the §38 status display. */
+    currentStage: pipelineStageEnum("current_stage"),
+    /** 0-100 overall progress, derived from completed stages — never faked. */
+    progress: integer("progress").notNull().default(0),
+
+    /** Failure bookkeeping (§20, §30). */
+    failedStage: pipelineStageEnum("failed_stage"),
+    errorMessage: text("error_message"),
+    errorCode: varchar("error_code", { length: 64 }),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
+    retryCount: integer("retry_count").notNull().default(0),
+
+    /** `manual` | `automation`. */
+    origin: varchar("origin", { length: 32 }).notNull().default("manual"),
+    /** Correlation id shared by every log line and job for this project (§41). */
+    traceId: varchar("trace_id", { length: 64 }),
+
+    targetDurationSeconds: integer("target_duration_seconds"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("projects_user_status_idx").on(t.userId, t.status),
+    index("projects_channel_created_idx").on(t.channelId, t.createdAt),
+  ],
+);
+
+/** Append-only audit of §20 transitions. Makes stuck states diagnosable. */
+export const projectEvents = pgTable(
+  "project_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fromStatus: projectStatusEnum("from_status"),
+    toStatus: projectStatusEnum("to_status").notNull(),
+    stage: pipelineStageEnum("stage"),
+    message: text("message"),
+    meta: jsonb("meta").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("project_events_project_idx").on(t.projectId, t.createdAt)],
+);
+
+// ---------------------------------------------------------------------------
+// Scripts (§9)
+// ---------------------------------------------------------------------------
+
+export const scripts = pgTable(
+  "scripts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Points at the currently active version. */
+    activeVersionId: uuid("active_version_id"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("scripts_project_key").on(t.projectId),
+    index("scripts_user_id_idx").on(t.userId),
+  ],
+);
+
+export const scriptVersions = pgTable(
+  "script_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    scriptId: uuid("script_id")
+      .notNull()
+      .references(() => scripts.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** 1-based; displayed as "SCRIPT v1.0" in the UI. */
+    version: integer("version").notNull(),
+    title: text("title").notNull(),
+    /** Alternative titles offered by the generator. */
+    titleIdeas: jsonb("title_ideas")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+    hook: text("hook").notNull(),
+    introduction: text("introduction"),
+    /** Ordered body sections: {heading, body, talkingPoints[], transition}. */
+    sections: jsonb("sections")
+      .notNull()
+      .$type<
+        Array<{
+          heading: string;
+          body: string;
+          talkingPoints?: string[];
+          transition?: string;
+        }>
+      >()
+      .default(sql`'[]'::jsonb`),
+    conclusion: text("conclusion"),
+    cta: text("cta"),
+    storyStructure: text("story_structure"),
+    /** Factual references the model was asked to ground claims in (§29). */
+    references: jsonb("references")
+      .notNull()
+      .$type<Array<{ label: string; url?: string }>>()
+      .default(sql`'[]'::jsonb`),
+    estimatedDurationSeconds: integer("estimated_duration_seconds"),
+    wordCount: integer("word_count"),
+    /** `ai` | `user_edit` — an edited version is still a version. */
+    source: varchar("source", { length: 16 }).notNull().default("ai"),
+    provider: varchar("provider", { length: 48 }),
+    model: varchar("model", { length: 64 }),
+    promptTokens: integer("prompt_tokens"),
+    outputTokens: integer("output_tokens"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("script_versions_script_version_key").on(t.scriptId, t.version),
+    index("script_versions_user_id_idx").on(t.userId),
+  ],
+);
+
+/** §10 shot/scene plan — one row per scene, drives visuals and the timeline. */
+export const scenes = pgTable(
+  "scenes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    scriptVersionId: uuid("script_version_id").references(
+      () => scriptVersions.id,
+      { onDelete: "set null" },
+    ),
+    /** 0-based ordering. */
+    index: integer("index").notNull(),
+    /** Storyboard label — Hook / Problem / Solution / Results / CTA. */
+    label: varchar("label", { length: 80 }),
+    narration: text("narration").notNull(),
+    /** Visual direction for stock search or generation. */
+    visualPrompt: text("visual_prompt"),
+    /** Stock search terms derived from the visual prompt. */
+    searchTerms: jsonb("search_terms")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+    onScreenText: text("on_screen_text"),
+    startMs: integer("start_ms"),
+    durationMs: integer("duration_ms"),
+    transition: varchar("transition", { length: 32 }),
+    /** Chosen visual for this scene. */
+    visualAssetId: uuid("visual_asset_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("scenes_project_index_key").on(t.projectId, t.index),
+    index("scenes_user_id_idx").on(t.userId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Media assets (§12, §13, §22, §29)
+// ---------------------------------------------------------------------------
+
+export const assets = pgTable(
+  "assets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "cascade",
+    }),
+    channelId: uuid("channel_id").references(() => channels.id, {
+      onDelete: "cascade",
+    }),
+    kind: assetKindEnum("kind").notNull(),
+    /** Object storage key. The bytes never live in Postgres (§22). */
+    storageKey: text("storage_key"),
+    mimeType: varchar("mime_type", { length: 128 }),
+    bytes: integer("bytes"),
+    width: integer("width"),
+    height: integer("height"),
+    durationMs: integer("duration_ms"),
+    checksumSha256: varchar("checksum_sha256", { length: 64 }),
+
+    /** Provenance and licensing — required by §29, never dropped. */
+    provider: varchar("provider", { length: 48 }),
+    providerAssetId: varchar("provider_asset_id", { length: 128 }),
+    sourceUrl: text("source_url"),
+    license: varchar("license", { length: 120 }),
+    attribution: text("attribution"),
+    authorName: varchar("author_name", { length: 200 }),
+
+    meta: jsonb("meta").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("assets_project_kind_idx").on(t.projectId, t.kind),
+    index("assets_user_id_idx").on(t.userId),
+  ],
+);
+
+export const voiceovers = pgTable(
+  "voiceovers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    assetId: uuid("asset_id").references(() => assets.id, {
+      onDelete: "set null",
+    }),
+    provider: varchar("provider", { length: 48 }).notNull(),
+    voiceId: varchar("voice_id", { length: 128 }),
+    voiceName: varchar("voice_name", { length: 120 }),
+    language: varchar("language", { length: 16 }),
+    speed: real("speed"),
+    style: varchar("style", { length: 64 }),
+    durationMs: integer("duration_ms"),
+    /** Per-scene audio offsets, so the timeline can align narration. */
+    segments: jsonb("segments").$type<
+      Array<{ sceneIndex: number; startMs: number; durationMs: number }>
+    >(),
+    charactersBilled: integer("characters_billed"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("voiceovers_project_idx").on(t.projectId),
+    index("voiceovers_user_id_idx").on(t.userId),
+  ],
+);
+
+export const musicTracks = pgTable(
+  "music_tracks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    assetId: uuid("asset_id").references(() => assets.id, {
+      onDelete: "set null",
+    }),
+    role: varchar("role", { length: 16 }).notNull().default("background"),
+    mood: varchar("mood", { length: 64 }),
+    bpm: integer("bpm"),
+    /** Linear gain 0-1. Kept low so narration stays intelligible (§13). */
+    volume: real("volume").notNull().default(0.14),
+    duckUnderNarration: boolean("duck_under_narration").notNull().default(true),
+    startMs: integer("start_ms").notNull().default(0),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("music_tracks_project_idx").on(t.projectId),
+    index("music_tracks_user_id_idx").on(t.userId),
+  ],
+);
+
+export const captions = pgTable(
+  "captions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    language: varchar("language", { length: 16 }).notNull().default("en"),
+    provider: varchar("provider", { length: 48 }),
+    /** Word/phrase level cues with timestamps (§14). */
+    cues: jsonb("cues")
+      .notNull()
+      .$type<Array<{ startMs: number; endMs: number; text: string }>>()
+      .default(sql`'[]'::jsonb`),
+    srtAssetId: uuid("srt_asset_id").references(() => assets.id, {
+      onDelete: "set null",
+    }),
+    vttAssetId: uuid("vtt_asset_id").references(() => assets.id, {
+      onDelete: "set null",
+    }),
+    burnedIn: boolean("burned_in").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("captions_project_idx").on(t.projectId),
+    index("captions_user_id_idx").on(t.userId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Rendering & thumbnails (§15, §16)
+// ---------------------------------------------------------------------------
+
+export const renders = pgTable(
+  "renders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 48 }).notNull(),
+    /** Provider-side render id, used for polling and cancellation. */
+    providerRenderId: varchar("provider_render_id", { length: 128 }),
+    status: jobStatusEnum("status").notNull().default("queued"),
+    /** Real provider-reported progress. Never synthesised (§37, §42). */
+    progress: integer("progress").notNull().default(0),
+    /** The timeline document submitted to the render provider. */
+    timeline: jsonb("timeline").$type<Record<string, unknown>>(),
+    width: integer("width").notNull().default(1920),
+    height: integer("height").notNull().default(1080),
+    fps: integer("fps").notNull().default(30),
+    durationMs: integer("duration_ms"),
+    outputAssetId: uuid("output_asset_id").references(() => assets.id, {
+      onDelete: "set null",
+    }),
+    /** Frame extracted for thumbnail generation. */
+    posterAssetId: uuid("poster_asset_id").references(() => assets.id, {
+      onDelete: "set null",
+    }),
+    error: text("error"),
+    attempt: integer("attempt").notNull().default(1),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("renders_project_idx").on(t.projectId, t.createdAt),
+    index("renders_user_id_idx").on(t.userId),
+    index("renders_provider_render_idx").on(t.providerRenderId),
+  ],
+);
+
+export const thumbnails = pgTable(
+  "thumbnails",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: jobStatusEnum("status").notNull().default("queued"),
+    selectedVariantId: uuid("selected_variant_id"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("thumbnails_project_idx").on(t.projectId),
+    index("thumbnails_user_id_idx").on(t.userId),
+  ],
+);
+
+export const thumbnailVariants = pgTable(
+  "thumbnail_variants",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    thumbnailId: uuid("thumbnail_id")
+      .notNull()
+      .references(() => thumbnails.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** 0-3 — the prototype's four-variation workflow is preserved. */
+    index: integer("index").notNull(),
+    /** Overlay text, kept short for readability at small sizes (§16). */
+    headline: varchar("headline", { length: 80 }).notNull(),
+    subline: varchar("subline", { length: 120 }),
+    /** The concept the generator was working to: curiosity, contrast, emotion. */
+    concept: text("concept"),
+    emotion: varchar("emotion", { length: 48 }),
+    backgroundAssetId: uuid("background_asset_id").references(() => assets.id, {
+      onDelete: "set null",
+    }),
+    /** Composited image. Absent until rendering succeeds. */
+    imageAssetId: uuid("image_asset_id").references(() => assets.id, {
+      onDelete: "set null",
+    }),
+    /** A/B test performance, populated from analytics (§16). */
+    impressions: integer("impressions"),
+    clicks: integer("clicks"),
+    ctr: real("ctr"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("thumbnail_variants_thumb_index_key").on(
+      t.thumbnailId,
+      t.index,
+    ),
+    index("thumbnail_variants_user_id_idx").on(t.userId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Metadata, publishing & analytics (§17, §18, §26)
+// ---------------------------------------------------------------------------
+
+export const videoMetadata = pgTable(
+  "video_metadata",
+  {
+    projectId: uuid("project_id")
+      .primaryKey()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 100 }).notNull(),
+    description: text("description").notNull().default(""),
+    tags: jsonb("tags")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+    hashtags: jsonb("hashtags")
+      .notNull()
+      .$type<string[]>()
+      .default(sql`'[]'::jsonb`),
+    chapters: jsonb("chapters")
+      .notNull()
+      .$type<Array<{ startMs: number; label: string }>>()
+      .default(sql`'[]'::jsonb`),
+    /** YouTube category id — 28 = Science & Technology. */
+    categoryId: varchar("category_id", { length: 8 }).notNull().default("28"),
+    defaultLanguage: varchar("default_language", { length: 16 }),
+    madeForKids: boolean("made_for_kids").notNull().default(false),
+    /** True once a human edited it — regeneration must not clobber edits. */
+    editedByUser: boolean("edited_by_user").notNull().default(false),
+    generatedBy: varchar("generated_by", { length: 48 }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("video_metadata_user_id_idx").on(t.userId)],
+);
+
+/** §29 pre-publish gate. A project cannot publish while checks are failing. */
+export const qualityChecks = pgTable(
+  "quality_checks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** `pass` | `warn` | `fail`. */
+    verdict: varchar("verdict", { length: 8 }).notNull(),
+    findings: jsonb("findings")
+      .notNull()
+      .$type<
+        Array<{
+          code: string;
+          severity: "info" | "warn" | "fail";
+          message: string;
+          detail?: string;
+        }>
+      >()
+      .default(sql`'[]'::jsonb`),
+    /** Licence/attribution roll-up for every asset used in the render. */
+    assetLicenses: jsonb("asset_licenses")
+      .notNull()
+      .$type<
+        Array<{
+          assetId: string;
+          provider?: string;
+          license?: string;
+          sourceUrl?: string;
+        }>
+      >()
+      .default(sql`'[]'::jsonb`),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("quality_checks_project_idx").on(t.projectId, t.createdAt),
+    index("quality_checks_user_id_idx").on(t.userId),
+  ],
+);
+
+export const publishJobs = pgTable(
+  "publish_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    status: publishJobStatusEnum("status").notNull().default("queued"),
+    visibility: publishVisibilityEnum("visibility").notNull().default("public"),
+    /** Null = publish as soon as the worker picks it up. */
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
+    /** True when a human (or an autopilot policy) approved publication. */
+    approvedByUserId: uuid("approved_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    /** Resumable-upload progress reported by the YouTube client. */
+    uploadProgress: integer("upload_progress").notNull().default(0),
+    attempt: integer("attempt").notNull().default(0),
+    error: text("error"),
+    errorCode: varchar("error_code", { length: 64 }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("publish_jobs_status_sched_idx").on(t.status, t.scheduledFor),
+    index("publish_jobs_project_idx").on(t.projectId),
+    index("publish_jobs_user_id_idx").on(t.userId),
+  ],
+);
+
+/**
+ * Written only after YouTube confirms the upload (§42). The presence of a row
+ * here — not a frontend flag — is what makes a project "Published".
+ */
+export const publishedVideos = pgTable(
+  "published_videos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    publishJobId: uuid("publish_job_id").references(() => publishJobs.id, {
+      onDelete: "set null",
+    }),
+    youtubeVideoId: varchar("youtube_video_id", { length: 32 }).notNull(),
+    url: text("url").notNull(),
+    /** YouTube's own upload/processing status, mirrored verbatim. */
+    uploadStatus: varchar("upload_status", { length: 32 }),
+    privacyStatus: varchar("privacy_status", { length: 16 }),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    scheduledPublishAt: timestamp("scheduled_publish_at", {
+      withTimezone: true,
+    }),
+    thumbnailVariantId: uuid("thumbnail_variant_id").references(
+      () => thumbnailVariants.id,
+      { onDelete: "set null" },
+    ),
+    titleUsed: text("title_used"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("published_videos_youtube_id_key").on(t.youtubeVideoId),
+    index("published_videos_channel_idx").on(t.channelId, t.publishedAt),
+    index("published_videos_user_id_idx").on(t.userId),
+  ],
+);
+
+/** Time-series performance snapshots pulled from YouTube Analytics (§26). */
+export const analyticsSnapshots = pgTable(
+  "analytics_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    publishedVideoId: uuid("published_video_id").references(
+      () => publishedVideos.id,
+      { onDelete: "cascade" },
+    ),
+    /** UTC date this snapshot describes. */
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    views: integer("views"),
+    likes: integer("likes"),
+    comments: integer("comments"),
+    shares: integer("shares"),
+    subscribersGained: integer("subscribers_gained"),
+    subscribersLost: integer("subscribers_lost"),
+    impressions: integer("impressions"),
+    /** Click-through rate as a fraction, 0-1. */
+    ctr: real("ctr"),
+    watchTimeMinutes: real("watch_time_minutes"),
+    averageViewDurationSeconds: real("average_view_duration_seconds"),
+    averageViewPercentage: real("average_view_percentage"),
+    estimatedRevenueCents: integer("estimated_revenue_cents"),
+    raw: jsonb("raw").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("analytics_snapshots_scope_date_key").on(
+      t.channelId,
+      t.publishedVideoId,
+      t.date,
+    ),
+    index("analytics_snapshots_user_id_idx").on(t.userId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Jobs & provider usage (§31, §41)
+// ---------------------------------------------------------------------------
+
+/**
+ * Durable mirror of every queued unit of work. BullMQ owns scheduling; this
+ * table owns the user-visible truth, so status survives a Redis flush and the
+ * UI can render real progress after a refresh (§10, §37).
+ */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "cascade",
+    }),
+    channelId: uuid("channel_id").references(() => channels.id, {
+      onDelete: "cascade",
+    }),
+    /** Queue name, e.g. `pipeline`, `publish`, `analytics`. */
+    queue: varchar("queue", { length: 48 }).notNull(),
+    /** Job type, e.g. `generate-script`. */
+    name: varchar("name", { length: 64 }).notNull(),
+    stage: pipelineStageEnum("stage"),
+    status: jobStatusEnum("status").notNull().default("queued"),
+    progress: integer("progress").notNull().default(0),
+    /** Human-readable note shown beside the progress bar. */
+    statusMessage: text("status_message"),
+    priority: integer("priority").notNull().default(1),
+    attempt: integer("attempt").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    /** BullMQ job id, for cancellation and correlation. */
+    queueJobId: varchar("queue_job_id", { length: 128 }),
+    traceId: varchar("trace_id", { length: 64 }),
+    payload: jsonb("payload").$type<Record<string, unknown>>(),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    error: text("error"),
+    errorCode: varchar("error_code", { length: 64 }),
+    /** Set when a provider is unconfigured — surfaced, never silently faked. */
+    notConfiguredProvider: varchar("not_configured_provider", { length: 48 }),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("jobs_project_stage_idx").on(t.projectId, t.stage),
+    index("jobs_user_status_idx").on(t.userId, t.status),
+    index("jobs_queue_job_idx").on(t.queueJobId),
+    index("jobs_trace_idx").on(t.traceId),
+  ],
+);
+
+/** Per-call provider accounting — cost control and rate-limit diagnosis. */
+export const apiUsage = pgTable(
+  "api_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
+    jobId: uuid("job_id").references(() => jobs.id, { onDelete: "set null" }),
+    provider: varchar("provider", { length: 48 }).notNull(),
+    operation: varchar("operation", { length: 64 }).notNull(),
+    model: varchar("model", { length: 64 }),
+    /** Units are provider-specific: tokens, characters, seconds, credits. */
+    quantity: integer("quantity"),
+    unit: varchar("unit", { length: 24 }),
+    estimatedCostCents: integer("estimated_cost_cents"),
+    httpStatus: integer("http_status"),
+    ok: boolean("ok").notNull().default(true),
+    errorCode: varchar("error_code", { length: 64 }),
+    durationMs: integer("duration_ms"),
+    traceId: varchar("trace_id", { length: 64 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("api_usage_provider_created_idx").on(t.provider, t.createdAt),
+    index("api_usage_user_created_idx").on(t.userId, t.createdAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Relations
+// ---------------------------------------------------------------------------
+
+export const usersRelations = relations(users, ({ many, one }) => ({
+  sessions: many(sessions),
+  channels: many(channels),
+  projects: many(projects),
+  subscription: one(subscriptions, {
+    fields: [users.id],
+    references: [subscriptions.userId],
+  }),
+  onboarding: one(onboardingProfiles, {
+    fields: [users.id],
+    references: [onboardingProfiles.userId],
+  }),
+}));
+
+export const channelsRelations = relations(channels, ({ one, many }) => ({
+  user: one(users, { fields: [channels.userId], references: [users.id] }),
+  settings: one(channelSettings, {
+    fields: [channels.id],
+    references: [channelSettings.channelId],
+  }),
+  brandKit: one(brandKits, {
+    fields: [channels.id],
+    references: [brandKits.channelId],
+  }),
+  automation: one(automationSettings, {
+    fields: [channels.id],
+    references: [automationSettings.channelId],
+  }),
+  projects: many(projects),
+}));
+
+export const projectsRelations = relations(projects, ({ one, many }) => ({
+  user: one(users, { fields: [projects.userId], references: [users.id] }),
+  channel: one(channels, {
+    fields: [projects.channelId],
+    references: [channels.id],
+  }),
+  idea: one(ideas, { fields: [projects.ideaId], references: [ideas.id] }),
+  script: one(scripts, {
+    fields: [projects.id],
+    references: [scripts.projectId],
+  }),
+  metadata: one(videoMetadata, {
+    fields: [projects.id],
+    references: [videoMetadata.projectId],
+  }),
+  scenes: many(scenes),
+  renders: many(renders),
+  jobs: many(jobs),
+  events: many(projectEvents),
+}));
+
+export const scriptsRelations = relations(scripts, ({ one, many }) => ({
+  project: one(projects, {
+    fields: [scripts.projectId],
+    references: [projects.id],
+  }),
+  versions: many(scriptVersions),
+}));
+
+export const scriptVersionsRelations = relations(scriptVersions, ({ one }) => ({
+  script: one(scripts, {
+    fields: [scriptVersions.scriptId],
+    references: [scripts.id],
+  }),
+}));
+
+export const thumbnailsRelations = relations(thumbnails, ({ one, many }) => ({
+  project: one(projects, {
+    fields: [thumbnails.projectId],
+    references: [projects.id],
+  }),
+  variants: many(thumbnailVariants),
+}));
+
+export const publishJobsRelations = relations(publishJobs, ({ one }) => ({
+  project: one(projects, {
+    fields: [publishJobs.projectId],
+    references: [projects.id],
+  }),
+  channel: one(channels, {
+    fields: [publishJobs.channelId],
+    references: [channels.id],
+  }),
+}));

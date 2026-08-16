@@ -1,0 +1,61 @@
+/**
+ * Dashboard information architecture (§44).
+ *
+ * The prototype's seven tabs become seven routes. The order, labels and icons are
+ * preserved exactly; only the mechanism changes from a `tab` state variable to
+ * real URLs, so a stage is linkable, refreshable and back-button-safe.
+ */
+
+export interface NavItem {
+  /** Route segment under /dashboard. Empty string = the overview index. */
+  segment: string;
+  href: string;
+  label: string;
+  /** lucide icon name, resolved by the component. */
+  icon: string;
+  /**
+   * When set, this stage needs a project that has reached the given point;
+   * the sidebar shows a muted dot the way the prototype did for locked tabs.
+   */
+  requires?: "idea" | "script" | "video";
+}
+
+export const NAV_ITEMS: readonly NavItem[] = [
+  { segment: "", href: "/dashboard", label: "Overview", icon: "LayoutDashboard" },
+  { segment: "research", href: "/dashboard/research", label: "Research", icon: "Search" },
+  {
+    segment: "script",
+    href: "/dashboard/script",
+    label: "Script",
+    icon: "FileText",
+    requires: "idea",
+  },
+  {
+    segment: "video",
+    href: "/dashboard/video",
+    label: "Video",
+    icon: "Clapperboard",
+    requires: "script",
+  },
+  {
+    segment: "thumbnail",
+    href: "/dashboard/thumbnail",
+    label: "Thumbnail",
+    icon: "ImageIcon",
+    requires: "script",
+  },
+  {
+    segment: "publish",
+    href: "/dashboard/publish",
+    label: "Publish",
+    icon: "Send",
+    requires: "video",
+  },
+  { segment: "channels", href: "/dashboard/channels", label: "Channels", icon: "Radio" },
+] as const;
+
+/** Secondary nav shown beneath the divider. */
+export const SECONDARY_NAV: readonly NavItem[] = [
+  { segment: "settings", href: "/dashboard/settings", label: "Settings", icon: "Settings" },
+  { segment: "billing", href: "/dashboard/billing", label: "Plan & billing", icon: "CreditCard" },
+] as const;

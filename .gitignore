@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# next
+.next/
+out/
+build/
+next-env.d.ts
+
+# secrets — never commit (§33)
+.env
+.env.local
+.env.*.local
+.env.production
+*.pem
+*.key
+
+# runtime
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# test / build artifacts
+coverage/
+.tsbuildinfo
+*.tsbuildinfo
+
+# local infra volumes
+.docker-data/
+
+# local media scratch space (renders, temp audio)
+.tally-tmp/
+
+# local editor/agent settings
+.claude/settings.local.json

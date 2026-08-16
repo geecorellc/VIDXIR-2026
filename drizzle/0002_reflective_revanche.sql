@@ -1,0 +1,1 @@
+ALTER TABLE "research_runs" ADD COLUMN "error_code" varchar(64);
