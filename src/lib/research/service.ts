@@ -14,7 +14,6 @@
  * Research screen shows the truth whether the page was open the whole time or
  * opened fresh an hour later.
  */
-import "server-only";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { channels, researchRuns } from "@/lib/db/schema";

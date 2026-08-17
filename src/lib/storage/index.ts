@@ -11,7 +11,6 @@
  * which tenant owns it — useful when auditing storage, and it makes an
  * accidentally cross-tenant key visible rather than silent (§34).
  */
-import "server-only";
 import { createHash, randomUUID } from "node:crypto";
 import {
   DeleteObjectCommand,

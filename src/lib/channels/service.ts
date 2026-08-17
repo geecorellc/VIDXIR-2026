@@ -20,7 +20,6 @@
  * `reauth_required_at`, which the UI renders as a reconnect prompt (§30) instead
  * of silently failing every job forever.
  */
-import "server-only";
 import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { channels } from "@/lib/db/schema";

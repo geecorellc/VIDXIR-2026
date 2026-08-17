@@ -22,7 +22,6 @@
  * failed does the stage fail. That is deliberate: one unlucky search term must not
  * cost a whole render, and a scene with no visual cannot be rendered at all.
  */
-import "server-only";
 import { env, usingMockProviders } from "@/lib/env";
 import { AssetMissingError, NotConfiguredError, ProviderError } from "@/lib/errors";
 import { logger } from "@/lib/logger";

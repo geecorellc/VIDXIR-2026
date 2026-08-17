@@ -9,7 +9,6 @@
  * Every query below carries `userId` in its predicate — tenant isolation is a
  * property of the query rather than of remembering to check (§34).
  */
-import "server-only";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {

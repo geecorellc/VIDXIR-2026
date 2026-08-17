@@ -7,7 +7,22 @@
  * the S3 client and the timeline model into every page that renders a
  * configuration banner.
  */
-import "server-only";
+import { createRequire } from "node:module";
+
+/**
+ * `ffmpeg-static` is CommonJS and exports a bare path string, so it has to be
+ * loaded synchronously: `ffmpegBinary()` is called from synchronous configuration
+ * code, and `await import()` would force every caller to become async.
+ *
+ * `createRequire` rather than a bare `require`, and that is not cosmetic — the
+ * bare form was silently broken in the one process that matters. Under ESM
+ * `require` is not defined at all, the `catch` below read `require is not defined`
+ * as "the postinstall was skipped", and the standalone worker — the only process
+ * that renders anything — reported `render: not_configured` on a machine with a
+ * perfectly good binary. Vitest transpiles to CJS, where the bare form works, so
+ * the whole test suite agreed the encoder was present.
+ */
+const requireCjs = createRequire(import.meta.url);
 
 /**
  * Path to an ffmpeg executable, or null if none is available.
@@ -26,8 +41,10 @@ export function ffmpegBinary(): string | null {
   if (configured) return configured;
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const resolved = require("ffmpeg-static") as string | { default?: string } | null;
+    const resolved = requireCjs("ffmpeg-static") as
+      | string
+      | { default?: string }
+      | null;
     const path = typeof resolved === "string" ? resolved : resolved?.default;
     return path && path.length > 0 ? path : null;
   } catch {

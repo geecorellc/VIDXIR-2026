@@ -1,11 +1,13 @@
 /**
  * Vitest configuration.
  *
- * Two projects, because they need different guarantees:
+ * One project, two kinds of test, separated by directory rather than by a Vitest
+ * `projects` entry — so select them by path (`vitest run tests/integration`), not
+ * with `--project`, which matches nothing here and exits zero having run nothing:
  *
- *  - `unit` runs anywhere with no services. These tests must not import modules
- *    that open a Postgres or Redis connection at module scope.
- *  - `integration` covers the flows §39 requires end-to-end (auth, tenant
+ *  - `src/**\/*.test.ts` runs anywhere with no services. These must not import
+ *    modules that open a Postgres or Redis connection at module scope.
+ *  - `tests/integration/**` covers the flows §39 requires end-to-end (auth, tenant
  *    isolation, job transitions). It is opt-in via TEST_DATABASE_URL so a plain
  *    `npm test` on a laptop without Docker still passes honestly rather than
  *    reporting green by skipping silently.
@@ -21,10 +23,20 @@ export default defineConfig({
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
       /**
-       * `server-only` is a marker package Next resolves through its bundler; the
-       * real module throws on import. Aliasing it to a stub lets server modules be
-       * unit-tested directly. This does not weaken the guarantee — the build still
-       * fails if a client component imports one, which is where it matters.
+       * `server-only` is a bundler directive: its `default` export throws
+       * unconditionally, and only Next's `react-server` condition resolves it to
+       * the empty module. Node cannot import it at all, so a test touching a
+       * module that carries the marker needs this stub.
+       *
+       * Scope worth knowing: only four modules still carry it — `lib/api/guard`,
+       * `lib/api/rate-limit`, `lib/auth/session` and `lib/channels/oauth-state`,
+       * all of which import `next/server` or `next/headers` and genuinely cannot
+       * run outside Next. The shared service, provider, queue and database layers
+       * had the marker removed, because the standalone BullMQ worker imports them
+       * as a plain Node process and this alias was hiding that they were
+       * unimportable there. The client-bundle boundary is enforced by
+       * `no-restricted-imports` in `eslint.config.mjs`, which applies to both
+       * runtimes; this alias no longer stands in for it.
        */
       "server-only": fileURLToPath(new URL("./tests/stubs/server-only.ts", import.meta.url)),
     },

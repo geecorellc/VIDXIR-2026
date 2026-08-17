@@ -17,7 +17,6 @@
  * variable. There is a mock, gated on `TALLY_USE_MOCK_PROVIDERS`, and it produces
  * a real WAV of a real length rather than pretending — see `media/synthetic.ts`.
  */
-import "server-only";
 import { env, usingMockProviders } from "@/lib/env";
 import { NotConfiguredError, VoiceGenerationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";

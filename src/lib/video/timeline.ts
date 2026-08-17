@@ -21,7 +21,6 @@
  * provider can be inspected — and re-submitted — without regenerating a single
  * asset.
  */
-import "server-only";
 
 /** 1080p at 30fps. YouTube's sweet spot for talking-head-plus-b-roll content. */
 export const OUTPUT_WIDTH = 1920;

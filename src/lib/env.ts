@@ -9,10 +9,17 @@
  *    *configuration state*, surfaced to the UI, never a fallback to fakery.
  *  - Mock providers are only permitted outside production (§40).
  *
- * This module is server-only. It must never be imported from a client
- * component — `server-only` makes that a build error rather than a leak (§34).
+ * This module must never be imported from a client component: it reads secrets,
+ * and anything a client component imports ends up in the browser bundle (§34).
+ *
+ * That boundary is enforced by the `no-restricted-imports` rule in
+ * `eslint.config.mjs`, not by the `server-only` marker package. The marker is a
+ * bundler directive with no runnable Node semantics — its `default` export throws
+ * unconditionally — so a module carrying it cannot be imported by the standalone
+ * BullMQ worker, which is a real Node process rather than an RSC runtime. Since
+ * the worker legitimately needs this module (it holds every credential), the
+ * check has to live somewhere both runtimes share.
  */
-import "server-only";
 import { z } from "zod";
 
 const hex32 = z

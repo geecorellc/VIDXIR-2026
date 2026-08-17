@@ -16,7 +16,6 @@
  * labelled `provider: "mock"` on the row, and it never claims to have heard
  * anything.
  */
-import "server-only";
 import { env, usingMockProviders } from "@/lib/env";
 import { NotConfiguredError, TranscriptionError } from "@/lib/errors";
 import { logger } from "@/lib/logger";

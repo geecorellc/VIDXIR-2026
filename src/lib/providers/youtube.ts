@@ -21,7 +21,6 @@
  * failure and not on Google's wire format. In particular `invalid_grant` on
  * refresh becomes ReauthRequiredError: only the user can fix it.
  */
-import "server-only";
 import { Readable } from "node:stream";
 import { google, type youtube_v3 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";

@@ -23,7 +23,6 @@
  * approved script version. §9 makes approval meaningful; that guarantee is only
  * real if nothing downstream rewrites the words.
  */
-import "server-only";
 import { z } from "zod";
 import { logger } from "@/lib/logger";
 import { generateJson, jsonSchema, stringArray } from "@/lib/providers/ai";

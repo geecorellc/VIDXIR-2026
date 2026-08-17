@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
+import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { executeResearchRun } from "@/lib/research/service";
 import type { JobHandler } from "@/worker/types";
 
@@ -25,8 +26,10 @@ export const researchHandler: JobHandler = async ({
 }) => {
   const parsed = PayloadSchema.safeParse(payload);
   if (!parsed.success) {
-    // Not retryable: a malformed payload will be malformed on every attempt.
-    throw new Error(
+    // A typed error so `shouldRetry` sees `retryable: false`. A malformed
+    // payload will be malformed on every attempt; a bare `Error` would be read
+    // as a possible transient fault and replayed for the full retry budget.
+    throw new ValidationError(
       `Invalid research payload: ${parsed.error.issues
         .map((i) => `${i.path.join(".")} ${i.message}`)
         .join("; ")}`,
@@ -42,10 +45,18 @@ export const researchHandler: JobHandler = async ({
     .limit(1);
 
   const row = rows[0];
-  if (!row) throw new Error(`Job row ${jobId} not found.`);
+  /**
+   * `NotFoundError` is `retryable: false`, so BullMQ discards this rather than
+   * replaying it three times with exponential backoff: a row that is missing now
+   * cannot appear later. The usual cause is a queued message that outlived its
+   * row — a truncated database, or a manual deletion.
+   */
+  if (!row) throw new NotFoundError(`Job row ${jobId} not found.`);
 
   if (row.channelId && row.channelId !== parsed.data.channelId) {
-    throw new Error("Job payload channel does not match the job record.");
+    // The payload is not describing this job. Refusing is a tenant-isolation
+    // guarantee (§34), and no retry changes the comparison.
+    throw new ForbiddenError("Job payload channel does not match the job record.");
   }
 
   const result = await executeResearchRun({

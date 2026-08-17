@@ -7,7 +7,6 @@
  * as though they were live signals, so when no run has completed the page shows a
  * "run research" state instead of numbers.
  */
-import "server-only";
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { ideas, researchResults, researchRuns } from "@/lib/db/schema";

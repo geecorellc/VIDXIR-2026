@@ -26,7 +26,6 @@
  * Every stage function here is worker-only and re-reads what it needs from the
  * database. The job payload arrives over Redis and is data, not authority.
  */
-import "server-only";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {

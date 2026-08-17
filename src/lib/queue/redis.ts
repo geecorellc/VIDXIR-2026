@@ -10,7 +10,6 @@
  * Connections are cached on globalThis so Next.js hot reload does not exhaust
  * Redis client slots.
  */
-import "server-only";
 import Redis, { type RedisOptions } from "ioredis";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";

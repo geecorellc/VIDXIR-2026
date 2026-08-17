@@ -10,7 +10,6 @@
  *    the "no such user" path, so timing does not disclose registration status.
  *  - Password changes revoke all sessions via the epoch bump.
  */
-import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { emailTokens, subscriptions, users } from "@/lib/db/schema";

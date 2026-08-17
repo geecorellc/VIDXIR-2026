@@ -12,7 +12,6 @@
  * the *configuration state* so the billing screen can say precisely which
  * credential is missing rather than pretending an upgrade succeeded (§42, §48).
  */
-import "server-only";
 import { NotConfiguredError } from "@/lib/errors";
 import { env } from "@/lib/env";
 import { capabilityStatus } from "@/lib/providers/config";

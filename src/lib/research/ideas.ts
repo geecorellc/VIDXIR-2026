@@ -20,7 +20,6 @@
  * Score has to be reproducible and explainable — a number a language model felt
  * was about right is neither, and §8 requires a configurable formula.
  */
-import "server-only";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";

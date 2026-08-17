@@ -12,7 +12,6 @@
  *     body alone. The caller passes the tier read from `subscriptions`, and this
  *     module refuses the write if the plan does not include the feature (§24).
  */
-import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {

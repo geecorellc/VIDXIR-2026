@@ -439,6 +439,80 @@ transaction, the state machine and every ownership predicate. `googleapis` is
 externalised in `vitest.config.ts`; it is a barrel over thousands of modules and
 running it through Vite's transform pipeline costs minutes per file.
 
+Integration runs use their own Redis namespace (`QUEUE_PREFIX=tally-test`, set in
+`tests/integration/setup.ts`). Without it a test run enqueues real BullMQ messages
+into the development namespace and then truncates the `jobs` rows they point at,
+so a developer's worker wakes up to hundreds of jobs it can never complete.
+
+### Two things the test suite cannot check
+
+Both of these hid real defects behind a green run, so they have their own
+verification scripts. Neither is a substitute for the suite; they cover the gap
+the suite has by construction.
+
+```bash
+npm run verify:worker      # the standalone worker boots and runs a job
+npm run verify:providers    # one real call per configured provider
+```
+
+**`verify:worker`** runs the worker's boot path in a real Node process: env,
+BullMQ, Postgres, the provider layer, and one deterministic `maintenance` job
+enqueued through the real `enqueue()`, consumed by a real `Worker`, and asserted
+to reach `succeeded` on its `jobs` row. Vitest cannot cover this, because Vitest
+*is* the thing that hides it — it aliases `server-only` and transpiles to
+CommonJS, so a module the worker cannot actually load imports fine under test. Two
+defects lived in that gap: every shared module carried `import "server-only"`
+(whose Node implementation throws unconditionally), and `ffmpegBinary()` used a
+bare `require`, which is undefined under ESM. The worker could not start, and once
+it could, it reported `render: not_configured` on a machine with a working
+encoder. 541 tests were green throughout. It uses `QUEUE_PREFIX=tally-verify` and
+obliterates the queue afterwards.
+
+**`verify:providers`** makes one cheap real call per provider — a sentence of
+narration, a two-second clip, one search page. The unit tests pin every adapter
+against recorded responses, which proves the parsing and the error taxonomy; they
+cannot prove a key is accepted, an account is funded, a model id still exists, or
+that a response shape has not drifted since the fixture was recorded. It reads
+`.env.local` exactly as the app does, overrides `TALLY_USE_MOCK_PROVIDERS` for the
+run (verifying a mock would prove nothing — §42), and leaves the per-provider
+selectors alone, so `VOICE_PROVIDER=mock` honestly reports *not configured* rather
+than silently upgrading to a paid provider. Exit is non-zero only for a
+*configured* provider that failed; "not configured" is a documented state (§48).
+
+The transcription check synthesises its audio through the voice provider rather
+than using a silent WAV. That was the first attempt and it was wrong:
+`transcribe()` deliberately rejects an empty cue list, because in the pipeline
+that means a truncated upload, so verifying with silence reported a failure for a
+perfectly good key. Synthesising first costs a few cents and proves more — it is
+the same composition the captions stage performs.
+
+### Why lint, not `server-only`
+
+`server-only` is a bundler directive, not a runtime guard: its package exports
+resolve to an empty module under Next's `react-server` condition and to a module
+that throws unconditionally everywhere else. A shared module carrying it is
+therefore unimportable by the standalone BullMQ worker, which is a plain Node
+process — and the worker legitimately needs `env`, `db`, the queue and every
+provider, since running the pipeline is its entire job.
+
+So the client-bundle boundary (§34) is enforced by `no-restricted-imports` in
+`eslint.config.mjs`, which applies to both runtimes and names the offending line.
+`allowTypeImports` is on deliberately: `import type` is erased by the compiler, so
+a view type shared between a server page and the client component it renders
+carries no runtime code.
+
+Four modules still carry the marker, and only these four — `lib/api/guard`,
+`lib/api/rate-limit`, `lib/auth/session` and `lib/channels/oauth-state`. Each
+imports `next/server` or `next/headers`, cannot run outside a Next request at all,
+and is not reachable from the worker.
+
+Running the worker under `--conditions react-server` was considered and rejected.
+It would make a plain Node process claim to be a React Server Components runtime,
+so any dependency shipping a `react-server` entry point would hand the worker a
+*different implementation* than the web app runs — a silent divergence between
+what renders a video and what serves the page, which is worse than the crash it
+would paper over.
+
 ---
 
 ## Non-negotiables
@@ -450,7 +524,9 @@ These are enforced in code, not by convention:
 - **OAuth tokens** are AES-256-GCM encrypted at rest and never serialised to the
   frontend. Tally asks for a Google authorisation, never a YouTube password.
 - **Provider API keys** are server-side only. Nothing that reads `env()` can be
-  imported into a client component — `server-only` makes that a build error.
+  imported into a client component — the `no-restricted-imports` rule in
+  `eslint.config.mjs` makes that a lint error. See
+  [Why lint, not `server-only`](#why-lint-not-server-only).
 - **Plan entitlements** are read from the `subscriptions` table on every check.
   A request body claiming a tier grants nothing.
 - **`PUBLISHED`** is reachable only from `PUBLISHING`, i.e. after YouTube has

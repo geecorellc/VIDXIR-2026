@@ -22,7 +22,6 @@
  * §48: an unconfigured provider throws `NotConfiguredError` naming its env vars.
  * There is no fake success path — a render either produces bytes or it fails.
  */
-import "server-only";
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

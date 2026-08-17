@@ -29,7 +29,6 @@
  * stores the source ids for provenance, and hands them to the idea generator so
  * an original angle can be traced back to the evidence it came from.
  */
-import "server-only";
 import { and, desc, eq, gte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {

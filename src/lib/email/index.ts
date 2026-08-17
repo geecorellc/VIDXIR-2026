@@ -7,7 +7,6 @@
  * one: the token in the log genuinely works. Production refuses `console`
  * (enforced in lib/env).
  */
-import "server-only";
 import { env } from "@/lib/env";
 import { NotConfiguredError, ProviderError } from "@/lib/errors";
 import { logger } from "@/lib/logger";

@@ -11,7 +11,6 @@
  * revenue number Tally has not actually read from YouTube would be a lie, and
  * §42 forbids exactly that.
  */
-import "server-only";
 import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {

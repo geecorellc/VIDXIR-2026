@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
+import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { executeScriptGeneration } from "@/lib/scripts/service";
 import type { JobHandler } from "@/worker/types";
 
@@ -20,8 +21,11 @@ const PayloadSchema = z.object({
 export const scriptHandler: JobHandler = async ({ jobId, payload, traceId }) => {
   const parsed = PayloadSchema.safeParse(payload);
   if (!parsed.success) {
-    // Not retryable: a malformed payload is malformed on every attempt.
-    throw new Error(
+    // A `ValidationError` rather than a bare `Error`, because `shouldRetry`
+    // treats an unrecognised error as a possible network blip and retries it.
+    // A malformed payload is malformed on every attempt, so the retry budget
+    // would be spent for nothing.
+    throw new ValidationError(
       `Invalid script payload: ${parsed.error.issues
         .map((i) => `${i.path.join(".")} ${i.message}`)
         .join("; ")}`,
@@ -36,10 +40,18 @@ export const scriptHandler: JobHandler = async ({ jobId, payload, traceId }) => 
     .limit(1);
 
   const row = rows[0];
-  if (!row) throw new Error(`Job row ${jobId} not found.`);
+  /**
+   * A row that is absent now will still be absent in fifteen seconds, so this is
+   * a `NotFoundError` (retryable: false) and BullMQ discards the message instead
+   * of replaying it three times. The normal cause is a message that outlived its
+   * row — a truncated test database, or a manual deletion.
+   */
+  if (!row) throw new NotFoundError(`Job row ${jobId} not found.`);
 
   if (row.projectId && row.projectId !== parsed.data.projectId) {
-    throw new Error("Job payload project does not match the job record.");
+    // Mismatched ids mean the payload is not describing this job. Refusing is a
+    // tenant-isolation guarantee (§34), and no retry can change the comparison.
+    throw new ForbiddenError("Job payload project does not match the job record.");
   }
 
   const result = await executeScriptGeneration({

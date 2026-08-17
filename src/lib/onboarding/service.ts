@@ -5,7 +5,6 @@
  * closing the browser mid-flow loses nothing. Completing onboarding stamps
  * `users.onboarded_at`, which is what `requireOnboarded()` checks.
  */
-import "server-only";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { onboardingProfiles, users } from "@/lib/db/schema";

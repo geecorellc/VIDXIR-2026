@@ -29,7 +29,6 @@
  * attributed to that provider in the logs and in `api_usage` rather than
  * surfacing as an anonymous network fault.
  */
-import "server-only";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { env } from "@/lib/env";

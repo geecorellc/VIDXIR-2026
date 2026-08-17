@@ -18,7 +18,6 @@
  *    voiceover or a render until a human (or an explicit autopilot policy) has
  *    said yes, which is what §37's honesty about state costs in practice.
  */
-import "server-only";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {

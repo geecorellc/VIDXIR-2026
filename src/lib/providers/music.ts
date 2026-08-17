@@ -12,7 +12,6 @@
  * bed you notice is a bed that is too loud, and narration intelligibility is worth
  * more than the music. The renderer ducks it further under speech.
  */
-import "server-only";
 import { env, usingMockProviders } from "@/lib/env";
 import { AssetMissingError, NotConfiguredError } from "@/lib/errors";
 import { logger } from "@/lib/logger";

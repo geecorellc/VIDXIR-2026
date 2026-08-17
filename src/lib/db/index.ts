@@ -5,7 +5,6 @@
  * a new pool on every hot reload until Postgres refuses connections, so the
  * client is cached on `globalThis` outside production.
  */
-import "server-only";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { env } from "@/lib/env";

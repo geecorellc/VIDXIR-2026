@@ -9,7 +9,6 @@
  * Limits are read from the `plans` table shape via the shared catalogue, so the
  * UI and the enforcement point cannot disagree about what a plan includes.
  */
-import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { channels, usageCounters } from "@/lib/db/schema";

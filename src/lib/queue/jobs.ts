@@ -13,7 +13,6 @@
  * worst case is a row that is `queued` forever because Redis rejected the push —
  * and that is a visible, reportable state rather than silent loss (§30, §42).
  */
-import "server-only";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";

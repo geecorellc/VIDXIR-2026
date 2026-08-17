@@ -24,7 +24,6 @@
  * §48: without `ANTHROPIC_API_KEY` every call throws `NotConfiguredError`, which
  * the API layer renders as a 503 naming the variable.
  */
-import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import type { z } from "zod";
 import { env } from "@/lib/env";

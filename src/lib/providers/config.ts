@@ -10,7 +10,6 @@
  * through a factory that throws NotConfiguredError when credentials are absent,
  * so there is nowhere for a silent fake to hide.
  */
-import "server-only";
 import { env, usingMockProviders } from "@/lib/env";
 import { hasFfmpeg } from "@/lib/media/ffmpeg";
 

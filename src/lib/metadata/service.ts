@@ -20,7 +20,6 @@
  * queue would add a poll cycle and a job row for nothing. If it grows a second
  * provider call it moves to the pipeline queue.
  */
-import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {

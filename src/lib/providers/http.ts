@@ -14,7 +14,6 @@
  * an account has run out of money. Every provider module routes through it so the
  * five media stages classify failures the same way `ai.ts` already does.
  */
-import "server-only";
 import {
   ProviderAuthError,
   ProviderError,

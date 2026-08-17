@@ -7,7 +7,6 @@
  * every path that could produce a wrong status is the path that has to prove the
  * transition is legal.
  */
-import "server-only";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {

@@ -13,7 +13,6 @@
  *    `ctr` and `impressions` stay null. §42 forbids deriving a plausible number
  *    to fill the column, and §8's scoring would silently inherit the fiction.
  */
-import "server-only";
 import { and, eq, gte, isNull, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { analyticsSnapshots, publishedVideos } from "@/lib/db/schema";

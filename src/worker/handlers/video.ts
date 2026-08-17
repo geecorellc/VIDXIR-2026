@@ -14,6 +14,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { jobs } from "@/lib/db/schema";
+import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import {
   CAPTIONS_JOB,
   MUSIC_JOB,
@@ -52,8 +53,10 @@ function stageHandler(
   return async ({ jobId, payload, traceId }) => {
     const parsed = PayloadSchema.safeParse(payload);
     if (!parsed.success) {
-      // Not retryable: a malformed payload is malformed on every attempt.
-      throw new Error(
+      // Typed so `shouldRetry` reads `retryable: false` off it. A malformed
+      // payload is malformed on every attempt, and a bare `Error` is treated as
+      // a possible transient fault — three render attempts for nothing.
+      throw new ValidationError(
         `Invalid pipeline payload: ${parsed.error.issues
           .map((i) => `${i.path.join(".")} ${i.message}`)
           .join("; ")}`,
@@ -67,10 +70,20 @@ function stageHandler(
       .limit(1);
 
     const row = rows[0];
-    if (!row) throw new Error(`Job row ${jobId} not found.`);
+    /**
+     * Discarded, not retried: `NotFoundError` is `retryable: false`, and a row
+     * that is missing now cannot appear fifteen seconds later. This matters more
+     * on the pipeline queue than anywhere else — a retried render stage is
+     * minutes of encoding, and the usual cause of a missing row is a queued
+     * message that outlived it (a truncated database, a manual deletion).
+     */
+    if (!row) throw new NotFoundError(`Job row ${jobId} not found.`);
 
     if (row.projectId && row.projectId !== parsed.data.projectId) {
-      throw new Error("Job payload project does not match the job record.");
+      // The payload is not describing this job. Refusing is a tenant-isolation
+      // guarantee (§34): a mismatched id is how one user's render would write
+      // into another's project. No retry changes the comparison.
+      throw new ForbiddenError("Job payload project does not match the job record.");
     }
 
     return execute({

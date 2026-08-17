@@ -33,6 +33,20 @@ if (TEST_DATABASE_URL) {
   process.env["DATABASE_URL"] = TEST_DATABASE_URL;
   process.env["APP_URL"] ??= "http://localhost:3000";
   process.env["REDIS_URL"] ??= "redis://127.0.0.1:6379";
+  /**
+   * A Redis namespace of their own.
+   *
+   * `QUEUE_PREFIX` defaults to `tally`, which is also what a developer's worker
+   * consumes, so without this an integration run enqueues real BullMQ messages
+   * into the development queue and then TRUNCATEs the `jobs` rows they point at.
+   * A running worker then picks up hundreds of jobs it can never complete. That
+   * happened: the first successful worker boot drained a 1099-message backlog,
+   * every one failing `Job row <id> not found.`
+   *
+   * The tests do not need a worker — they call the stage functions directly — so
+   * this is purely about not leaving live messages behind for one.
+   */
+  process.env["QUEUE_PREFIX"] ??= "tally-test";
   process.env["S3_ENDPOINT"] ??= "http://127.0.0.1:9000";
   process.env["S3_BUCKET"] ??= "tally-test";
   /**

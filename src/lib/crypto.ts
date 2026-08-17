@@ -9,7 +9,6 @@
  *  - Session/verification tokens: 32 random bytes, stored only as SHA-256.
  *    A database leak therefore does not yield usable session cookies.
  */
-import "server-only";
 import {
   createCipheriv,
   createDecipheriv,

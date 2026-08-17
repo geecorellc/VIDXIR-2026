@@ -19,7 +19,6 @@
  * A single mixed queue would let ten renders starve a publish that is only
  * waiting on one API call.
  */
-import "server-only";
 import { Queue, type JobsOptions } from "bullmq";
 import { env } from "@/lib/env";
 import { queueConnection } from "@/lib/queue/redis";

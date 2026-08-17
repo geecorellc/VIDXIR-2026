@@ -14,7 +14,6 @@
  * accounting row could not be written is a bookkeeping problem, not a user-facing
  * one, so the error is logged and swallowed.
  */
-import "server-only";
 import { db } from "@/lib/db";
 import { apiUsage } from "@/lib/db/schema";
 import { errorCodeOf, isAppError } from "@/lib/errors";
