@@ -317,6 +317,98 @@ something to configure.
 
 ---
 
+## The video pipeline
+
+`POST /api/video/build` queues the first stage and returns a job id and the scene
+count the plan will produce. It does not return a video, because at that moment
+there isn't one. Seven jobs then run on the `pipeline` queue, each enqueueing the
+next, so a crash resumes at a stage boundary instead of restarting the render:
+
+| Job | Stage | Produces |
+|---|---|---|
+| `video-scene-plan` | `SCENE_PLAN` | Scene rows with measured narration offsets |
+| `video-voiceover` | `VOICEOVER` | One narration asset per scene |
+| `video-visuals` | `VISUALS` | One visual per scene (stock, else generated) |
+| `video-music` | `MUSIC` | A bed sized to the measured runtime |
+| `video-captions` | `CAPTIONS` | Cues from the real audio, plus SRT/VTT |
+| `video-timeline` | `TIMELINE` | The timeline document the renderer consumes |
+| `video-render` | `RENDER` | The MP4, stored in object storage |
+
+Progress is the sum of the weights of the stages that have finished — never a
+timer. The weights live in one table (`PIPELINE_STAGES`) that sums to 100, and
+`RENDER` is worth 25 of it, so a bar that sits at 75% is telling the truth about
+where the work is.
+
+Scene durations come from the encoded audio, not from an estimate: `wavDurationMs`
+reads the WAV header and the MP3 path parses frame headers, so the visual slot is
+as long as the narration actually is. A scene plan whose narration is missing
+fails with `asset_missing` rather than rendering a silent gap.
+
+### Renderer
+
+`RENDER_PROVIDER` selects one of three, and there is deliberately **no mock
+renderer** — even a development build produces a real, playable MP4 (§42):
+
+- **`ffmpeg`** (default) — encodes on the worker with the bundled `ffmpeg-static`
+  binary. No account, no per-minute cost. `FFMPEG_PATH` overrides the bundled
+  binary with a system one (e.g. an NVENC build); it must support `libx264`,
+  `aac` and the `subtitles` filter, since captions are burned in through libass.
+- **`shotstack`** — hosted. `SHOTSTACK_API_KEY` plus `SHOTSTACK_ENV`
+  (`stage` while testing). Renders are submitted, then polled, and every poll
+  writes the provider's own percentage to `renders.progress`.
+- **`remotion-lambda`** — your own render farm. `REMOTION_AWS_REGION`,
+  `REMOTION_LAMBDA_FUNCTION_NAME` and `REMOTION_SERVE_URL`; the deployed site must
+  expose a composition named `TallyVideo` that accepts Tally's timeline document as
+  its input props.
+
+A local encode is a single pass: stills are looped for their scene's slot, scaled
+and padded to the output frame, narration is delayed to each scene's offset, the
+music bed is mixed with `amix` (`normalize=0`, so a two-input mix does not halve
+the narration), captions are burned in, and the result is written with
+`+faststart` so the studio preview can stream before the file is fully buffered.
+It is capped at 45 minutes; a longer encode is killed and reported, not left
+running.
+
+`-xerror` is part of the argument list and is load-bearing rather than tidiness.
+`-loop 1 -t <slot>` measures `-t` in *output* time, so an image that never decodes
+— a truncated download, a provider serving HTML under an image content-type —
+produces no frames, output time never advances, `-t` never fires, and ffmpeg
+re-reads the same unreadable file until something kills it. Measured here: a
+corrupt PNG spun until the timeout while emitting 18 MB of `inflate returned error
+-3` and writing *nothing* to `-progress`, so the progress bar would also sit
+still. With `-xerror` the same input exits immediately and the stderr tail names
+the decode failure. `render.smoke.test.ts` covers this case explicitly.
+
+### Provider credentials
+
+Every asset provider degrades to a documented configuration state rather than to
+fake output (§48). `GET /api/config/providers` reports what is and is not
+configured, and `/api/video/build` refuses up front — with the variable's name —
+instead of failing three stages later.
+
+| Variable | Stage | Missing behaviour |
+|---|---|---|
+| `VOICE_PROVIDER` + `ELEVENLABS_API_KEY` | Voiceover | Build refused at the route with `503` |
+| `VISUAL_PROVIDERS` + `PEXELS_API_KEY` / `RUNWAY_API_KEY` | Visuals | Falls through the priority list; a scene with no source fails as `asset_missing` |
+| `MUSIC_PROVIDER` + `FREESOUND_API_KEY` | Music | Rendered without a bed |
+| `TRANSCRIPTION_PROVIDER` + `OPENAI_API_KEY` / `DEEPGRAM_API_KEY` | Captions | Rendered without captions |
+| `RENDER_PROVIDER` (+ per-provider keys) | Render | `ffmpeg` needs no credential at all |
+
+`TALLY_USE_MOCK_PROVIDERS=true` makes every provider synthetic — real PNG and WAV
+bytes, generated in-process — and is the only way tests obtain assets. It is
+refused when `NODE_ENV=production`, so it cannot be the reason a paying user's
+video is silence over a solid colour (§40).
+
+### Remote assets
+
+Provider URLs are fetched through `lib/providers/fetch`, not `fetch` directly:
+private and link-local address ranges are rejected after DNS resolution,
+redirects are re-validated rather than followed blindly, the declared content type
+must match what the stage asked for, and a size ceiling is enforced while
+streaming so a provider cannot fill the disk (§34).
+
+---
+
 ## Checks
 
 ```bash

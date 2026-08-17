@@ -15,8 +15,7 @@
  *    ones finish, because a half-completed pipeline stage is worse than a slow
  *    deploy.
  *
- * Handlers are registered per queue. Phase 5 adds the pipeline stages to the
- * `pipeline` queue registration; the harness does not change.
+ * Handlers are registered per queue and the harness knows nothing about them.
  */
 import { Worker, type Job } from "bullmq";
 import { closeDb } from "@/lib/db";
@@ -33,6 +32,7 @@ import { RESEARCH_JOB_NAME } from "@/lib/research/service";
 import { SCRIPT_JOB_NAME } from "@/lib/scripts/service";
 import { researchHandler } from "@/worker/handlers/research";
 import { scriptHandler } from "@/worker/handlers/script";
+import { videoHandlers } from "@/worker/handlers/video";
 import type { JobHandler } from "@/worker/types";
 
 const log = logger.child({ component: "worker" });
@@ -44,6 +44,9 @@ const HANDLERS: Partial<Record<QueueName, Record<string, JobHandler>>> = {
   },
   pipeline: {
     [SCRIPT_JOB_NAME]: scriptHandler,
+    // Scene plan through render. Each stage enqueues the next, so all seven land
+    // on this queue rather than on one queue per stage.
+    ...videoHandlers,
   },
 };
 

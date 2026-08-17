@@ -35,8 +35,19 @@ if (TEST_DATABASE_URL) {
   process.env["REDIS_URL"] ??= "redis://127.0.0.1:6379";
   process.env["S3_ENDPOINT"] ??= "http://127.0.0.1:9000";
   process.env["S3_BUCKET"] ??= "tally-test";
-  process.env["S3_ACCESS_KEY_ID"] ??= "test";
-  process.env["S3_SECRET_ACCESS_KEY"] ??= "test";
+  /**
+   * The credentials `docker-compose.yml` gives MinIO.
+   *
+   * These were previously placeholders, which was invisible for a long time: no
+   * suite actually uploaded anything, so nothing ever authenticated. The moment
+   * the video pipeline stored its first asset every upload failed with Access
+   * Denied. A test bucket that cannot be written to is worse than no test bucket,
+   * because the failure surfaces as a `StorageError` from application code and
+   * reads like a bug in the pipeline.
+   */
+  process.env["S3_ACCESS_KEY_ID"] ??= "tallyminio";
+  process.env["S3_SECRET_ACCESS_KEY"] ??= "tallyminio";
+  process.env["S3_FORCE_PATH_STYLE"] ??= "true";
   process.env["ENCRYPTION_KEY"] ??= "a".repeat(64);
   process.env["SESSION_SECRET"] ??= "b".repeat(64);
   // Console email is a real delivery channel in tests: assertions read the

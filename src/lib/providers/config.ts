@@ -12,6 +12,7 @@
  */
 import "server-only";
 import { env, usingMockProviders } from "@/lib/env";
+import { hasFfmpeg } from "@/lib/media/ffmpeg";
 
 export type Capability =
   | "ai"
@@ -67,6 +68,15 @@ interface Spec {
   provider: () => string;
   /** Env vars required by the selected implementation. */
   required: (provider: string) => string[];
+  /**
+   * Non-credential readiness check, for a provider whose requirement is not an
+   * env var. The local renderer needs an executable on disk, and reporting
+   * "ready" because no variable is missing would be a lie of exactly the kind
+   * §42 forbids.
+   */
+  available?: (provider: string) => boolean;
+  /** Shown when `available` returns false. */
+  unavailableHint?: string;
   hint?: string;
 }
 
@@ -139,15 +149,25 @@ const SPECS: Spec[] = [
     capability: "render",
     label: "Video rendering",
     optional: true,
-    provider: () => (usingMockProviders() ? "mock" : env().RENDER_PROVIDER),
+    // Not mocked, even in development: `ffmpeg` is a real encoder producing a
+    // real MP4, so there is no state in which Tally claims to have rendered a
+    // video it did not render (§42).
+    provider: () => env().RENDER_PROVIDER,
     required: (p) => {
       if (p === "shotstack") return ["SHOTSTACK_API_KEY"];
       if (p === "remotion-lambda") {
         return ["REMOTION_LAMBDA_FUNCTION_NAME", "REMOTION_SERVE_URL"];
       }
+      // `ffmpeg` needs a binary rather than a credential; see `available` below.
       return [];
     },
-    hint: "Shotstack: https://dashboard.shotstack.io (use the stage key first)",
+    // The bundled binary is the default, so the usual reason this is unavailable
+    // is an install that skipped postinstall scripts.
+    available: (p) => (p === "ffmpeg" ? hasFfmpeg() : true),
+    unavailableHint:
+      "ffmpeg was not found. Run `npm install ffmpeg-static`, set FFMPEG_PATH " +
+      "to a system ffmpeg, or set RENDER_PROVIDER=shotstack.",
+    hint: "Local ffmpeg needs no account · Shotstack: https://dashboard.shotstack.io",
   },
   {
     capability: "storage",
@@ -181,10 +201,12 @@ function evaluate(spec: Spec): CapabilityStatus {
   const requiredEnvVars = spec.required(provider);
   const missingEnvVars = missing(requiredEnvVars);
 
+  const available = spec.available?.(provider) ?? true;
+
   let state: ConfigState;
   if (provider === "mock" || provider === "console") {
     state = "mock";
-  } else if (missingEnvVars.length > 0) {
+  } else if (missingEnvVars.length > 0 || !available) {
     state = "not_configured";
   } else {
     state = "ready";
@@ -197,7 +219,10 @@ function evaluate(spec: Spec): CapabilityStatus {
     requiredEnvVars,
     missingEnvVars,
     label: spec.label,
-    hint: spec.hint,
+    // The unavailability hint is the actionable one when it applies: telling an
+    // operator where to get a Shotstack key does not help when the problem is a
+    // missing binary.
+    hint: !available && spec.unavailableHint ? spec.unavailableHint : spec.hint,
     optional: spec.optional,
   };
 }

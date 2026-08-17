@@ -62,7 +62,8 @@ services:
       /bin/sh -c "
       mc alias set local http://minio:9000 tallyminio tallyminio &&
       mc mb --ignore-existing local/tally-media &&
-      echo 'bucket ready'
+      mc mb --ignore-existing local/tally-test &&
+      echo 'buckets ready'
       "
 
 volumes:

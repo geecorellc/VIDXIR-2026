@@ -80,9 +80,20 @@ const schema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   DEEPGRAM_API_KEY: z.string().optional(),
 
+  /**
+   * There is deliberately no `mock` renderer. `ffmpeg` encodes locally with the
+   * bundled static binary, so a development build produces a genuine MP4 rather
+   * than a placeholder — §42 applies to the render stage above all others. A
+   * legacy `RENDER_PROVIDER=mock` is accepted and read as `ffmpeg`.
+   */
   RENDER_PROVIDER: z
-    .enum(["shotstack", "remotion-lambda", "mock"])
-    .default("mock"),
+    .preprocess(
+      (value) => (value === "mock" ? "ffmpeg" : value),
+      z.enum(["shotstack", "remotion-lambda", "ffmpeg"]),
+    )
+    .default("ffmpeg"),
+  /** Overrides the bundled ffmpeg-static binary with a system install. */
+  FFMPEG_PATH: z.string().optional(),
   SHOTSTACK_API_KEY: z.string().optional(),
   SHOTSTACK_ENV: z.enum(["stage", "v1"]).default("stage"),
   REMOTION_AWS_REGION: z.string().default("us-east-1"),
