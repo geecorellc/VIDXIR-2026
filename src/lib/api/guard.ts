@@ -14,7 +14,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { channels, projects, subscriptions } from "@/lib/db/schema";
+import { channels, projects } from "@/lib/db/schema";
 import {
   AppError,
   ForbiddenError,
@@ -25,7 +25,6 @@ import {
 } from "@/lib/errors";
 import { logger, newTraceId, type Logger } from "@/lib/logger";
 import { getSession, type SessionUser } from "@/lib/auth/session";
-import { isPlanTier, type PlanTier } from "@/lib/plans";
 
 export interface RequestContext {
   user: SessionUser;
@@ -57,22 +56,14 @@ export async function requireOnboarded(): Promise<RequestContext> {
   return ctx;
 }
 
-/** The user's authoritative plan tier, read from the database (§23). */
-export async function currentTier(userId: string): Promise<PlanTier> {
-  const rows = await db
-    .select({ tier: subscriptions.tier, status: subscriptions.status })
-    .from(subscriptions)
-    .where(eq(subscriptions.userId, userId))
-    .limit(1);
-
-  const row = rows[0];
-  if (!row) return "starter";
-  // A lapsed subscription falls back to the free tier rather than keeping paid
-  // capabilities alive (§24: payment failure must actually downgrade access).
-  const entitled = row.status === "active" || row.status === "trialing";
-  if (!entitled) return "starter";
-  return isPlanTier(row.tier) ? row.tier : "starter";
-}
+/**
+ * The user's authoritative plan tier, read from the database (§23).
+ *
+ * Re-exported from `plans/enforce` rather than implemented here, so the scheduler
+ * — which cannot import this `server-only` module — resolves a tier the same way a
+ * request does.
+ */
+export { currentTier } from "@/lib/plans/enforce";
 
 // ---------------------------------------------------------------------------
 // Resource access — always re-queried with the tenant predicate

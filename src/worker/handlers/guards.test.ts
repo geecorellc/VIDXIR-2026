@@ -40,6 +40,8 @@ vi.mock("@/lib/db", () => {
 const executeResearchRun = vi.fn();
 const executeScriptGeneration = vi.fn();
 const executeScenePlan = vi.fn();
+const executePublish = vi.fn();
+const forgetUploadProgress = vi.fn();
 
 vi.mock("@/lib/research/service", () => ({
   RESEARCH_JOB_NAME: "research-run",
@@ -65,16 +67,23 @@ vi.mock("@/lib/video/service", () => ({
   executeTimeline: vi.fn(),
   executeRender: vi.fn(),
 }));
+vi.mock("@/lib/publish/service", () => ({
+  PUBLISH_JOB: "publish-video",
+  executePublish: (...a: unknown[]) => executePublish(...a),
+  forgetUploadProgress: (...a: unknown[]) => forgetUploadProgress(...a),
+}));
 
 const { researchHandler } = await import("@/worker/handlers/research");
 const { scriptHandler } = await import("@/worker/handlers/script");
 const { videoHandlers } = await import("@/worker/handlers/video");
+const { publishHandler } = await import("@/worker/handlers/publish");
 
 const JOB_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const PROJECT_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const CHANNEL_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const RUN_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const PUBLISH_JOB_ID = "11111111-1111-4111-8111-111111111111";
 
 function ctx(payload: Record<string, unknown>) {
   return { jobId: JOB_ID, payload, traceId: "trace", attempt: 1 };
@@ -111,6 +120,21 @@ describe.each([
     run: () => scenePlan()(ctx({ projectId: PROJECT_ID, tier: "studio" })),
     row: { userId: USER_ID, projectId: PROJECT_ID },
     badPayload: () => scenePlan()(ctx({})),
+    mismatched: { userId: USER_ID, projectId: CHANNEL_ID },
+  },
+  {
+    /**
+     * The publish handler matters most of the three: a guard that failed open
+     * here would upload a video to another tenant's YouTube channel with that
+     * tenant's OAuth token, which cannot be undone (§34).
+     */
+    label: "publish",
+    run: () =>
+      publishHandler(
+        ctx({ projectId: PROJECT_ID, publishJobId: PUBLISH_JOB_ID }),
+      ),
+    row: { userId: USER_ID, projectId: PROJECT_ID },
+    badPayload: () => publishHandler(ctx({ projectId: PROJECT_ID })),
     mismatched: { userId: USER_ID, projectId: CHANNEL_ID },
   },
 ])("$label handler", ({ run, row, badPayload, mismatched }) => {
@@ -173,5 +197,42 @@ describe("authority comes from the job row", () => {
     expect(executeScenePlan).toHaveBeenCalledWith(
       expect.objectContaining({ tier: "starter", userId: USER_ID }),
     );
+  });
+
+  it("uploads for the row's user, not a userId injected into the publish payload", async () => {
+    rowsFor.mockReturnValue([{ userId: USER_ID, projectId: PROJECT_ID }]);
+    executePublish.mockResolvedValue({
+      youtubeVideoId: "v",
+      url: "https://www.youtube.com/watch?v=v",
+      uploadStatus: "uploaded",
+      privacyStatus: "public",
+      thumbnailSet: true,
+      disclosureOutstanding: true,
+    });
+
+    await publishHandler(
+      ctx({
+        projectId: PROJECT_ID,
+        publishJobId: PUBLISH_JOB_ID,
+        userId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      }),
+    );
+
+    expect(executePublish).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID, projectId: PROJECT_ID }),
+    );
+  });
+
+  it("releases the publish progress throttle even when the upload fails", async () => {
+    rowsFor.mockReturnValue([{ userId: USER_ID, projectId: PROJECT_ID }]);
+    executePublish.mockRejectedValue(new Error("network reset"));
+
+    await publishHandler(
+      ctx({ projectId: PROJECT_ID, publishJobId: PUBLISH_JOB_ID }),
+    ).catch(() => {});
+
+    // A long-lived worker would otherwise keep one map entry per video it ever
+    // attempted.
+    expect(forgetUploadProgress).toHaveBeenCalledWith(PUBLISH_JOB_ID);
   });
 });

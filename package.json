@@ -17,6 +17,7 @@
     "test:integration": "vitest run tests/integration",
     "verify:worker": "tsx scripts/verify-worker.ts",
     "verify:providers": "tsx scripts/verify-providers.ts",
+    "verify:automation": "tsx scripts/verify-automation.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "db:studio": "drizzle-kit studio",

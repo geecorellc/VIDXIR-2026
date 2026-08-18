@@ -9,6 +9,7 @@
 import { RESEARCH_JOB_NAME } from "@/lib/research/service";
 import { SCRIPT_JOB_NAME } from "@/lib/scripts/service";
 import type { QueueName } from "@/lib/queue/queues";
+import { publishHandlers } from "@/worker/handlers/publish";
 import { researchHandler } from "@/worker/handlers/research";
 import { scriptHandler } from "@/worker/handlers/script";
 import { thumbnailHandlers } from "@/worker/handlers/thumbnail";
@@ -30,6 +31,14 @@ export const HANDLERS: Partial<Record<QueueName, Record<string, JobHandler>>> = 
     // would mean a separate worker's concurrency to tune for a job that runs
     // once per video.
     ...thumbnailHandlers,
+  },
+  /**
+   * Its own queue, not `pipeline`. `CONCURRENCY.publish` is 1, and that only
+   * serialises uploads if uploads are the only thing on the queue — sharing it
+   * with the pipeline would either starve renders or let two uploads overlap.
+   */
+  publish: {
+    ...publishHandlers,
   },
 };
 

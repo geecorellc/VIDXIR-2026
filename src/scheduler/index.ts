@@ -4,9 +4,9 @@
  * A separate process from the web tier, because §19 is explicit: automation must
  * not depend on the user's browser being open. Anything time-driven runs here.
  *
- * This is the Phase 2 shape — session pruning, channel stats and analytics
- * ingestion. The automation engine (choose a topic, start a video) lands in Phase
- * 7 and registers its own task in the same loop.
+ * Session pruning, channel stats, analytics ingestion, and — since Phase 7 — the
+ * automation engine, which chooses a topic and starts a video on the user's
+ * cadence.
  *
  * Design notes:
  *  - Tasks are plain async functions on fixed intervals, not cron expressions.
@@ -14,11 +14,14 @@
  *  - A task that throws is logged and the loop continues. One channel with a
  *    dead grant must not stop the other channels' refreshes.
  *  - Overlap is prevented per task, so a slow ingest cannot stack up behind
- *    itself and multiply quota spend.
+ *    itself and multiply quota spend. That guard is *per process*, which is why
+ *    `runAutomationTick` does not rely on it: it claims each channel's slot with
+ *    a conditional UPDATE, so two schedulers cannot both start the same video.
  */
 import "@/lib/load-env";
 import { closeDb } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { runAutomationTick } from "@/lib/automation/service";
 import { pruneSessions } from "@/lib/auth/session";
 import { channelsNeedingStatsRefresh, refreshChannelStats } from "@/lib/channels/service";
 import {
@@ -82,6 +85,24 @@ const TASKS: Task[] = [
       if (stale.length > 0) {
         log.info("channel stats pass complete", { considered: stale.length });
       }
+    },
+  },
+  {
+    /**
+     * The automation engine (§19).
+     *
+     * Every five minutes, which sets the worst-case lateness of a scheduled video:
+     * a slot at 18:00 starts by 18:05. A finer interval would poll Postgres for
+     * nothing, and a coarser one makes "18:00" a claim Tally does not keep.
+     *
+     * `runAutomationTick` handles per-channel failures internally, so nothing here
+     * needs a try/catch beyond `runTask`'s.
+     */
+    name: "automation",
+    everyMs: 5 * MINUTE,
+    delayMs: 20_000,
+    run: async () => {
+      await runAutomationTick();
     },
   },
   {
