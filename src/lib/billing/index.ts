@@ -8,14 +8,20 @@
  * row is untouched until the provider confirms (§24: "Never activate paid
  * features solely because the frontend says the user selected 'Studio'").
  *
- * The Stripe implementation lands with Phase 8. Until then this module exposes
- * the *configuration state* so the billing screen can say precisely which
- * credential is missing rather than pretending an upgrade succeeded (§42, §48).
+ * Stripe implements it in `lib/billing/stripe.ts`. When credentials are absent this
+ * module exposes the *configuration state* so the billing screen can say precisely
+ * which credential is missing rather than pretending an upgrade succeeded (§42, §48).
  */
 import { NotConfiguredError } from "@/lib/errors";
 import { env } from "@/lib/env";
 import { capabilityStatus } from "@/lib/providers/config";
 import type { PlanTier } from "@/lib/plans";
+/**
+ * A static import, not a dynamic one. `stripe.ts` imports only *types* from this
+ * module, so the cycle is erased at compile time and there is no runtime
+ * initialisation order to get wrong.
+ */
+import { stripeProvider } from "@/lib/billing/stripe";
 
 export interface CheckoutRequest {
   userId: string;
@@ -95,20 +101,27 @@ export function getBillingProvider(): BillingProvider {
     );
   }
 
-  // StripeProvider is implemented in the billing phase. Reaching this line means
-  // the credentials are present but the implementation is not wired yet — that is
-  // an unfinished code path, not a configuration state, so it must not be dressed
-  // up as one. It throws, the route returns a 500 with a trace id, and no
-  // subscription row is touched.
+  if (availability.provider === "stripe") return stripeProvider;
+
+  /**
+   * `configured` is only true for a provider with credentials, and `mock` never
+   * reports configured, so this is unreachable through `billingAvailability`. It
+   * stays as a throw rather than a silent stub: a new provider added to the env
+   * enum without an implementation must fail loudly, not grant tiers (§42, §48).
+   */
   throw new Error(
-    `Billing provider "${availability.provider}" is configured but not implemented yet.`,
+    `Billing provider "${availability.provider}" is configured but not implemented.`,
   );
 }
 
-/** True when a paid upgrade can actually be carried out end to end. */
+/**
+ * True when a paid upgrade can actually be carried out end to end.
+ *
+ * Requires the webhook secret as well as the API key and prices, because checkout
+ * without a verified webhook is the worst of the available states: the customer is
+ * charged and nothing ever grants them the plan. Better to offer no button.
+ */
 export function canUpgrade(): boolean {
-  // Deliberately conservative: the checkout implementation lands with Phase 8, so
-  // until then the billing screen offers no purchase button at all rather than one
-  // that fails after the user commits.
-  return false;
+  const availability = billingAvailability();
+  return availability.configured && availability.provider === "stripe";
 }

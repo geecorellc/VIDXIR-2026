@@ -22,6 +22,13 @@
       "when": 1786903574818,
       "tag": "0002_reflective_revanche",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787073145035,
+      "tag": "0003_serious_madripoor",
+      "breakpoints": true
     }
   ]
 }

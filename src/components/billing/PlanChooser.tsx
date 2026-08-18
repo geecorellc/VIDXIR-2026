@@ -9,8 +9,10 @@
  *
  * Changed: choosing "Studio" here does not make the account a Studio account. The
  * prototype set `plan` in React state and the dashboard believed it; §24 requires
- * the opposite — the tier follows a confirmed payment, and until checkout exists
- * this screen says so and continues onto onboarding on the free tier.
+ * the opposite — the tier follows a confirmed payment. Selecting a paid plan sends
+ * the user to the provider's checkout, and the account stays on its current tier
+ * until the webhook confirms the payment. When checkout is not configured the screen
+ * says so and continues onto onboarding on the free tier.
  */
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -44,11 +46,57 @@ export function PlanChooser({
   // "MOST POPULAR" badge points at.
   const [selected, setSelected] = useState<PlanTier>("studio");
 
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const paidSelected = selected !== "starter";
   const wouldNeedPayment = paidSelected && selected !== currentTier;
+  /** A paid plan the user does not have, on a server that can actually sell it. */
+  const canBuySelected = wouldNeedPayment && upgradeAvailable;
 
   function proceed() {
+    if (canBuySelected) {
+      void startCheckout();
+      return;
+    }
     startTransition(() => router.push(continueHref));
+  }
+
+  /**
+   * Ask the server for a checkout URL and go there. The account is *not* upgraded
+   * by this call — the response says as much — so a user who abandons the payment
+   * page simply arrives back on their current tier (§24).
+   */
+  async function startCheckout() {
+    if (selected === "starter") return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tier: selected }),
+      });
+      const payload = (await response.json()) as {
+        data?: { url?: string };
+        error?: { message?: string };
+      };
+
+      if (!response.ok || !payload.data?.url) {
+        setError(
+          payload.error?.message ??
+            "Could not start checkout. Nothing has been charged — you can continue and upgrade later.",
+        );
+        setBusy(false);
+        return;
+      }
+      window.location.assign(payload.data.url);
+    } catch {
+      setError(
+        "Could not reach the payment provider. Nothing has been charged — you can continue and upgrade later.",
+      );
+      setBusy(false);
+    }
   }
 
   return (
@@ -125,12 +173,43 @@ export function PlanChooser({
         )}
 
         <div style={{ textAlign: "center", marginTop: 32 }}>
-          <Btn onClick={proceed} loading={pending}>
-            {wouldNeedPayment && !upgradeAvailable
-              ? `Continue on ${planByTier(currentTier).name}`
-              : `Continue with ${planByTier(selected).name}`}{" "}
+          <Btn onClick={proceed} loading={pending || busy} disabled={busy}>
+            {canBuySelected
+              ? `Continue to payment for ${planByTier(selected).name}`
+              : wouldNeedPayment
+                ? `Continue on ${planByTier(currentTier).name}`
+                : `Continue with ${planByTier(selected).name}`}{" "}
             <ArrowRight size={16} />
           </Btn>
+
+          {canBuySelected && (
+            <p
+              style={{
+                margin: "14px 0 0",
+                fontSize: 12,
+                color: color.textFaint,
+                lineHeight: 1.6,
+              }}
+            >
+              You will be taken to our payment provider.{" "}
+              {planByTier(selected).name} switches on once the payment is confirmed.
+            </p>
+          )}
+
+          {error ? (
+            <p
+              role="alert"
+              style={{
+                margin: "14px auto 0",
+                maxWidth: 460,
+                fontSize: 12.5,
+                lineHeight: 1.6,
+                color: color.warning,
+              }}
+            >
+              {error}
+            </p>
+          ) : null}
         </div>
       </div>
     </div>

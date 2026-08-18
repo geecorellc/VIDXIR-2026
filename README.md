@@ -478,6 +478,101 @@ fonts-dejavu-core` provides one at
 
 ---
 
+## Billing
+
+One rule, and everything else follows from it: **a plan tier changes only because a
+signature-verified Stripe event said the money moved.**
+
+`POST /api/billing/checkout` returns a Stripe-hosted URL and writes nothing. Its
+response says `tierGranted: false` in as many words, because the client must not be
+able to read a successful call as an upgrade — a user who follows the URL, abandons
+the page and comes back is still on Starter, which is the correct outcome (§24, §42).
+The body names a **tier**, never a price id; price ids come from the server's
+environment, since a caller who could name a price could name a free one.
+
+`src/lib/billing/webhook.ts` is the only code in Tally that can write
+`subscriptions.tier`. Four properties, each corresponding to a way real webhooks go
+wrong:
+
+- **Signature first.** The route reads `request.text()` and verifies the HMAC before
+  the body is parsed. Anyone can POST to a public webhook URL; the signature is the
+  only thing separating Stripe from someone granting themselves Scale with one curl.
+- **Idempotent.** Stripe redelivers on any non-2xx and guarantees only at-least-once
+  delivery. The unique index on `billing_events (provider, provider_event_id)` makes
+  a redelivery lose its insert, and a lost insert means the change is not applied
+  twice. `onConflictDoNothing` rather than a read-then-write, so two concurrent
+  deliveries of one event cannot both decide they are the first.
+- **Order-independent.** Delivery order is explicitly not guaranteed. The
+  `subscriptions.last_event_at` comparison lives **inside** the UPDATE's `WHERE`, so
+  an older `customer.subscription.updated` arriving after a newer one is recorded and
+  skipped rather than silently reverting the tier.
+- **Tier from the price, not from metadata.** `tallyTier` metadata is written at
+  checkout and is only a hint; the authoritative tier is whichever configured price
+  the subscription is actually on. If the two disagree — someone switched plans in the
+  portal — the price wins, because that is what the customer is being charged for. A
+  price this deployment does not sell grants **Starter**, never the highest tier.
+
+Failed payments really do remove access. `past_due`, `unpaid`, `canceled`,
+`incomplete` and Stripe's `paused` (mapped to `unpaid`, since no access is no access)
+all keep the recorded tier but `currentTier()` refuses to honour it — so a cleared
+payment restores the right plan instead of dropping the customer to Starter
+permanently.
+
+The webhook route is the one route not wrapped in `handle()`. That wrapper's
+`assertSameOrigin` rejects requests with no `Origin` and no same-origin
+`Sec-Fetch-Site`, and Stripe is a server: it sends neither, so every delivery would
+be refused. The HMAC replaces CSRF protection and does more than it did — CSRF
+defends against a browser being tricked into sending a request, whereas the signature
+proves the request came from Stripe at all.
+
+Status codes are chosen for Stripe's retry behaviour: **200** for anything verified
+and processed *including* duplicates, stale deliveries and unused event types (a
+non-2xx would make Stripe redeliver forever and eventually disable the endpoint);
+**403** for a failed signature, which Stripe does not retry, correctly — a body that
+fails the HMAC will never start passing it; **503** when the signing secret is unset,
+so an operator who sets it recovers the backlog; **500** when a genuine event failed
+to process, so Stripe retries with backoff for up to three days.
+
+Card changes, invoices, plan switches and cancellation all happen on Stripe's hosted
+pages via `POST /api/billing/portal`. That is deliberate rather than lazy: Tally never
+receives a card number, so there is no cardholder data in this codebase to protect,
+and cancellation is always available without Tally mediating it. A second checkout for
+an account that already pays is refused with `409` — Stripe would happily bill two
+subscriptions in parallel — so plan *changes* go through the portal, which swaps the
+price on the existing subscription.
+
+### Credential
+
+| Variable | Purpose | Missing behaviour |
+|---|---|---|
+| `BILLING_PROVIDER` | `stripe` or `mock` | Defaults to `mock`, which can never grant a paid tier |
+| `STRIPE_SECRET_KEY` | API calls | Checkout and portal return `503` naming it |
+| `STRIPE_WEBHOOK_SECRET` | Signature verification | No upgrade button is offered at all |
+| `STRIPE_PRICE_STUDIO` | Studio price id | Studio is not purchasable |
+| `STRIPE_PRICE_SCALE` | Scale price id | Scale is not purchasable |
+
+`canUpgrade()` requires the **webhook secret** as well as the key and the prices,
+because checkout without a verified webhook is the worst available state: the customer
+is charged and nothing ever grants them the plan. Better to offer no button and say
+which variable is missing (§48). `TALLY_USE_MOCK_PROVIDERS=true` resolves billing to
+`mock`, which never reports configured — a development build must not be able to hand
+out paid tiers (§40).
+
+Local setup, once the products exist in the dashboard:
+
+```bash
+stripe listen --forward-to localhost:3000/api/billing/webhook
+```
+
+That prints the `whsec_…` value for `STRIPE_WEBHOOK_SECRET`. Point the production
+endpoint at `/api/billing/webhook` and subscribe it to
+`checkout.session.completed`, `customer.subscription.created`,
+`customer.subscription.updated`, `customer.subscription.deleted`,
+`invoice.payment_succeeded` and `invoice.payment_failed`. Any other event type is
+recorded and acknowledged.
+
+---
+
 ## Checks
 
 ```bash
@@ -522,6 +617,8 @@ the suite has by construction.
 ```bash
 npm run verify:worker      # the standalone worker boots and runs a job
 npm run verify:providers    # one real call per configured provider
+npm run verify:automation   # the scheduler's queries, cadence maths and publish queue
+npm run verify:billing      # the billing schema, idempotency index and HMAC
 ```
 
 **`verify:worker`** runs the worker's boot path in a real Node process: env,
@@ -554,6 +651,20 @@ than using a silent WAV. That was the first attempt and it was wrong:
 that means a truncated upload, so verifying with silence reported a failure for a
 perfectly good key. Synthesising first costs a few cents and proves more — it is
 the same composition the captions stage performs.
+
+**`verify:automation`** and **`verify:billing`** cover the same gap for the scheduler
+and the billing path. Both exist because of a defect the suite could have missed:
+`dueChannels` interpolated a `Date` into a raw `sql` template, which postgres.js
+rejects at Bind, so the scheduler's first query threw on every tick. Billing has one
+raw `sql` fragment of the same kind — the `last_event_at` comparison — so
+`verify:billing` executes it against real Postgres, then proves the unique event index
+genuinely rejects a redelivery (the whole idempotency story rests on
+`onConflictDoNothing` returning zero rows, and nothing else would notice if a
+migration dropped that index), that an unrecognised price maps to no tier, and that
+the real HMAC accepts a signed body and rejects one edited after signing. It makes no
+Stripe API call: it creates no customer, no session and no subscription, so it cannot
+charge anyone, and it writes only to `billing_events` under a synthetic provider name
+that it deletes again.
 
 ### Why lint, not `server-only`
 

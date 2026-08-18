@@ -62,6 +62,49 @@ export function BillingPanel({
   billingProvider,
 }: BillingPanelProps) {
   const [selected, setSelected] = useState<PlanTier>(tier);
+  const [busy, setBusy] = useState<"checkout" | "portal" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Both actions do the same thing: ask the server for a provider-hosted URL and
+   * navigate to it. Neither changes what the user is entitled to, so there is no
+   * optimistic state to update — when the browser comes back, the page re-renders
+   * from the database (§24, §42).
+   */
+  async function go(kind: "checkout" | "portal") {
+    setBusy(kind);
+    setError(null);
+    try {
+      const response = await fetch(`/api/billing/${kind}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body:
+          kind === "checkout"
+            ? JSON.stringify({ tier: selected })
+            : JSON.stringify({}),
+      });
+      const payload = (await response.json()) as {
+        data?: { url?: string };
+        error?: { message?: string };
+      };
+
+      if (!response.ok || !payload.data?.url) {
+        setError(
+          payload.error?.message ??
+            "Could not reach the billing provider. Nothing has been charged.",
+        );
+        setBusy(null);
+        return;
+      }
+      // Full navigation rather than a router push: the destination is Stripe.
+      window.location.assign(payload.data.url);
+    } catch {
+      setError("Could not reach the billing provider. Nothing has been charged.");
+      setBusy(null);
+    }
+  }
+
+  const isPaid = subscription.provider !== "none" && tier !== "starter";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -118,8 +161,19 @@ export function BillingPanel({
               No payment method on file — you are on the free tier.
             </span>
           ) : (
-            <Btn variant="ghost" disabled icon={<CreditCard size={14} />}>
-              Manage payment
+            /**
+             * Enabled only when a real billing provider owns the subscription.
+             * Cancellation, card changes and invoices all live on the provider's
+             * pages, so this button is the user's route to all three.
+             */
+            <Btn
+              variant="ghost"
+              loading={busy === "portal"}
+              disabled={busy !== null || !upgradeAvailable}
+              onClick={() => void go("portal")}
+              icon={<CreditCard size={14} />}
+            >
+              {busy === "portal" ? "Opening…" : "Manage payment"}
             </Btn>
           )}
         </div>
@@ -161,13 +215,68 @@ export function BillingPanel({
       {/* Upgrade action, or an honest reason there isn't one                */}
       {/* ---------------------------------------------------------------- */}
       {upgradeAvailable ? (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <Btn disabled={selected === tier}>
-            {selected === tier ? `You're on ${planName}` : `Switch to ${labelFor(selected)}`}
-          </Btn>
-          <span style={{ fontSize: 12, color: color.textFaint }}>
-            Change plans anytime — nothing is locked in.
-          </span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div
+            style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}
+          >
+            {/*
+              Three distinct cases, because conflating them is how a billing UI
+              starts lying:
+                - already on this plan          → nothing to do
+                - on a paid plan, want another  → the portal swaps the price on the
+                                                  existing subscription; a second
+                                                  checkout would bill twice
+                - downgrade to the free tier    → cancellation, which only the
+                                                  provider can perform
+            */}
+            {selected === tier ? (
+              <Btn disabled>You&rsquo;re on {planName}</Btn>
+            ) : selected === "starter" ? (
+              <Btn
+                variant="ghost"
+                loading={busy === "portal"}
+                disabled={busy !== null}
+                onClick={() => void go("portal")}
+              >
+                Cancel or downgrade
+              </Btn>
+            ) : isPaid ? (
+              <Btn
+                loading={busy === "portal"}
+                disabled={busy !== null}
+                onClick={() => void go("portal")}
+              >
+                Change to {labelFor(selected)}
+              </Btn>
+            ) : (
+              <Btn
+                loading={busy === "checkout"}
+                disabled={busy !== null}
+                onClick={() => void go("checkout")}
+              >
+                Continue to payment
+              </Btn>
+            )}
+            <span style={{ fontSize: 12, color: color.textFaint }}>
+              {selected === tier
+                ? "Change plans anytime — nothing is locked in."
+                : "You will be taken to our payment provider. Your plan changes once payment is confirmed."}
+            </span>
+          </div>
+
+          {error ? (
+            <div
+              role="alert"
+              style={{
+                fontSize: 12.5,
+                lineHeight: 1.6,
+                color: color.warning,
+                fontFamily: font.body,
+              }}
+            >
+              {error}
+            </div>
+          ) : null}
         </div>
       ) : (
         <Card tone="warning" pad={16}>

@@ -174,8 +174,21 @@ export async function prepareDatabase(): Promise<void> {
  * `plans` is deliberately absent — it is seeded reference data, not test state.
  * TRUNCATE ... CASCADE covers the rest in one statement so new child tables do
  * not silently start leaking rows between tests.
+ *
+ * `billing_events` is listed explicitly even though it references `users`,
+ * because that FK is `ON DELETE set null`: a webhook event Tally could not match
+ * to an account has a null `user_id`, so the cascade from `users` would never
+ * reach it and its unique (provider, event id) row would survive into the next
+ * test — where a redelivery assertion would then see a "duplicate" that belongs
+ * to a different test.
  */
-const RESET_ROOTS = ["users", "research_runs", "jobs", "api_usage"] as const;
+const RESET_ROOTS = [
+  "users",
+  "research_runs",
+  "jobs",
+  "api_usage",
+  "billing_events",
+] as const;
 
 export async function resetDatabase(): Promise<void> {
   const { rawSql } = await import("@/lib/db");

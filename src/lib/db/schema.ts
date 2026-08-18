@@ -257,6 +257,14 @@ export const subscriptions = pgTable(
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
     trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+    /**
+     * Provider timestamp of the newest event applied to this row.
+     *
+     * Stripe does not guarantee delivery order, so an older `updated` event can
+     * land after a newer one. Applying it would silently revert the tier. The
+     * handler compares against this and skips anything not strictly newer.
+     */
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -267,6 +275,59 @@ export const subscriptions = pgTable(
   (t) => [
     uniqueIndex("subscriptions_user_id_key").on(t.userId),
     index("subscriptions_provider_sub_idx").on(t.providerSubscriptionId),
+  ],
+);
+
+/**
+ * Every billing-provider event Tally has seen (§24, §32).
+ *
+ * Two jobs, both load-bearing:
+ *
+ *  1. **Idempotency.** Stripe redelivers on any non-2xx, and at-least-once
+ *     delivery is its documented contract. `provider_event_id` is unique, so a
+ *     redelivery loses the insert and the handler returns without applying the
+ *     change a second time. Without this a retried `subscription.deleted` would
+ *     re-run a downgrade over a subsequent re-subscribe.
+ *  2. **Audit.** A paid tier can only ever be granted by a row here, so "why does
+ *     this account have Studio?" is answerable from the database alone.
+ *
+ * `payload` holds the provider's own object as received. It contains no card
+ * numbers — Stripe never sends them — and no API keys.
+ */
+export const billingEvents = pgTable(
+  "billing_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    /** The provider's event id, e.g. `evt_…`. The idempotency key. */
+    providerEventId: varchar("provider_event_id", { length: 128 }).notNull(),
+    eventType: varchar("event_type", { length: 96 }).notNull(),
+    /**
+     * Nullable: an event can arrive for a customer Tally cannot resolve to a user
+     * (a subscription created directly in the Stripe dashboard, say). It is still
+     * recorded — silently dropping it would erase the only evidence it happened.
+     */
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    providerCustomerId: varchar("provider_customer_id", { length: 128 }),
+    providerSubscriptionId: varchar("provider_subscription_id", { length: 128 }),
+    /** The provider's own event timestamp, used to reject out-of-order deliveries. */
+    eventCreatedAt: timestamp("event_created_at", { withTimezone: true }).notNull(),
+    /** False when the event was recorded but deliberately not applied. */
+    applied: boolean("applied").notNull().default(false),
+    /** Why it was not applied: `duplicate`, `stale`, `unhandled`, `unknown_customer`. */
+    skipReason: varchar("skip_reason", { length: 48 }),
+    payload: jsonb("payload").notNull().$type<Record<string, unknown>>(),
+    receivedAt: timestamp("received_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("billing_events_provider_event_key").on(
+      t.provider,
+      t.providerEventId,
+    ),
+    index("billing_events_user_received_idx").on(t.userId, t.receivedAt),
+    index("billing_events_subscription_idx").on(t.providerSubscriptionId),
   ],
 );
 
