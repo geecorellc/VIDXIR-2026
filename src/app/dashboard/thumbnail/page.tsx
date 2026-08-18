@@ -39,8 +39,13 @@ export default async function ThumbnailPage({
     currentTier(userId),
   ]);
 
-  const ai = capabilityStatus("ai");
-  const visuals = capabilityStatus("visuals");
+  // The same three the POST route re-checks. Listed here so the button is
+  // disabled before the click rather than after a 503 (§37).
+  const required = [
+    capabilityStatus("ai"),
+    capabilityStatus("visuals"),
+    capabilityStatus("thumbnail"),
+  ];
   const variants = await withImageUrls(userId, context.thumbnailVariants);
 
   return (
@@ -57,7 +62,7 @@ export default async function ThumbnailPage({
         variants={variants}
         selectedVariantId={context.selectedThumbnailVariantId}
         abTestingAvailable={hasFeature(tier, "thumbnailAbTest")}
-        canGenerate={ai.state !== "not_configured" && visuals.state !== "not_configured"}
+        canGenerate={required.every((c) => c.state !== "not_configured")}
         error={
           context.project?.errorMessage
             ? {

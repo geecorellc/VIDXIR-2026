@@ -173,7 +173,7 @@ export function ThumbnailStudio({
               ? baseTitle
                 ? `Ready to design thumbnails for “${baseTitle}.”`
                 : "Ready to design four thumbnail concepts for this video."
-              : "Thumbnail generation needs the AI and visuals providers to be configured."
+              : "Thumbnail generation needs the AI, visuals and thumbnail-text providers to be configured."
           }
           action={
             <Btn onClick={generate} loading={busy === "generate"} disabled={!canGenerate}>

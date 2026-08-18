@@ -11,6 +11,7 @@ import { SCRIPT_JOB_NAME } from "@/lib/scripts/service";
 import type { QueueName } from "@/lib/queue/queues";
 import { researchHandler } from "@/worker/handlers/research";
 import { scriptHandler } from "@/worker/handlers/script";
+import { thumbnailHandlers } from "@/worker/handlers/thumbnail";
 import { videoHandlers } from "@/worker/handlers/video";
 import type { JobHandler } from "@/worker/types";
 
@@ -24,6 +25,11 @@ export const HANDLERS: Partial<Record<QueueName, Record<string, JobHandler>>> = 
     // Scene plan through render. Each stage enqueues the next, so all seven land
     // on this queue rather than on one queue per stage.
     ...videoHandlers,
+    // Thumbnails share the pipeline queue rather than getting their own: a
+    // generation is one AI call and four short composites, and a separate queue
+    // would mean a separate worker's concurrency to tune for a job that runs
+    // once per video.
+    ...thumbnailHandlers,
   },
 };
 

@@ -33,6 +33,7 @@ import { env, usingMockProviders } from "@/lib/env";
 import { NotConfiguredError, RenderError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { ffmpegBinary } from "@/lib/media/ffmpeg";
+import { escapeFilterPath } from "@/lib/media/filter";
 import { fetchRemoteAsset } from "@/lib/providers/fetch";
 import { providerJson } from "@/lib/providers/http";
 import { getObjectBuffer } from "@/lib/storage";
@@ -1120,17 +1121,6 @@ function assColour(hex: string): string {
     ? (255 - parseInt(alpha, 16)).toString(16).padStart(2, "0")
     : "00";
   return `&H${inverted}${b}${g}${r}`.toUpperCase();
-}
-
-/**
- * Escape a path for use inside a filter argument.
- *
- * Windows paths are the reason this exists: `C:\Users\...` contains both a colon
- * (the filter option separator) and backslashes (the filter escape character),
- * so an unescaped path silently becomes a different filter option.
- */
-function escapeFilterPath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/:/g, "\\\\:").replace(/'/g, "\\\\'");
 }
 
 /** Unused elsewhere, kept for the storage streaming path in service code. */

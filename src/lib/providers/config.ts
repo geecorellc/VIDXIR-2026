@@ -12,6 +12,7 @@
  */
 import { env, usingMockProviders } from "@/lib/env";
 import { hasFfmpeg } from "@/lib/media/ffmpeg";
+import { FONT_HINT, hasThumbnailFont } from "@/lib/media/fonts";
 
 export type Capability =
   | "ai"
@@ -21,6 +22,7 @@ export type Capability =
   | "music"
   | "transcription"
   | "render"
+  | "thumbnail"
   | "storage"
   | "billing"
   | "email";
@@ -167,6 +169,26 @@ const SPECS: Spec[] = [
       "ffmpeg was not found. Run `npm install ffmpeg-static`, set FFMPEG_PATH " +
       "to a system ffmpeg, or set RENDER_PROVIDER=shotstack.",
     hint: "Local ffmpeg needs no account · Shotstack: https://dashboard.shotstack.io",
+  },
+  {
+    capability: "thumbnail",
+    label: "Thumbnail text",
+    // Optional in the sense that the rest of the product works without it: a
+    // video renders, uploads and publishes with no thumbnail. Only the Thumbnail
+    // tab is blocked.
+    optional: true,
+    // Never mocked. `drawtext` burns real type onto a real frame, so there is no
+    // state where Tally shows a thumbnail it did not composite (§42).
+    provider: () => "ffmpeg-drawtext",
+    // The requirement is a file on disk, not a credential — the env var is how an
+    // operator points at one, but a system font satisfies it without any var set.
+    required: () => [],
+    available: () => hasFfmpeg() && hasThumbnailFont(),
+    unavailableHint:
+      "Thumbnail headlines are drawn by ffmpeg and need a font file. " + FONT_HINT,
+    hint:
+      "A system font is used when found. THUMBNAIL_FONT_FILE overrides it — set " +
+      "it to match the channel's brand face.",
   },
   {
     capability: "storage",

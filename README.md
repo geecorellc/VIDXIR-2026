@@ -409,6 +409,75 @@ streaming so a provider cannot fill the disk (§34).
 
 ---
 
+## Thumbnails
+
+A generation produces **four** concepts and composites a real 1280×720 JPEG for
+each. The concepts come from Claude, reading the finished script — the same brief
+the metadata stage uses, plus the channel's niche, audience and brand palette, and
+a list of headlines already tried on this project so a second run does not return
+the first run's ideas in a different order.
+
+Generation requires a **finished render**, not just a script. That is not a policy
+choice: `THUMBNAIL_GENERATING` is only reachable from `VIDEO_READY`,
+`READY_TO_PUBLISH` and `FAILED`, and the prerequisite is checked against the
+`renders` table rather than against the project's status label, because a `FAILED`
+project can reach this state having never produced a video.
+
+The background for variant 0 is the render's own poster frame when the render
+produced one (`renders.poster_asset_id`); the rest come from the stock library
+through the same `acquireVisual` path the video pipeline uses, so licence,
+attribution and provider are recorded per asset. Nothing downloads a third party's
+YouTube video (§29).
+
+Headline text is drawn by ffmpeg's `drawtext` from a **`textfile=` with
+`expansion=none`**, never as an inline `text=` argument. A model-written headline
+can contain `:`, `'`, `%` or `\`, each of which changes the meaning of a filter
+argument; routing it through a file makes it data rather than syntax and removes
+the whole class of escaping bugs. The output is re-encoded down a quality ladder
+until it fits YouTube's 2 MB ceiling, and a variant that cannot be made to fit
+fails rather than producing bytes the upload would reject.
+
+Each variant composites independently. One failed background download leaves that
+row with `image_asset_id` null — the studio then says *"Image not rendered"* rather
+than drawing a placeholder (§42) — while the other three keep their images. Only
+when *all four* fail does the stage error, as `asset_missing`.
+
+A failure never moves the project to `FAILED`. It returns to whichever of
+`VIDEO_READY` / `READY_TO_PUBLISH` it came from and records the reason on the
+`thumbnails` row, because a rendered video that is one step from publishing should
+not look broken on account of a thumbnail.
+
+`POST /api/thumbnails/select` refuses a variant with no composited image. Selecting
+a concept whose picture does not exist would publish a video with no thumbnail
+while the UI showed a tick beside it.
+
+### Credential
+
+Concepts need `ANTHROPIC_API_KEY`; backgrounds need a configured visual provider.
+The third requirement is a **font file**, which is where thumbnails differ from
+captions: `drawtext` needs a path, while libass takes a font *name* and lets
+fontconfig resolve it.
+
+Nothing is bundled — Oswald and Inter reach the browser through a Google Fonts
+`@import`, which is no use to a worker, and a licensed TTF does not belong in the
+repository. A well-known system font is used when one is found (Impact or Arial
+Bold on Windows, DejaVu Sans Bold on Debian/Ubuntu). Otherwise the `thumbnail`
+capability reports `not_configured` and the route refuses with `503`.
+
+| Variable | Purpose | Missing behaviour |
+|---|---|---|
+| `THUMBNAIL_FONT_FILE` | Headline face | A system font is searched; if none is found, generation is refused |
+| `THUMBNAIL_FONT_FILE_BODY` | Subline face | Falls back to a system body font, then to the headline face |
+
+Set both in production: the system font that happens to exist on the host is not
+the channel's brand face. A path that is set but does not exist is reported as
+`not_configured` and does **not** fall back to the system search — an operator who
+names a file means that file. In a slim image, `apt-get install -y
+fonts-dejavu-core` provides one at
+`/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`.
+
+---
+
 ## Checks
 
 ```bash
