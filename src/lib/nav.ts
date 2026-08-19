@@ -54,8 +54,21 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { segment: "channels", href: "/dashboard/channels", label: "Channels", icon: "Radio" },
 ] as const;
 
-/** Secondary nav shown beneath the divider. */
+/**
+ * Secondary nav shown beneath the divider.
+ *
+ * Analytics lives here rather than becoming an eighth primary tab: the
+ * prototype's seven stages are a *workflow*, in order, and inserting a reporting
+ * view into that sequence would misrepresent it. Reporting is something you
+ * consult, like billing — not a step you pass through.
+ */
 export const SECONDARY_NAV: readonly NavItem[] = [
+  {
+    segment: "analytics",
+    href: "/dashboard/analytics",
+    label: "Analytics",
+    icon: "BarChart3",
+  },
   { segment: "settings", href: "/dashboard/settings", label: "Settings", icon: "Settings" },
   { segment: "billing", href: "/dashboard/billing", label: "Plan & billing", icon: "CreditCard" },
 ] as const;

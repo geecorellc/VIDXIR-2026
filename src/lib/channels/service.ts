@@ -38,6 +38,7 @@ import { logger } from "@/lib/logger";
 import {
   fetchChannelById,
   fetchMyChannel,
+  hasMonetaryScope,
   missingRequiredScopes,
   refreshAccessToken,
   revokeToken,
@@ -501,6 +502,57 @@ async function accessTokenFor(
   });
 
   return tokens.accessToken;
+}
+
+/**
+ * What a channel's stored grant permits, read from the database.
+ *
+ * Exists so callers can decide whether to *ask* a provider for something before
+ * asking — specifically revenue, which fails the entire analytics query with a
+ * 403 when the monetary scope is absent. Phase 9 §12 is the reason it reads the
+ * `channels` row rather than accepting a scope list: a client-supplied
+ * "monetary: true" would otherwise decide what Tally requests, and a client must
+ * never widen its own authorisation.
+ *
+ * Returns null when the channel is not this user's, matching the tenant-scoped
+ * read every other accessor here performs.
+ */
+export interface ChannelGrant {
+  channelId: string;
+  youtubeChannelId: string;
+  /** Scopes as granted, split. Empty when nothing is recorded. */
+  grantedScopes: string[];
+  /** Whether earnings can be requested at all. */
+  canReadRevenue: boolean;
+  needsReauth: boolean;
+}
+
+export async function channelGrant(
+  userId: string,
+  channelId: string,
+): Promise<ChannelGrant | null> {
+  const rows = await db
+    .select({
+      id: channels.id,
+      youtubeChannelId: channels.youtubeChannelId,
+      grantedScopes: channels.grantedScopes,
+      reauthRequiredAt: channels.reauthRequiredAt,
+    })
+    .from(channels)
+    .where(and(eq(channels.id, channelId), eq(channels.userId, userId)))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+
+  const scopeText = row.grantedScopes ?? "";
+  return {
+    channelId: row.id,
+    youtubeChannelId: row.youtubeChannelId,
+    grantedScopes: scopeText.split(/\s+/).filter(Boolean),
+    canReadRevenue: hasMonetaryScope(scopeText),
+    needsReauth: row.reauthRequiredAt !== null,
+  };
 }
 
 /**

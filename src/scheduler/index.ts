@@ -4,9 +4,9 @@
  * A separate process from the web tier, because §19 is explicit: automation must
  * not depend on the user's browser being open. Anything time-driven runs here.
  *
- * Session pruning, channel stats, analytics ingestion, and — since Phase 7 — the
- * automation engine, which chooses a topic and starts a video on the user's
- * cadence.
+ * Session pruning, channel stats, analytics ingestion (which since Phase 9 also
+ * re-evaluates running thumbnail tests), and — since Phase 7 — the automation
+ * engine, which chooses a topic and starts a video on the user's cadence.
  *
  * Design notes:
  *  - Tasks are plain async functions on fixed intervals, not cron expressions.
@@ -28,6 +28,10 @@ import {
   defaultWindow,
   ingestChannelAnalytics,
 } from "@/lib/channels/analytics";
+import {
+  concludeExperiment,
+  runningExperimentIds,
+} from "@/lib/analytics/experiments";
 import { isAppError } from "@/lib/errors";
 import { closeRedis } from "@/lib/queue/redis";
 
@@ -125,6 +129,34 @@ const TASKS: Task[] = [
             error,
           });
         }
+      }
+
+      /**
+       * Re-check running thumbnail tests in the same pass (Phase 9 §11).
+       *
+       * Folded in here rather than given its own task: the decision reads the
+       * observations this pass just refreshed, so a separate interval would either
+       * duplicate the work or evaluate stale numbers. `concludeExperiment` only
+       * closes a test that has cleared the policy — an `insufficient_data` result
+       * leaves it running, so this is safe to call every pass.
+       */
+      const experiments = await runningExperimentIds();
+      for (const experiment of experiments) {
+        try {
+          await concludeExperiment(experiment.userId, experiment.id);
+        } catch (error) {
+          log.warn("experiment evaluation failed", {
+            userId: experiment.userId,
+            channelId: experiment.channelId,
+            errorCode: isAppError(error) ? error.code : "unknown",
+            error,
+          });
+        }
+      }
+      if (experiments.length > 0) {
+        log.info("thumbnail experiments evaluated", {
+          considered: experiments.length,
+        });
       }
     },
   },

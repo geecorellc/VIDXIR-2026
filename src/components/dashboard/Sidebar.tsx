@@ -16,6 +16,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
+  BarChart3,
   Clapperboard,
   CreditCard,
   FileText,
@@ -34,6 +35,7 @@ import { NAV_ITEMS, SECONDARY_NAV, type NavItem } from "@/lib/nav";
 import { api } from "@/services/api-client";
 
 const ICONS: Record<string, LucideIcon> = {
+  BarChart3,
   LayoutDashboard,
   Search,
   FileText,

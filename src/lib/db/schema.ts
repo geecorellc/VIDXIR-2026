@@ -13,6 +13,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  char,
   index,
   integer,
   jsonb,
@@ -26,6 +27,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 // ---------------------------------------------------------------------------
@@ -127,6 +129,74 @@ export const publishJobStatusEnum = pgEnum("publish_job_status", [
 export const emailTokenPurposeEnum = pgEnum("email_token_purpose", [
   "verify_email",
   "reset_password",
+]);
+
+/**
+ * Where a stored metric came from (Phase 9 §6).
+ *
+ * The point of this enum is that "we did not measure it" and "we measured zero"
+ * must be different states in the database, not two readings of the same null.
+ */
+export const analyticsMetricSourceEnum = pgEnum("analytics_metric_source", [
+  /** The provider returned the value directly. */
+  "provider",
+  /** Computed from other values the provider did return, arithmetic only. */
+  "derived_views_impressions",
+  /** The provider was asked and does not offer this metric at all. */
+  "provider_unsupported",
+  /** The provider was asked and returned no value for this row. */
+  "provider_null",
+]);
+
+/**
+ * Why a revenue figure is present or absent (Phase 9 §7).
+ *
+ * `scope_missing` is the common case in practice: revenue requires the
+ * `yt-analytics-monetary.readonly` scope, and a channel connected without it
+ * cannot report earnings. That is a permission state, not zero earnings, and
+ * conflating the two would show a monetised channel $0.00.
+ */
+export const revenueStateEnum = pgEnum("revenue_state", [
+  /** A real figure was returned and is stored in `estimated_revenue`. */
+  "reported",
+  /** The provider reported exactly zero for this period. Not the same as absent. */
+  "reported_zero",
+  /** The connected account has not granted the monetary analytics scope. */
+  "scope_missing",
+  /** The channel is not in the YouTube Partner Program, so there is no revenue. */
+  "not_monetized",
+  /** The provider was asked and declined to report (privacy threshold, delay). */
+  "unavailable",
+  /** Revenue was never requested for this row. */
+  "not_requested",
+]);
+
+/** Lifecycle of a thumbnail A/B test (Phase 9 §8). */
+export const experimentStatusEnum = pgEnum("experiment_status", [
+  /** Created, arms chosen, nothing shown to YouTube yet. */
+  "draft",
+  "running",
+  "completed",
+  "cancelled",
+]);
+
+/**
+ * How a test ended.
+ *
+ * `insufficient_data` exists so a test that ran without gathering enough
+ * observations reports that plainly, rather than crowning whichever arm happened
+ * to be ahead (§10).
+ */
+export const experimentOutcomeEnum = pgEnum("experiment_outcome", [
+  "winner",
+  /** Enough data, but no arm cleared the required margin over the control. */
+  "no_winner",
+  /** Enough data, and the leaders are within the noise margin of each other. */
+  "tie",
+  /** Ended before the minimum impressions/observation days were reached. */
+  "insufficient_data",
+  /** A human stopped it. */
+  "stopped",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1383,24 +1453,273 @@ export const analyticsSnapshots = pgTable(
     subscribersGained: integer("subscribers_gained"),
     subscribersLost: integer("subscribers_lost"),
     impressions: integer("impressions"),
-    /** Click-through rate as a fraction, 0-1. */
-    ctr: real("ctr"),
+    /**
+     * Click-through rate as a fraction, 0-1.
+     *
+     * `numeric` rather than `real` (Phase 9): a float cannot round-trip a rate
+     * exactly, so a stored 0.0 could read back as 4e-17 and a CTR comparison
+     * between two variants would depend on binary rounding rather than on the
+     * measurement. Null still means "not measured" — see `ctrSource`.
+     */
+    ctr: numeric("ctr", { precision: 9, scale: 6 }),
+    /**
+     * How `ctr`/`impressions` were obtained, so the UI can tell a measured zero
+     * from an absent measurement (§6).
+     *
+     * `null` — nothing was measured. `provider_unsupported` — YouTube Analytics
+     * v2 was queried and does not expose impression CTR at all (the normal case;
+     * it lives only in Studio). `provider` — the provider returned a real value.
+     * `derived_views_impressions` — computed from impressions and views that the
+     * provider did return. Never a guess (§42).
+     */
+    ctrSource: analyticsMetricSourceEnum("ctr_source"),
     watchTimeMinutes: real("watch_time_minutes"),
     averageViewDurationSeconds: real("average_view_duration_seconds"),
     averageViewPercentage: real("average_view_percentage"),
+    /**
+     * Kept for the rows written before Phase 9 and for callers that want a
+     * rounded minor-unit figure. `estimatedRevenue` is authoritative: cents
+     * cannot represent a three-decimal YouTube payout, and summing rounded cents
+     * over a month drifts from the real total.
+     */
     estimatedRevenueCents: integer("estimated_revenue_cents"),
+    /**
+     * Exact estimated revenue in `revenueCurrency` (§7). `numeric`, never a
+     * float — a float total is not reproducible and this figure is money.
+     */
+    estimatedRevenue: numeric("estimated_revenue", { precision: 18, scale: 6 }),
+    /** ISO-4217 for `estimatedRevenue`. Preserved, never converted (§7). */
+    revenueCurrency: char("revenue_currency", { length: 3 }),
+    /**
+     * Why revenue is or is not present. `null` means no revenue attempt was
+     * made for this row at all; the explicit states are what stop a missing
+     * payout from rendering as $0.00 (§6, §7).
+     */
+    revenueState: revenueStateEnum("revenue_state"),
+    /**
+     * True once YouTube stops revising the figure. Until then it is an estimate
+     * and the UI must say so (§7). Null = unknown, which is treated as estimated.
+     */
+    revenueFinal: boolean("revenue_final"),
     raw: jsonb("raw").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
-    uniqueIndex("analytics_snapshots_scope_date_key").on(
-      t.channelId,
-      t.publishedVideoId,
+    /**
+     * Video-level uniqueness. Partial, because the unconditional three-column
+     * index it replaces did not constrain channel-level rows at all: Postgres
+     * treats NULLs as distinct, so `(channel, NULL, date)` could be inserted
+     * without limit and `ON CONFLICT` could never match it.
+     */
+    uniqueIndex("analytics_snapshots_video_date_key")
+      .on(t.channelId, t.publishedVideoId, t.date)
+      .where(sql`${t.publishedVideoId} is not null`),
+    /**
+     * Channel-level uniqueness, which is the half that was missing. With this
+     * index a re-pull upserts instead of duplicating, so the ingest no longer
+     * needs its delete-then-insert window — a read-then-write race §5 forbids.
+     */
+    uniqueIndex("analytics_snapshots_channel_date_key")
+      .on(t.channelId, t.date)
+      .where(sql`${t.publishedVideoId} is null`),
+    index("analytics_snapshots_user_id_idx").on(t.userId),
+    /** The dashboard's read shape: one channel, one date range, in order. */
+    index("analytics_snapshots_channel_date_idx").on(t.channelId, t.date),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Thumbnail A/B testing (§8, §9, §10 of Phase 9)
+// ---------------------------------------------------------------------------
+
+/**
+ * One thumbnail A/B test over an already-published video.
+ *
+ * Deliberately *not* a second thumbnail pipeline: the arms reference
+ * `thumbnail_variants` rows that Phase 6a already generated. An experiment
+ * decides which of those existing images is shown and records what happened.
+ *
+ * Scoped to a `published_videos` row rather than a project, because there is
+ * nothing to measure until YouTube has confirmed a publication (§42).
+ */
+export const thumbnailExperiments = pgTable(
+  "thumbnail_experiments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channelId: uuid("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    publishedVideoId: uuid("published_video_id")
+      .notNull()
+      .references(() => publishedVideos.id, { onDelete: "cascade" }),
+    status: experimentStatusEnum("status").notNull().default("draft"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    /**
+     * The arm the winner call selected, set only when `status` is `completed`
+     * and the decision was `winner`. A null here with a completed status means
+     * the test ended without one, which is a real outcome (§10).
+     *
+     * The lambda defers resolution because `thumbnailExperimentArms` is declared
+     * below and references this table in turn — the cycle has to be broken on one
+     * side. `set null` rather than `cascade`: losing the arm row must not delete
+     * the experiment's history.
+     */
+    winningArmId: uuid("winning_arm_id").references(
+      (): AnyPgColumn => thumbnailExperimentArms.id,
+      { onDelete: "set null" },
+    ),
+    /** Why the test ended: `winner`, `no_winner`, `tie`, `stopped`, `expired`. */
+    outcome: experimentOutcomeEnum("outcome"),
+    /**
+     * Frozen copy of the policy the decision was made under, so a later change
+     * to the thresholds cannot retroactively rewrite what a past test concluded.
+     */
+    decisionPolicy: jsonb("decision_policy").$type<{
+      minImpressionsPerArm: number;
+      minObservationDays: number;
+      minArms: number;
+      minRelativeLift: number;
+    }>(),
+    /** The full decision record, including per-arm figures at decision time. */
+    decision: jsonb("decision").$type<Record<string, unknown>>(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    /**
+     * One live test per video. Partial, so a completed test does not block a
+     * later one — and expressed in the database rather than as a check-then-insert,
+     * which two concurrent requests would both pass (§5).
+     */
+    uniqueIndex("thumbnail_experiments_live_video_key")
+      .on(t.publishedVideoId)
+      .where(sql`${t.status} in ('draft', 'running')`),
+    index("thumbnail_experiments_user_idx").on(t.userId),
+    index("thumbnail_experiments_channel_status_idx").on(t.channelId, t.status),
+  ],
+);
+
+/**
+ * One arm of an experiment: a thumbnail variant under test.
+ *
+ * `impressions`/`clicks`/`views` are integers and nullable. Null means "no
+ * observation has been recorded", which is not the same as a recorded zero, and
+ * the winner policy treats them differently (§6, §10).
+ */
+export const thumbnailExperimentArms = pgTable(
+  "thumbnail_experiment_arms",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    experimentId: uuid("experiment_id")
+      .notNull()
+      .references(() => thumbnailExperiments.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The already-generated variant this arm shows. Never a new render. */
+    thumbnailVariantId: uuid("thumbnail_variant_id")
+      .notNull()
+      .references(() => thumbnailVariants.id, { onDelete: "cascade" }),
+    /** Stable ordinal, 0-based. Assignment is derived from this, not from a row id. */
+    position: integer("position").notNull(),
+    /**
+     * The arm that was already live when the test started. Exactly one per
+     * experiment, enforced by a partial unique index: without a control there is
+     * nothing to compare against and §8 forbids silently replacing production.
+     */
+    isControl: boolean("is_control").notNull().default(false),
+    impressions: integer("impressions"),
+    clicks: integer("clicks"),
+    views: integer("views"),
+    /** Observed CTR as an exact fraction. Numeric for the same reason as above. */
+    ctr: numeric("ctr", { precision: 9, scale: 6 }),
+    /** How the arm's figures were obtained — see `analyticsMetricSourceEnum`. */
+    metricsSource: analyticsMetricSourceEnum("metrics_source"),
+    /** Distinct days this arm has a recorded observation for. */
+    observationDays: integer("observation_days").notNull().default(0),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("thumbnail_experiment_arms_position_key").on(
+      t.experimentId,
+      t.position,
+    ),
+    /** A variant cannot be two arms of the same test. */
+    uniqueIndex("thumbnail_experiment_arms_variant_key").on(
+      t.experimentId,
+      t.thumbnailVariantId,
+    ),
+    uniqueIndex("thumbnail_experiment_arms_control_key")
+      .on(t.experimentId)
+      .where(sql`${t.isControl}`),
+    index("thumbnail_experiment_arms_user_idx").on(t.userId),
+  ],
+);
+
+/**
+ * Per-arm, per-day observations — the append-only record the winner policy reads.
+ *
+ * Separate from the arm's running totals because a re-pull of a day must
+ * *replace* that day rather than add to it. Totals are recomputed from these
+ * rows, so a double ingest cannot inflate an arm's impressions (§5).
+ */
+export const thumbnailExperimentObservations = pgTable(
+  "thumbnail_experiment_observations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    experimentId: uuid("experiment_id")
+      .notNull()
+      .references(() => thumbnailExperiments.id, { onDelete: "cascade" }),
+    armId: uuid("arm_id")
+      .notNull()
+      .references(() => thumbnailExperimentArms.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** UTC date the observation covers, at midnight. */
+    date: timestamp("date", { withTimezone: true }).notNull(),
+    impressions: integer("impressions"),
+    clicks: integer("clicks"),
+    views: integer("views"),
+    source: analyticsMetricSourceEnum("source").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    /** One row per arm per day — the upsert target that makes ingest idempotent. */
+    uniqueIndex("thumbnail_experiment_observations_arm_date_key").on(
+      t.armId,
       t.date,
     ),
-    index("analytics_snapshots_user_id_idx").on(t.userId),
+    index("thumbnail_experiment_observations_experiment_idx").on(
+      t.experimentId,
+      t.date,
+    ),
+    index("thumbnail_experiment_observations_user_idx").on(t.userId),
   ],
 );
 
@@ -1587,3 +1906,47 @@ export const publishJobsRelations = relations(publishJobs, ({ one }) => ({
     references: [channels.id],
   }),
 }));
+
+export const thumbnailExperimentsRelations = relations(
+  thumbnailExperiments,
+  ({ one, many }) => ({
+    publishedVideo: one(publishedVideos, {
+      fields: [thumbnailExperiments.publishedVideoId],
+      references: [publishedVideos.id],
+    }),
+    channel: one(channels, {
+      fields: [thumbnailExperiments.channelId],
+      references: [channels.id],
+    }),
+    arms: many(thumbnailExperimentArms),
+  }),
+);
+
+export const thumbnailExperimentArmsRelations = relations(
+  thumbnailExperimentArms,
+  ({ one, many }) => ({
+    experiment: one(thumbnailExperiments, {
+      fields: [thumbnailExperimentArms.experimentId],
+      references: [thumbnailExperiments.id],
+    }),
+    variant: one(thumbnailVariants, {
+      fields: [thumbnailExperimentArms.thumbnailVariantId],
+      references: [thumbnailVariants.id],
+    }),
+    observations: many(thumbnailExperimentObservations),
+  }),
+);
+
+export const thumbnailExperimentObservationsRelations = relations(
+  thumbnailExperimentObservations,
+  ({ one }) => ({
+    arm: one(thumbnailExperimentArms, {
+      fields: [thumbnailExperimentObservations.armId],
+      references: [thumbnailExperimentArms.id],
+    }),
+    experiment: one(thumbnailExperiments, {
+      fields: [thumbnailExperimentObservations.experimentId],
+      references: [thumbnailExperiments.id],
+    }),
+  }),
+);

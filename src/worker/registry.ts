@@ -9,6 +9,7 @@
 import { RESEARCH_JOB_NAME } from "@/lib/research/service";
 import { SCRIPT_JOB_NAME } from "@/lib/scripts/service";
 import type { QueueName } from "@/lib/queue/queues";
+import { analyticsHandlers } from "@/worker/handlers/analytics";
 import { publishHandlers } from "@/worker/handlers/publish";
 import { researchHandler } from "@/worker/handlers/research";
 import { scriptHandler } from "@/worker/handlers/script";
@@ -39,6 +40,15 @@ export const HANDLERS: Partial<Record<QueueName, Record<string, JobHandler>>> = 
    */
   publish: {
     ...publishHandlers,
+  },
+  /**
+   * The `analytics` queue existed from Phase 5 with `CONCURRENCY.analytics = 2`
+   * and no handlers; Phase 9 fills it rather than adding a queue. Kept off
+   * `pipeline` because these jobs are quota-bound and must not queue behind a
+   * render, and off `publish` because that queue is deliberately serialised.
+   */
+  analytics: {
+    ...analyticsHandlers,
   },
 };
 

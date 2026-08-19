@@ -19,6 +19,7 @@
     "verify:providers": "tsx scripts/verify-providers.ts",
     "verify:automation": "tsx scripts/verify-automation.ts",
     "verify:billing": "tsx scripts/verify-billing.ts",
+    "verify:analytics": "tsx scripts/verify-analytics.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "db:studio": "drizzle-kit studio",

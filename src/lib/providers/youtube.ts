@@ -31,6 +31,7 @@ import {
   NotConfiguredError,
   ProviderError,
   ProviderRateLimitError,
+  ProviderScopeError,
   PublishBlockedError,
   ReauthRequiredError,
   YouTubeUploadError,
@@ -64,6 +65,24 @@ const REQUIRED_SCOPES = [
   "https://www.googleapis.com/auth/youtube",
   "https://www.googleapis.com/auth/youtube.upload",
 ] as const;
+
+/**
+ * The scope YouTube requires before it will report earnings.
+ *
+ * Named here, and checked before any revenue query is issued, because the
+ * failure mode without it is the one §7 of Phase 9 singles out: a monetised
+ * channel silently reporting $0.00. Tally does not request this scope at consent
+ * (see `YOUTUBE_SCOPES`), so in practice `revenueState` is `scope_missing` — an
+ * explicit permission state, not an earnings figure.
+ */
+export const YOUTUBE_MONETARY_SCOPE =
+  "https://www.googleapis.com/auth/yt-analytics-monetary.readonly";
+
+/** Whether a granted-scope string permits revenue reporting. */
+export function hasMonetaryScope(grantedScope: string | null | undefined): boolean {
+  if (!grantedScope) return false;
+  return grantedScope.split(/\s+/).includes(YOUTUBE_MONETARY_SCOPE);
+}
 
 const CONFIG_HINT =
   "Google Cloud console -> APIs & Services -> Credentials -> OAuth 2.0 Client ID " +
@@ -797,6 +816,22 @@ export interface AnalyticsRow {
   watchTimeMinutes: number | null;
   averageViewDurationSeconds: number | null;
   averageViewPercentage: number | null;
+  /**
+   * Estimated revenue as the *exact decimal string* the API returned, not a
+   * float.
+   *
+   * A string because this is money: `0.017` cannot be represented exactly in
+   * binary floating point, and the value is on its way to a `numeric` column. It
+   * is never parsed with `Number()` on the write path (§7 of Phase 9).
+   *
+   * `null` means the metric was not returned. `revenueRequested` distinguishes
+   * "not asked for" from "asked for and absent".
+   */
+  estimatedRevenue: string | null;
+  /** True when the revenue metric was included in the request. */
+  revenueRequested: boolean;
+  /** ISO-4217 the figure is denominated in. Preserved, never converted. */
+  currency: string | null;
 }
 
 /**
@@ -819,6 +854,25 @@ const ANALYTICS_METRICS = [
   "averageViewPercentage",
 ] as const;
 
+/**
+ * Revenue metrics, requested only when the caller has confirmed the monetary
+ * scope is granted.
+ *
+ * Appended rather than merged into `ANALYTICS_METRICS` because asking for
+ * `estimatedRevenue` without the scope makes the *whole* query fail with a 403 —
+ * so an unconditional request would take the view counts down with it.
+ */
+const REVENUE_METRICS = ["estimatedRevenue"] as const;
+
+/**
+ * The currency revenue is requested in.
+ *
+ * Fixed rather than per-user because the figure is stored alongside its currency
+ * code and never converted; a per-request currency would mean the same channel's
+ * history was denominated in whatever was configured on the day (§7).
+ */
+export const ANALYTICS_REVENUE_CURRENCY = "USD";
+
 export interface AnalyticsQuery {
   /** ISO date, inclusive. */
   startDate: string;
@@ -827,6 +881,15 @@ export interface AnalyticsQuery {
   videoIds?: string[];
   /** Break the result down per video as well as per day. */
   byVideo?: boolean;
+  /**
+   * Include revenue metrics.
+   *
+   * The caller must have verified `hasMonetaryScope()` first. This function does
+   * not check, because it only holds an access token and not the grant record —
+   * but it does report back, per row, whether revenue was requested, so a caller
+   * cannot mistake an unrequested metric for a zero.
+   */
+  includeRevenue?: boolean;
 }
 
 /**
@@ -844,17 +907,22 @@ export async function fetchAnalytics(
   const analytics = google.youtubeAnalytics({ version: "v2", auth });
 
   const dimensions = query.byVideo ? ["day", "video"] : ["day"];
+  const withRevenue = query.includeRevenue === true;
+  const metrics = withRevenue
+    ? [...ANALYTICS_METRICS, ...REVENUE_METRICS]
+    : [...ANALYTICS_METRICS];
 
   try {
     const response = await analytics.reports.query({
       ids: "channel==MINE",
       startDate: query.startDate,
       endDate: query.endDate,
-      metrics: ANALYTICS_METRICS.join(","),
+      metrics: metrics.join(","),
       dimensions: dimensions.join(","),
       ...(query.videoIds && query.videoIds.length > 0
         ? { filters: `video==${query.videoIds.join(",")}` }
         : {}),
+      ...(withRevenue ? { currency: ANALYTICS_REVENUE_CURRENCY } : {}),
       maxResults: 10_000,
     });
 
@@ -871,6 +939,23 @@ export async function fetchAnalytics(
         const value = at(name);
         return typeof value === "number" ? value : null;
       };
+      /**
+       * Money as an exact decimal string.
+       *
+       * The googleapis client has already parsed the JSON, so a numeric cell is
+       * a JS number by the time it reaches here. `toString()` on it is lossless
+       * for every value the API can send — the loss §7 forbids would come from
+       * *arithmetic* on the float, and none is done: the string goes straight to
+       * a `numeric` column.
+       */
+      const money = (name: string): string | null => {
+        const value = at(name);
+        if (typeof value === "number") {
+          return Number.isFinite(value) ? value.toString() : null;
+        }
+        if (typeof value === "string" && value.trim() !== "") return value.trim();
+        return null;
+      };
       return {
         date: String(at("day") ?? ""),
         videoId: query.byVideo ? String(at("video") ?? "") || null : null,
@@ -883,6 +968,9 @@ export async function fetchAnalytics(
         watchTimeMinutes: num("estimatedMinutesWatched"),
         averageViewDurationSeconds: num("averageViewDuration"),
         averageViewPercentage: num("averageViewPercentage"),
+        estimatedRevenue: withRevenue ? money("estimatedRevenue") : null,
+        revenueRequested: withRevenue,
+        currency: withRevenue ? ANALYTICS_REVENUE_CURRENCY : null,
       };
     });
   } catch (error) {
@@ -1241,6 +1329,23 @@ export function translate(error: unknown, operation: string): AppError {
         "This channel has reached its daily upload limit. Try again tomorrow.",
         { retryable: false, cause: error },
       );
+    }
+    /**
+     * Insufficient scope, which is a *permanent* failure that no retry fixes and
+     * that must not be reported as a quota problem or as an absence of earnings.
+     *
+     * Separated out for the revenue path specifically: without this branch, a
+     * channel connected before the monetary scope existed would look
+     * rate-limited, the analytics job would back off and retry forever, and the
+     * dashboard would keep showing a pending state instead of "reconnect to see
+     * revenue" (Phase 9 §7, §13).
+     */
+    if (
+      reasons.includes("insufficientPermissions") ||
+      reasons.includes("forbidden") ||
+      /insufficient (authentication )?scope|insufficientPermissions/i.test(message)
+    ) {
+      return new ProviderScopeError("YouTube", message, error);
     }
     return new ProviderError("YouTube", message, {
       retryable: false,

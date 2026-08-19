@@ -6,10 +6,12 @@
  * the important part — anything Tally cannot know yet comes back as `null` so
  * the tile renders a dash instead of a fabricated figure (§42).
  *
- * Estimated revenue is deliberately `null` until Phase 9 wires YouTube Analytics
- * monetary metrics, which need the `yt-analytics-monetary.readonly` scope. A
- * revenue number Tally has not actually read from YouTube would be a lie, and
- * §42 forbids exactly that.
+ * Estimated revenue is read from the `analytics_snapshots` rows Phase 9's ingest
+ * writes — and is still `null` whenever nothing was actually read from YouTube.
+ * Earnings need the `yt-analytics-monetary.readonly` scope, which Tally does not
+ * request at consent, so the honest tile for most accounts says the access is
+ * missing rather than showing $0.00. `revenueSummary` distinguishes the reasons
+ * and the hint below names the one that applies (Phase 9 §7).
  */
 import { and, desc, eq, gte, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -20,6 +22,11 @@ import {
   publishedVideos,
   researchRuns,
 } from "@/lib/db/schema";
+import {
+  formatMoney,
+  revenueSummary,
+  type RevenueSummary,
+} from "@/lib/analytics/report";
 import { compact } from "@/lib/dashboard/format";
 import type { ProjectStatus } from "@/lib/projects/state-machine";
 import { isWorking } from "@/lib/projects/state-machine";
@@ -56,7 +63,7 @@ export interface OverviewData {
 export async function getOverview(userId: string): Promise<OverviewData> {
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  const [channelRows, viewRows, projectRows, latestRun, publishedRows] =
+  const [channelRows, viewRows, projectRows, latestRun, publishedRows, revenue] =
     await Promise.all([
       db
         .select({
@@ -115,6 +122,10 @@ export async function getOverview(userId: string): Promise<OverviewData> {
         .select({ count: sql<string>`count(*)` })
         .from(publishedVideos)
         .where(eq(publishedVideos.userId, userId)),
+
+      // Across every channel, over the same 7-day window as the views tile so the
+      // two tiles describe the same period.
+      revenueSummary(userId, { range: { start: since, end: new Date() } }),
     ]);
 
   const hasChannel = channelRows.length > 0;
@@ -150,18 +161,57 @@ export async function getOverview(userId: string): Promise<OverviewData> {
         ? "No analytics collected yet"
         : "Connect a channel",
     },
-    revenue: {
-      // Not guessed, not extrapolated. Requires YouTube Analytics monetary
-      // scope, which arrives in Phase 9.
-      value: null,
-      emptyHint: "Needs YouTube revenue access",
-    },
+    revenue: revenueStat(revenue, hasChannel),
     inProgress: projectRows.filter((p) => isWorking(p.status)),
     demandSeries: latestRun[0]?.demandSeries ?? null,
     demandNiche: latestRun[0]?.niche ?? null,
     publishedCount: Number(publishedRows[0]?.count ?? 0),
     hasChannel,
   };
+}
+
+/**
+ * The revenue tile, from stored snapshots (Phase 9 §7, §14).
+ *
+ * Never fabricates and never rounds absence to zero. When a figure exists it is
+ * formatted from the exact decimal string; when it does not, the hint says *why*,
+ * because "we cannot read your earnings" and "you earned nothing" are different
+ * facts and a dash with a vague label reads as the second.
+ *
+ * `delta` carries the estimate warning: YouTube revises recent earnings, so a
+ * provisional total is labelled rather than presented as settled.
+ */
+function revenueStat(revenue: RevenueSummary, hasChannel: boolean): OverviewStat {
+  if (!hasChannel) {
+    return { value: null, emptyHint: "Connect a channel" };
+  }
+
+  if (revenue.total.state !== "available" || revenue.total.value === null) {
+    return { value: null, emptyHint: revenueHint(revenue) };
+  }
+
+  return {
+    value: formatMoney(revenue.total.value, revenue.currency),
+    // An unsettled total says so, rather than looking like a final number.
+    delta: revenue.final ? "Final" : "Estimated — YouTube still revising",
+  };
+}
+
+/** Why there is no revenue figure, in the user's terms. */
+function revenueHint(revenue: RevenueSummary): string {
+  switch (revenue.state) {
+    case "scope_missing":
+      return "Reconnect the channel to grant revenue access";
+    case "not_monetized":
+      return "This channel is not monetised";
+    case "unavailable":
+      return "YouTube has not reported earnings for this period";
+    case "mixed":
+      return "Earnings span multiple currencies";
+    case "not_requested":
+    default:
+      return "Needs YouTube revenue access";
+  }
 }
 
 /** "2 rendering now" — the prototype's delta line, made truthful. */

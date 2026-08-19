@@ -27,6 +27,7 @@ export type ErrorCode =
   | "provider_out_of_credit"
   | "provider_rate_limited"
   | "provider_timeout"
+  | "provider_scope_missing"
   | "provider_failed"
   | "oauth_token_expired"
   | "oauth_reauth_required"
@@ -244,6 +245,40 @@ export class ProviderRateLimitError extends AppError {
       details: { provider, retryAfterSeconds },
       cause,
     });
+  }
+}
+
+/**
+ * The credential is valid but the grant does not cover this call.
+ *
+ * Separate from `ProviderAuthError` (the credential is bad), from
+ * `ProviderRateLimitError` (waiting helps) and from `ReauthRequiredError` (the
+ * token is dead). Here the token works fine for everything else — only this
+ * *operation* is outside what the user authorised, so the fix is a re-consent
+ * with an additional scope, and retrying is pointless.
+ *
+ * Added in Phase 9 for revenue: without it, a channel authorised without
+ * `yt-analytics-monetary.readonly` returns a 403 that looks like a quota error,
+ * and the analytics job would retry it indefinitely instead of reporting the
+ * permission state the dashboard needs to show.
+ */
+export class ProviderScopeError extends AppError {
+  readonly provider: string;
+
+  constructor(provider: string, message?: string, cause?: unknown) {
+    super({
+      code: "provider_scope_missing",
+      message:
+        message ??
+        `${provider} refused this request because the connected account has not ` +
+          `granted the required permission.`,
+      status: 403,
+      // Never retried: the grant will not change on its own.
+      retryable: false,
+      details: { provider },
+      cause,
+    });
+    this.provider = provider;
   }
 }
 
