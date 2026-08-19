@@ -13,7 +13,7 @@
  */
 import "server-only";
 import { cookies } from "next/headers";
-import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { sessions, users } from "@/lib/db/schema";
 import { generateToken, hashToken } from "@/lib/crypto";
@@ -180,22 +180,14 @@ export async function revokeAllSessions(userId: string): Promise<void> {
 }
 
 /**
- * Delete expired sessions, and revoked ones older than the grace period. Run by
- * the scheduler; sessions are high-churn and would otherwise grow without bound.
+ * Session pruning lives in `lib/auth/session-maintenance`, not here.
+ *
+ * It is the scheduler's job, and the scheduler is a plain Node process that cannot
+ * import this module at all: the `server-only` marker above is real — `cookies()`
+ * from `next/headers` only exists inside a request — and its runtime export
+ * throws. Keeping the prune here made `npm run scheduler` die at its first import.
  */
-export async function pruneSessions(): Promise<number> {
-  const revokedCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const deleted = await db
-    .delete(sessions)
-    .where(
-      or(
-        lt(sessions.expiresAt, new Date()),
-        lt(sessions.revokedAt, revokedCutoff),
-      ),
-    )
-    .returning({ id: sessions.id });
-  return deleted.length;
-}
+export { pruneSessions } from "@/lib/auth/session-maintenance";
 
 /** Cookie TTL, exported for tests. */
 export const sessionTtlMs = SESSION_TTL_MS;

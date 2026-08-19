@@ -202,6 +202,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
       userId,
       channelId,
       title: `Video ${youtubeVideoId}`,
+      maxVideosPerMonth: null,
     });
     const [published] = await db
       .insert(publishedVideos)

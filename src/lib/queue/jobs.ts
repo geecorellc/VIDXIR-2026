@@ -21,6 +21,7 @@ import {
   isAppError,
   isBlockingCode,
   userMessageOf,
+  withDatabaseErrors,
 } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { getQueue, type QueueName } from "@/lib/queue/queues";
@@ -168,27 +169,38 @@ export async function enqueue(input: EnqueueInput): Promise<EnqueuedJob> {
   return { id: row.id, queue: input.queue, name: input.name, status: "queued" };
 }
 
-/** Mark a job as started. Called by the worker, once per attempt. */
+/**
+ * Mark a job as started. Called by the worker, once per attempt.
+ *
+ * Classified (§14): this is one of the few places where "database failure" versus
+ * "internal error" changes what happens next. The worker's `shouldRetry()` treats
+ * an unclassified `Error` as retryable, so a dropped connection here already gets
+ * another attempt — but so does a permanent fault, which then burns the whole
+ * attempt budget before the operator sees anything. `withDatabaseErrors` makes the
+ * distinction explicit rather than accidental.
+ */
 export async function markJobRunning(
   jobId: string,
   attempt: number,
   statusMessage?: string,
 ): Promise<void> {
-  await db
-    .update(jobs)
-    .set({
-      status: "running",
-      attempt,
-      startedAt: new Date(),
-      // A retry must clear the previous attempt's error, or the UI shows a stale
-      // failure beside a running job.
-      error: null,
-      errorCode: null,
-      notConfiguredProvider: null,
-      ...(statusMessage === undefined ? {} : { statusMessage }),
-      updatedAt: new Date(),
-    })
-    .where(eq(jobs.id, jobId));
+  await withDatabaseErrors("mark job running", async () => {
+    await db
+      .update(jobs)
+      .set({
+        status: "running",
+        attempt,
+        startedAt: new Date(),
+        // A retry must clear the previous attempt's error, or the UI shows a stale
+        // failure beside a running job.
+        error: null,
+        errorCode: null,
+        notConfiguredProvider: null,
+        ...(statusMessage === undefined ? {} : { statusMessage }),
+        updatedAt: new Date(),
+      })
+      .where(eq(jobs.id, jobId));
+  });
 }
 
 /**
@@ -215,29 +227,39 @@ export async function reportProgress(
     .where(eq(jobs.id, jobId));
 }
 
-/** Mark a job succeeded, recording its result and duration. */
+/**
+ * Mark a job succeeded, recording its result and duration.
+ *
+ * Classified for the same reason as `markJobRunning`, with a sharper consequence:
+ * the handler's work is already done and its side effects are already committed, so
+ * a failure to record the success is the case where a retry duplicates real work.
+ * A transient fault should retry (the row is still `running`, and every handler is
+ * idempotent by §10); a permanent one should stop and be visible instead.
+ */
 export async function markJobSucceeded(
   jobId: string,
   result?: Record<string, unknown>,
   statusMessage?: string,
 ): Promise<void> {
   const finishedAt = new Date();
-  await db
-    .update(jobs)
-    .set({
-      status: "succeeded",
-      progress: 100,
-      result: result ?? {},
-      finishedAt,
-      // Computed in SQL so the duration reflects the stored start time rather
-      // than a timestamp this process happens to hold.
-      durationMs: sql`GREATEST(0, (EXTRACT(EPOCH FROM (${finishedAt.toISOString()}::timestamptz - COALESCE(${jobs.startedAt}, ${jobs.createdAt}))) * 1000)::int)`,
-      error: null,
-      errorCode: null,
-      ...(statusMessage === undefined ? {} : { statusMessage }),
-      updatedAt: finishedAt,
-    })
-    .where(eq(jobs.id, jobId));
+  await withDatabaseErrors("mark job succeeded", async () => {
+    await db
+      .update(jobs)
+      .set({
+        status: "succeeded",
+        progress: 100,
+        result: result ?? {},
+        finishedAt,
+        // Computed in SQL so the duration reflects the stored start time rather
+        // than a timestamp this process happens to hold.
+        durationMs: sql`GREATEST(0, (EXTRACT(EPOCH FROM (${finishedAt.toISOString()}::timestamptz - COALESCE(${jobs.startedAt}, ${jobs.createdAt}))) * 1000)::int)`,
+        error: null,
+        errorCode: null,
+        ...(statusMessage === undefined ? {} : { statusMessage }),
+        updatedAt: finishedAt,
+      })
+      .where(eq(jobs.id, jobId));
+  });
 }
 
 /**

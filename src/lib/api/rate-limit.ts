@@ -29,9 +29,39 @@ export interface RateLimitResult {
 }
 
 /**
- * Consume one unit against `key`. Uses INCR + EXPIRE, which is atomic enough for
- * a fixed window: the first request in a window creates the key and sets the TTL.
+ * The window counter, incremented and expired in one atomic step.
+ *
+ * An `INCR` followed by a separate `EXPIRE` is two round trips, and a process
+ * that dies between them (or a Redis failover that loses the second command)
+ * leaves a counter with no TTL. That key never resets, so the subject it belongs
+ * to is rate-limited permanently — on the auth rules, that is an account locked
+ * out of its own login by a cache hiccup.
+ *
+ * The script also returns the TTL, so the exhausted path no longer needs a third
+ * round trip, and `retryAfterSeconds` is read from the same atomic view of the
+ * key that produced the count.
+ *
+ * `PEXPIRE`/`PTTL` in milliseconds internally, converted at the boundary, so a
+ * request arriving in the final fractional second of a window reports 1 rather
+ * than 0 and never advertises a retry the window will still reject.
  */
+const WINDOW_SCRIPT = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  return {count, ARGV[1]}
+end
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl < 0 then
+  -- A key with no expiry cannot have come from this script. Repair it rather
+  -- than letting it accumulate forever.
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  ttl = ARGV[1]
+end
+return {count, ttl}
+`;
+
+/** Consume one unit against `key`, atomically. */
 export async function consume(
   rule: RateLimitRule,
   key: string,
@@ -40,18 +70,22 @@ export async function consume(
 
   try {
     const redis = getRedis();
-    const count = await redis.incr(redisKey);
-    if (count === 1) {
-      await redis.expire(redisKey, rule.windowSeconds);
-    }
+    const raw = (await redis.eval(
+      WINDOW_SCRIPT,
+      1,
+      redisKey,
+      String(rule.windowSeconds * 1000),
+    )) as [number, number | string];
+
+    const count = Number(raw[0]);
+    const ttlMs = Number(raw[1]);
+    const retryAfterSeconds =
+      Number.isFinite(ttlMs) && ttlMs > 0
+        ? Math.max(1, Math.ceil(ttlMs / 1000))
+        : rule.windowSeconds;
 
     if (count > rule.limit) {
-      const ttl = await redis.ttl(redisKey);
-      return {
-        allowed: false,
-        remaining: 0,
-        retryAfterSeconds: ttl > 0 ? ttl : rule.windowSeconds,
-      };
+      return { allowed: false, remaining: 0, retryAfterSeconds };
     }
 
     return {
@@ -109,5 +143,23 @@ export function rules() {
     research: { name: "research", limit: 10, windowSeconds: 10 * 60 },
     /** Read-heavy dashboard endpoints, keyed by user. */
     read: { name: "read", limit: 240, windowSeconds: 60 },
+    /**
+     * Authenticated writes that are not generation: settings, onboarding, channel
+     * mutations. Loose enough that no real UI interaction reaches it, tight enough
+     * that a scripted loop cannot hammer Postgres through an authenticated route.
+     */
+    mutation: { name: "mutation", limit: 60, windowSeconds: 60 },
+    /**
+     * OAuth connect and callback, keyed by user. Each round trip issues a signed
+     * state and a nonce cookie; a loop through it is both a Google-quota cost and
+     * a way to churn state cookies.
+     */
+    oauth: { name: "oauth", limit: 20, windowSeconds: 10 * 60 },
+    /**
+     * Stripe checkout and portal session creation, keyed by user. Every call is a
+     * live request to Stripe, so this rule bounds our own outbound spend as much
+     * as it bounds the caller.
+     */
+    billing: { name: "billing", limit: 10, windowSeconds: 10 * 60 },
   } satisfies Record<string, RateLimitRule>;
 }

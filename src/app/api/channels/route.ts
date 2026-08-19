@@ -8,6 +8,7 @@
  */
 import type { NextRequest } from "next/server";
 import { currentTier, handle, requireUser } from "@/lib/api/guard";
+import { enforce, rules } from "@/lib/api/rate-limit";
 import { listChannels } from "@/lib/channels/service";
 import { planByTier } from "@/lib/plans";
 import { capabilityStatus } from "@/lib/providers/config";
@@ -15,6 +16,7 @@ import { capabilityStatus } from "@/lib/providers/config";
 export async function GET(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireUser();
+    await enforce(rules().read, `channels:${user.id}`);
     const [channels, tier] = await Promise.all([
       listChannels(user.id),
       currentTier(user.id),

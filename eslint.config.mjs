@@ -60,15 +60,16 @@ const config = [
   },
 
   {
-    // Server-side entry points are allowed to log directly; the structured
-    // logger wraps console itself.
-    files: [
-      "src/lib/observability/**",
-      "src/lib/db/migrate.ts",
-      "src/worker/**",
-      "src/scheduler/**",
-      "scripts/**",
-    ],
+    /**
+     * Server-side entry points are allowed to log directly.
+     *
+     * These are the CLI-shaped surfaces: a migration runner and the verification
+     * scripts print a human-readable transcript to a terminal, which is not what
+     * the structured logger is for. Everything else — including `src/lib/logger`
+     * itself, which writes to `process.stdout`/`process.stderr` rather than through
+     * `console` — stays under the rule.
+     */
+    files: ["src/lib/db/migrate.ts", "src/worker/**", "src/scheduler/**", "scripts/**"],
     rules: { "no-console": "off" },
   },
 
@@ -123,6 +124,7 @@ const config = [
                 "@/lib/billing/*",
                 "@/lib/auth/*",
                 "@/lib/api/*",
+                "@/lib/health",
                 "**/lib/env",
                 "**/lib/db",
                 "**/lib/crypto",

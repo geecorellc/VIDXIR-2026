@@ -31,7 +31,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await enforce(rules().read, `billing:portal:${user.id}`);
+    /**
+     * The same bucket as checkout, and the `billing` rule rather than `read`.
+     *
+     * A portal session is not a read: it is a live Stripe API call that mints a
+     * short-lived authenticated URL. Sharing the bucket with checkout is deliberate
+     * — the thing worth bounding is this account's total outbound Stripe traffic,
+     * not each endpoint's separately.
+     */
+    await enforce(rules().billing, `billing:${user.id}`);
 
     const identity = await billingIdentity(user.id);
     if (!identity) throw new NotFoundError("Account not found.");

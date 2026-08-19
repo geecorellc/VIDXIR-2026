@@ -23,7 +23,10 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { channelId } = await params;
     const access = await requireChannelAccess(user.id, channelId);
 
-    await enforce(rules().read, user.id);
+    // `mutation`, not `read`: this spends YouTube Data API quota and writes the
+    // cached statistics back. The `read` ceiling of 240/minute is the right shape
+    // for a Postgres-only dashboard query and much too loose for an outbound call.
+    await enforce(rules().mutation, `refresh:${user.id}`);
 
     const channel = await refreshChannelStats(user.id, access.id);
     log.info("channel stats refreshed", {

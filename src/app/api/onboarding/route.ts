@@ -5,6 +5,7 @@
  */
 import type { NextRequest } from "next/server";
 import { handle, parseJson, requireUser } from "@/lib/api/guard";
+import { enforce, rules } from "@/lib/api/rate-limit";
 import { onboardingPatchSchema } from "@/lib/onboarding/config";
 import {
   complete,
@@ -16,6 +17,7 @@ import {
 export async function GET(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireUser();
+    await enforce(rules().read, `onboarding:${user.id}`);
     const profile = await getProfile(user.id);
     return {
       name: user.name,
@@ -30,6 +32,7 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireUser();
+    await enforce(rules().mutation, `onboarding:${user.id}`);
     const patch = await parseJson(request, onboardingPatchSchema);
     const profile = await saveStep(user.id, patch);
     return { profile, missing: missingFields(profile) };
@@ -39,6 +42,7 @@ export async function PATCH(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return handle(request, async () => {
     const { user, log } = await requireUser();
+    await enforce(rules().mutation, `onboarding:${user.id}`);
     await complete(user.id);
     log.info("onboarding finished");
     // The next step is connecting a channel (§46), which happens on the

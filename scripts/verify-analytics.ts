@@ -600,6 +600,9 @@ async function main(): Promise<void> {
         userId: tenant.userId,
         channelId: tenant.channelId,
         title: "verify-analytics probe project",
+        // Unlimited: the probe is not testing plan enforcement, and a limit here
+        // would make this script fail once the probe tenant's month filled up.
+        maxVideosPerMonth: null,
       });
 
       const [published] = await db

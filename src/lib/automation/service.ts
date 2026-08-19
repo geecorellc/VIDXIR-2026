@@ -43,7 +43,7 @@ import {
 import { isAppError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { assertCanStartVideo, currentTier } from "@/lib/plans/enforce";
-import type { PlanTier } from "@/lib/plans";
+import { planByTier, type PlanTier } from "@/lib/plans";
 import { createProject } from "@/lib/projects/service";
 import { hasActiveJob } from "@/lib/queue/jobs";
 import { SCRIPT_JOB_NAME, startScriptGeneration } from "@/lib/scripts/service";
@@ -347,14 +347,40 @@ async function startVideoFor(
 ): Promise<ChannelRunOutcome> {
   const preferred = await preferredLength(candidate.userId, candidate.channelId);
 
-  const project = await createProject({
-    userId: candidate.userId,
-    channelId: candidate.channelId,
-    title: idea.title,
-    ideaId: idea.id,
-    origin: "automation",
-    targetDurationSeconds: preferred,
-  });
+  let project;
+  try {
+    project = await createProject({
+      userId: candidate.userId,
+      channelId: candidate.channelId,
+      title: idea.title,
+      ideaId: idea.id,
+      origin: "automation",
+      targetDurationSeconds: preferred,
+      // Enforced atomically inside the transaction. It matters more here than on
+      // the manual path: automation for several channels of one user can tick
+      // simultaneously, so the pre-check above is genuinely racy (§13).
+      maxVideosPerMonth: planByTier(tier).maxVideosPerMonth,
+    });
+  } catch (error) {
+    /**
+     * The atomic claim refused. Reachable when two of this user's channels fire
+     * on the same tick and the last allowance slot goes to the other one — the
+     * pre-check above passed for both.
+     *
+     * Reported as a skip, matching the pre-check's own handling: an exhausted
+     * allowance is a state, not a fault, and counting it as `failed` would make
+     * the pass metrics say something broke when nothing did.
+     */
+    if (isAppError(error) && error.code === "plan_limit_reached") {
+      log.info("automation skipped: allowance claimed by a concurrent start", {
+        userId: candidate.userId,
+        channelId: candidate.channelId,
+        tier,
+      });
+      return { started: false, reason: "plan_limit_reached" };
+    }
+    throw error;
+  }
 
   try {
     const { jobId } = await startScriptGeneration({

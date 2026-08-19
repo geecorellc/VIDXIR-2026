@@ -15,7 +15,11 @@ import {
   projects,
   usageCounters,
 } from "@/lib/db/schema";
-import { ForbiddenError, InvalidStateTransitionError } from "@/lib/errors";
+import {
+  ForbiddenError,
+  InvalidStateTransitionError,
+  PlanLimitError,
+} from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { newTraceId } from "@/lib/logger";
 import { PIPELINE_STAGES, type PipelineStage } from "@/lib/stages";
@@ -179,14 +183,25 @@ export interface CreateProjectInput {
   ideaId?: string | null;
   origin?: "manual" | "automation";
   targetDurationSeconds?: number | null;
+  /**
+   * The plan's monthly video allowance, or null for unlimited.
+   *
+   * Passed in rather than resolved here so this module does not depend on plan
+   * enforcement — but supplied by every caller, because it is what makes the
+   * counter increment below atomic against the limit. See the note on the upsert.
+   */
+  maxVideosPerMonth: number | null;
 }
 
 /**
  * Create a project in the IDEA state and increment the month's usage counter in
  * the same transaction, so the quota reflects work actually started.
  *
- * Plan limits are checked by the caller (`assertCanStartVideo`) before this runs;
- * the counter here is the record, not the gate.
+ * The caller still runs `assertCanStartVideo` first — that is what produces the
+ * useful error before any work is done, and it reads the same counter. But that
+ * check is a read→decision→write, and two simultaneous starts both pass it (§13).
+ * So the increment here carries the limit as a predicate and is the actual gate:
+ * the caller's check is the good error message, this one is the guarantee.
  */
 export async function createProject(
   input: CreateProjectInput,
@@ -195,6 +210,49 @@ export async function createProject(
   const period = currentPeriod();
 
   const created = await db.transaction(async (tx) => {
+    /**
+     * Claim the month's quota slot first, conditionally (§13).
+     *
+     * Ordered before the project insert so a refusal costs nothing: the
+     * transaction rolls back having written no row and no event.
+     *
+     * `setWhere` makes the UPDATE branch of the upsert conditional on the stored
+     * count still being below the allowance. Under two concurrent starts at the
+     * boundary, both transactions contend on the same `(userId, period)` row — the
+     * second blocks on the first's lock, re-evaluates the predicate against the
+     * *committed* value, and its update matches nothing. `returning` is then
+     * empty, which is how the loser learns it lost.
+     *
+     * This is the same shape as the automation slot claim: a compare-and-swap
+     * predicate inside the write, rather than a check before it.
+     */
+    if (input.maxVideosPerMonth !== null) {
+      const claimed = await tx
+        .insert(usageCounters)
+        .values({ userId: input.userId, period, videosStarted: 1 })
+        .onConflictDoUpdate({
+          target: [usageCounters.userId, usageCounters.period],
+          set: {
+            videosStarted: sql`${usageCounters.videosStarted} + 1`,
+            updatedAt: new Date(),
+          },
+          setWhere: sql`${usageCounters.videosStarted} < ${input.maxVideosPerMonth}`,
+        })
+        .returning({ videosStarted: usageCounters.videosStarted });
+
+      if (!claimed[0]) {
+        throw new PlanLimitError(
+          `Your plan includes ${input.maxVideosPerMonth} videos a month and you have used all of them. Upgrade for unlimited videos.`,
+          {
+            limit: input.maxVideosPerMonth,
+            used: input.maxVideosPerMonth,
+            tier: "unknown",
+            resource: "videos",
+          },
+        );
+      }
+    }
+
     const [row] = await tx
       .insert(projects)
       .values({
@@ -219,16 +277,20 @@ export async function createProject(
       message: `Project created from ${input.origin ?? "manual"} trigger`,
     });
 
-    await tx
-      .insert(usageCounters)
-      .values({ userId: input.userId, period, videosStarted: 1 })
-      .onConflictDoUpdate({
-        target: [usageCounters.userId, usageCounters.period],
-        set: {
-          videosStarted: sql`${usageCounters.videosStarted} + 1`,
-          updatedAt: new Date(),
-        },
-      });
+    // Unlimited plans still need the counter maintained — the dashboard reports
+    // it, and a tier change must not start the month over — but with no predicate.
+    if (input.maxVideosPerMonth === null) {
+      await tx
+        .insert(usageCounters)
+        .values({ userId: input.userId, period, videosStarted: 1 })
+        .onConflictDoUpdate({
+          target: [usageCounters.userId, usageCounters.period],
+          set: {
+            videosStarted: sql`${usageCounters.videosStarted} + 1`,
+            updatedAt: new Date(),
+          },
+        });
+    }
 
     // Mark the source idea as used so research does not re-offer it.
     if (input.ideaId) {

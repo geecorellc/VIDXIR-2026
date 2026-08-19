@@ -58,6 +58,7 @@ suite("project lifecycle (integration)", () => {
       userId: user.id,
       channelId,
       title: "Lifecycle project",
+      maxVideosPerMonth: null,
     });
     return { user, channelId, project };
   }
@@ -98,7 +99,12 @@ suite("project lifecycle (integration)", () => {
       );
 
       const { user, channelId } = await newProject("counter@tally.test");
-      await createProject({ userId: user.id, channelId, title: "Second" });
+      await createProject({
+        userId: user.id,
+        channelId,
+        title: "Second",
+        maxVideosPerMonth: null,
+      });
 
       const [counter] = await db
         .select({

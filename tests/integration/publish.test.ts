@@ -167,6 +167,7 @@ suite("youtube publishing (integration)", () => {
       userId: user.id,
       channelId,
       title: "Budget smart home sensors",
+      maxVideosPerMonth: null,
     });
 
     for (const [status, stage] of [
@@ -1146,6 +1147,7 @@ suite("youtube publishing (integration)", () => {
         userId: first.user.id,
         channelId: first.channelId,
         title: "A second video",
+        maxVideosPerMonth: null,
       });
       for (const [status, stage] of [
         ["SCRIPT_GENERATING", "SCRIPT"],

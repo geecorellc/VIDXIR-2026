@@ -9,6 +9,7 @@
  */
 import type { NextRequest } from "next/server";
 import { handle, requireChannelAccess, requireUser } from "@/lib/api/guard";
+import { enforce, rules } from "@/lib/api/rate-limit";
 import { disconnectChannel, getChannel } from "@/lib/channels/service";
 import { NotFoundError } from "@/lib/errors";
 
@@ -19,6 +20,7 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   return handle(request, async () => {
     const { user } = await requireUser();
+    await enforce(rules().read, `channel:${user.id}`);
     const { channelId } = await params;
     const access = await requireChannelAccess(user.id, channelId);
     const channel = await getChannel(user.id, access.id);
@@ -30,6 +32,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   return handle(request, async () => {
     const { user, log } = await requireUser();
+    // Disconnect revokes a grant at Google and erases stored tokens. Bounded so a
+    // loop cannot churn revocations against Google's API through one session.
+    await enforce(rules().mutation, `channel:${user.id}`);
     const { channelId } = await params;
     const access = await requireChannelAccess(user.id, channelId);
 

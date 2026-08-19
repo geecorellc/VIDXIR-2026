@@ -93,18 +93,20 @@ export async function signup(input: SignupInput): Promise<{ userId: string }> {
 
   const passwordHash = await hashPassword(input.password);
 
-  const existing = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.emailNormalized, email))
-    .limit(1);
-
-  if (existing.length > 0) {
-    // Deliberately generic — does not confirm the address is registered beyond
-    // what the signup form already implies.
-    throw new ConflictError("That email cannot be used to sign up.");
-  }
-
+  /**
+   * Insert first and let the unique index decide (§13).
+   *
+   * A SELECT-then-INSERT is a read→decision→write over a value the caller
+   * supplies, and two simultaneous signups for the same address both pass the
+   * SELECT. The loser then hits `users_email_normalized_key` inside the
+   * transaction and surfaces as an unhandled unique violation — a 500 exposing
+   * that the address is taken, when the whole point of the generic message above
+   * is not to confirm that.
+   *
+   * `onConflictDoNothing` makes the index itself the arbiter: exactly one inserter
+   * gets a row back, and an empty `returning` is the conflict. The database
+   * already had the constraint; this just stops racing it.
+   */
   const userId = await db.transaction(async (tx) => {
     const inserted = await tx
       .insert(users)
@@ -114,10 +116,15 @@ export async function signup(input: SignupInput): Promise<{ userId: string }> {
         passwordHash,
         name,
       })
+      .onConflictDoNothing({ target: users.emailNormalized })
       .returning({ id: users.id });
 
     const created = inserted[0];
-    if (!created) throw new Error("Failed to create user");
+    if (!created) {
+      // Deliberately generic — does not confirm the address is registered beyond
+      // what the signup form already implies.
+      throw new ConflictError("That email cannot be used to sign up.");
+    }
 
     await tx.insert(subscriptions).values({
       userId: created.id,

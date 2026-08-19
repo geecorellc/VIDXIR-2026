@@ -17,6 +17,7 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { requireUser } from "@/lib/api/guard";
+import { consume, rules } from "@/lib/api/rate-limit";
 import { connectChannel } from "@/lib/channels/service";
 import { consumeOAuthState, safeReturnTo } from "@/lib/channels/oauth-state";
 import { isAppError } from "@/lib/errors";
@@ -34,6 +35,7 @@ type CallbackOutcome =
   | "invalid_state"
   | "wrong_account"
   | "not_configured"
+  | "rate_limited"
   | "error";
 
 function finish(
@@ -75,6 +77,24 @@ export async function GET(request: NextRequest) {
       reason: isAppError(error) ? error.code : "unknown",
     });
     return finish(request, fallback, "invalid_state");
+  }
+
+  /**
+   * Bounded *after* the state is consumed, not before.
+   *
+   * The nonce must burn on every reachable path — that is what makes the state
+   * single-use — so a refusal here must not be able to skip it. And a request that
+   * gets this far already carried a valid HMAC and a matching cookie, so the
+   * cheap-to-reject cases are behind us; what remains is the token exchange and a
+   * YouTube read, which is the cost worth limiting.
+   *
+   * `consume` rather than `enforce`: this route answers with redirects, and a
+   * thrown RateLimitedError would render as a JSON body in the address bar.
+   */
+  const limit = await consume(rules().oauth, `oauth:${userId}`);
+  if (!limit.allowed) {
+    log.warn("oauth callback rate limited", { userId });
+    return finish(request, intent.returnTo, "rate_limited");
   }
 
   const googleError = params.get("error");

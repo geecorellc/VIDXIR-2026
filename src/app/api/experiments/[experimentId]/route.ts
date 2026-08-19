@@ -64,7 +64,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     assertUuid(experimentId, "experimentId");
 
     const body = await parseJson(request, PatchSchema);
-    await enforce(rules().read, `experiments:${user.id}`);
+    await enforce(rules().mutation, `experiments:${user.id}`);
 
     const experiment =
       body.action === "start"

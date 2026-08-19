@@ -240,6 +240,7 @@ suite("video pipeline (integration)", () => {
       userId: user.id,
       channelId,
       title: "Budget smart home sensors",
+      maxVideosPerMonth: null,
     });
 
     await persistScriptVersion({
@@ -569,6 +570,7 @@ suite("video pipeline (integration)", () => {
         userId: user.id,
         channelId,
         title: "Never approved",
+        maxVideosPerMonth: null,
       });
 
       await persistScriptVersion({

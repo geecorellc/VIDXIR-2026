@@ -49,6 +49,18 @@ const schema = z.object({
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
+  /** Server-side per-statement ceiling, in milliseconds. See `lib/db`. */
+  DATABASE_STATEMENT_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15_000),
+  /** Ceiling on an idle open transaction, in milliseconds. See `lib/db`. */
+  DATABASE_IDLE_TX_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30_000),
 
   REDIS_URL: z.string().min(1, "REDIS_URL is required"),
   QUEUE_PREFIX: z.string().default("tally"),
@@ -134,6 +146,29 @@ const schema = z.object({
     .positive()
     .default(20),
 
+  /**
+   * Number of proxy hops in front of this instance, for `clientIp()`.
+   *
+   * `X-Forwarded-For` is client-appendable: a request can arrive carrying a
+   * fabricated header, and the platform proxy *appends* the real peer rather than
+   * replacing the list. So the trustworthy entry is the Nth from the right, where
+   * N is the number of proxies that are actually in the path. Default 0 means
+   * "no proxy" and the header is ignored entirely, which is the safe default for
+   * a direct-to-Node deployment; behind one load balancer, set 1.
+   */
+  TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).default(0),
+
+  /**
+   * Optional shared token gating the *detail* in the readiness response (§16).
+   *
+   * The readiness verdict is always public — an orchestrator probe cannot log in,
+   * and a probe that cannot get an answer is useless. The per-dependency breakdown
+   * is operational detail, so in production it is shown only to a caller
+   * presenting this token. Unset in development, where the breakdown is what makes
+   * the endpoint worth calling.
+   */
+  HEALTH_PROBE_TOKEN: z.string().optional(),
+
   LOG_LEVEL: z
     .enum(["trace", "debug", "info", "warn", "error"])
     .default("info"),
@@ -171,6 +206,45 @@ function load(): Env {
       throw new Error(
         "EMAIL_PROVIDER=console only prints emails to stdout. " +
           "Configure a real email provider in production.",
+      );
+    }
+
+    /**
+     * §17: Stripe live configuration must be explicit, never inferred.
+     *
+     * `BILLING_PROVIDER=stripe` with a missing key would boot fine and fail at the
+     * first checkout — and, worse, a missing webhook secret means signature
+     * verification has nothing to verify against, so subscription state would
+     * silently stop tracking reality. Both are startup errors instead.
+     */
+    if (env.BILLING_PROVIDER === "stripe") {
+      const missing = (
+        [
+          ["STRIPE_SECRET_KEY", env.STRIPE_SECRET_KEY],
+          ["STRIPE_WEBHOOK_SECRET", env.STRIPE_WEBHOOK_SECRET],
+        ] as const
+      )
+        .filter(([, value]) => !value)
+        .map(([name]) => name);
+      if (missing.length > 0) {
+        throw new Error(
+          `BILLING_PROVIDER=stripe requires ${missing.join(" and ")}. ` +
+            `Stripe live configuration must be explicit, not inferred.`,
+        );
+      }
+    }
+
+    /**
+     * Cookies are issued with `secure: true` in production (see `auth/session`),
+     * and a browser will not return a Secure cookie over http — so an http
+     * APP_URL in production produces a login flow that appears to work and never
+     * establishes a session. It also means OAuth state and session tokens would
+     * cross the network in clear text.
+     */
+    if (env.APP_URL.startsWith("http://")) {
+      throw new Error(
+        "APP_URL must use https in production. Session and OAuth cookies are " +
+          "issued as Secure and will not be sent over http.",
       );
     }
   }

@@ -11,6 +11,7 @@
  */
 import type { NextRequest } from "next/server";
 import { handle, requireUser } from "@/lib/api/guard";
+import { enforce, rules } from "@/lib/api/rate-limit";
 import { blockingMisconfigurations, providerStatuses } from "@/lib/providers/config";
 import { realPublishBlocked, usingMockProviders } from "@/lib/env";
 
@@ -18,7 +19,10 @@ export async function GET(request: NextRequest) {
   return handle(request, async () => {
     // Authenticated: the list of missing credentials is operational detail that
     // should not be public, even though it contains no secrets.
-    await requireUser();
+    const { user } = await requireUser();
+    // Bounded for the same reason it is authenticated — which capabilities are
+    // unconfigured is reconnaissance, and it should not be enumerable at speed.
+    await enforce(rules().read, `providers:${user.id}`);
 
     return {
       capabilities: providerStatuses(),

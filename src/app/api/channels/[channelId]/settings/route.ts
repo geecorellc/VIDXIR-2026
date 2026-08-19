@@ -14,6 +14,7 @@ import {
   requireChannelAccess,
   requireUser,
 } from "@/lib/api/guard";
+import { enforce, rules } from "@/lib/api/rate-limit";
 import { channelUpdateSchema } from "@/lib/settings/config";
 import {
   getChannelConfig,
@@ -29,6 +30,7 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   return handle(request, async () => {
     const { user } = await requireUser();
+    await enforce(rules().read, `settings:${user.id}`);
     const { channelId } = await params;
     const channel = await requireChannelAccess(user.id, channelId);
     const config = await getChannelConfig(user.id, channel.id);
@@ -39,6 +41,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   return handle(request, async () => {
     const { user, log } = await requireUser();
+    // Up to three writes plus a re-read per call, and `updateAutomation` clears
+    // `next_run_at` — a loop here would keep resetting the automation schedule.
+    await enforce(rules().mutation, `settings:${user.id}`);
     const { channelId } = await params;
     const channel = await requireChannelAccess(user.id, channelId);
     const body = await parseJson(request, channelUpdateSchema);

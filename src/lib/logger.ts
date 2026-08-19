@@ -39,14 +39,73 @@ export interface LogContext {
 const REDACT_PATTERN =
   /(password|secret|token|apikey|api_key|authorization|cookie|credential|refresh|access_key)/i;
 
+/**
+ * Credential shapes that appear *inside* string values (§15).
+ *
+ * Key-name redaction only catches a secret that arrived as its own field. The
+ * ways a credential actually reaches a log line are messier: a provider error
+ * message that quotes the request URL, an OAuth redirect carrying
+ * `?access_token=`, an `Authorization: Bearer` header echoed back in a 401 body.
+ * Each of those is a string value under an innocent key like `message` or `url`,
+ * and the key-name pass sees nothing wrong with it.
+ *
+ * These patterns are recognisable prefixes rather than a general entropy test —
+ * a heuristic that scrubbed any long random-looking string would also scrub the
+ * UUIDs that every correlation field is made of, and destroy the traceability
+ * §15 is asking for.
+ */
+const VALUE_PATTERNS: readonly RegExp[] = [
+  // Query/form parameters that name a credential, e.g. `?access_token=ya29...`.
+  /\b(access_token|refresh_token|id_token|client_secret|api_key|apikey|password)=[^&\s"']+/gi,
+  // `Authorization: Bearer <token>` and bare `Bearer <token>`.
+  /\bBearer\s+[A-Za-z0-9._~+/-]{8,}=*/gi,
+  // `Basic <base64>` credentials.
+  /\bBasic\s+[A-Za-z0-9+/]{8,}=*/gi,
+  // Provider key prefixes: Stripe (live/test secret, restricted, webhook),
+  // OpenAI/Anthropic/Deepgram-style `sk-`, Google OAuth refresh tokens, and JWTs.
+  /\b(?:sk_live|sk_test|rk_live|rk_test|whsec)_[A-Za-z0-9]{8,}/g,
+  /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\bya29\.[A-Za-z0-9._-]{8,}/g,
+  /\b1\/\/[A-Za-z0-9._-]{16,}/g,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g,
+  // Credentials embedded in a URL's userinfo, e.g. `postgres://user:pw@host`.
+  /\b([a-z][a-z0-9+.-]*):\/\/[^/\s:@]+:[^/\s@]+@/gi,
+];
+
+/**
+ * Scrub credential shapes out of a string, preserving the surrounding text so
+ * the message remains diagnosable.
+ */
+export function redactValue(value: string): string {
+  let out = value;
+  for (const pattern of VALUE_PATTERNS) {
+    out = out.replace(pattern, (match) => {
+      // Keep the part that identifies *what* was redacted where it is a
+      // name=value or scheme://user: shape, and drop the credential itself.
+      const named = /^([A-Za-z_]+)=/.exec(match);
+      if (named) return `${named[1]}=[redacted]`;
+      const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(match);
+      if (scheme) return `${scheme[1]}://[redacted]@`;
+      const prefix = /^(Bearer|Basic)\s/i.exec(match);
+      if (prefix) return `${prefix[1]} [redacted]`;
+      return "[redacted]";
+    });
+  }
+  return out;
+}
+
 function redact(value: unknown, depth = 0): unknown {
   if (depth > 4) return "[depth-limit]";
   if (value === null || value === undefined) return value;
+  if (typeof value === "string") return redactValue(value);
   if (value instanceof Error) {
     return {
       name: value.name,
-      message: value.message,
-      stack: value.stack,
+      message: redactValue(value.message),
+      // Stacks are kept — they are the diagnostic §14 wants in logs and never in
+      // a response — but a stack frame can quote an argument, so it is scrubbed
+      // on the same terms as any other string.
+      stack: value.stack ? redactValue(value.stack) : value.stack,
       // Preserve provider error codes attached by our own error classes.
       ...("code" in value ? { code: (value as { code?: unknown }).code } : {}),
     };
@@ -107,13 +166,16 @@ function emit(level: LogLevel, message: string, context: LogContext): void {
   if (LEVEL_ORDER[level] < LEVEL_ORDER[configuredLevel()]) return;
 
   const payload = redact(context) as Record<string, unknown>;
+  // Messages are literals at almost every call site, but not all — a few
+  // interpolate a provider detail — so they go through the same scrub.
+  const safeMessage = redactValue(message);
   const toStderr = LEVEL_ORDER[level] >= LEVEL_ORDER.warn;
   const line = prettyFormat()
-    ? formatPretty(level, message, payload)
+    ? formatPretty(level, safeMessage, payload)
     : JSON.stringify({
         ts: new Date().toISOString(),
         level,
-        msg: message,
+        msg: safeMessage,
         ...payload,
       });
 

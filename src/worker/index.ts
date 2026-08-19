@@ -21,6 +21,7 @@
 import "@/lib/load-env";
 import { Worker, type Job } from "bullmq";
 import { closeDb } from "@/lib/db";
+import { readiness } from "@/lib/health";
 import { logger } from "@/lib/logger";
 import { closeQueues, workerQueueOptions, type QueueName } from "@/lib/queue/queues";
 import { closeRedis, workerConnection } from "@/lib/queue/redis";
@@ -84,8 +85,75 @@ async function shutdown(signal: string): Promise<void> {
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("SIGINT", () => void shutdown("SIGINT"));
 
-process.on("unhandledRejection", (reason) => {
-  log.error("unhandled rejection in worker", { error: reason });
+/**
+ * Crash visibility (§15, §22).
+ *
+ * An uncaught exception exits, and does so through the logger rather than Node's
+ * default stderr dump — which would bypass redaction and produce a line no log
+ * aggregator can parse. Exiting is deliberate: after an uncaught throw the
+ * process state is unknown, and a worker that keeps pulling jobs in an unknown
+ * state fails them one by one until the retry limits are gone. Better to die and
+ * be restarted; BullMQ returns the in-flight job to the queue when the lock
+ * lapses, and the durable `jobs` row means nothing disappears.
+ *
+ * `close(true)` forces, unlike the graceful path: the state that made this
+ * unsafe to continue also makes it unsafe to wait.
+ */
+process.on("uncaughtException", (error) => {
+  log.error("uncaught exception in worker, exiting", { error });
+  void Promise.allSettled(workers.map((w) => w.close(true))).finally(() => {
+    process.exit(1);
+  });
 });
 
-start();
+process.on("unhandledRejection", (reason) => {
+  log.error("unhandled rejection in worker, exiting", {
+    error: reason instanceof Error ? reason : new Error(String(reason)),
+  });
+  void Promise.allSettled(workers.map((w) => w.close(true))).finally(() => {
+    process.exit(1);
+  });
+});
+
+/**
+ * Dependency preflight before consuming anything (§10, §16, §22).
+ *
+ * Without this the worker starts happily against an unreachable Postgres and
+ * discovers it one job at a time — each job leaving a `failed` row and burning an
+ * attempt, so a dependency outage that lasted a minute arrives as a batch of
+ * permanently-failed work an operator has to find and requeue by hand. Checking
+ * once at boot turns that into a single legible log line.
+ *
+ * `worker` mode is the right question here: unlike the web tier, this process
+ * cannot do anything at all without both Redis and Postgres, so Redis counts as a
+ * hard failure rather than a degradation.
+ *
+ * Not fatal. A supervisor restarting a worker into an outage produces a crash
+ * loop, and BullMQ's own reconnect handles a Redis blip better than a restart
+ * does — so this reports loudly and starts anyway, having made the cause visible.
+ */
+async function preflight(): Promise<void> {
+  try {
+    const report = await readiness("worker");
+    if (report.status === "ready") {
+      log.info("worker preflight ok", { mode: report.mode });
+      return;
+    }
+    log.error("worker preflight not ready — starting anyway", {
+      mode: report.mode,
+      // Names and statuses only; `detail` strings name capabilities and unset
+      // variables, never values.
+      checks: report.checks
+        .filter((check) => check.status !== "ok")
+        .map((check) => `${check.name}=${check.status}`),
+    });
+  } catch (error) {
+    // `readiness()` itself throwing means `env()` rejected the configuration,
+    // which is worth surfacing before the first job rather than inside it.
+    log.error("worker preflight failed", { error });
+  }
+}
+
+void preflight().finally(() => {
+  start();
+});

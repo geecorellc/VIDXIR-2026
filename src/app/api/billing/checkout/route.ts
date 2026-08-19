@@ -44,9 +44,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Keyed by user: checkout creates a Stripe customer on first use, and an
-    // unbounded loop here would fill an account with orphaned customers.
-    await enforce(rules().generation, `billing:checkout:${user.id}`);
+    /**
+     * Keyed by user: checkout creates a Stripe customer on first use, and an
+     * unbounded loop here would fill an account with orphaned customers.
+     *
+     * The `billing` rule rather than `generation`. `generation` is tuned for
+     * provider-credit spend inside our own pipeline and is per-minute; every call
+     * here is an outbound request to Stripe, and 10 per ten minutes is already far
+     * more checkouts than any real user starts.
+     */
+    await enforce(rules().billing, `billing:${user.id}`);
 
     const identity = await billingIdentity(user.id);
     if (!identity) throw new NotFoundError("Account not found.");

@@ -46,6 +46,9 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireOnboarded();
+    // Activating a version clears the previous approval, so this is a real state
+    // change rather than a read.
+    await enforce(rules().mutation, `scripts:${user.id}`);
     const { projectId, versionId } = await parseJson(request, PatchSchema);
 
     await requireProjectAccess(user.id, projectId);

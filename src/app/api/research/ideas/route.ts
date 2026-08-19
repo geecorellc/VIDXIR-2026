@@ -21,6 +21,7 @@ import {
   requireChannelAccess,
   requireOnboarded,
 } from "@/lib/api/guard";
+import { enforce, rules } from "@/lib/api/rate-limit";
 import { db } from "@/lib/db";
 import { ideas, researchResults } from "@/lib/db/schema";
 import { NotFoundError } from "@/lib/errors";
@@ -48,6 +49,8 @@ interface SourceView {
 export async function GET(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireOnboarded();
+    // Two queries, the second an IN over up to a few hundred source ids.
+    await enforce(rules().read, `ideas:${user.id}`);
     const query = parseQuery(request, QuerySchema);
 
     await requireChannelAccess(user.id, query.channelId);
@@ -150,6 +153,7 @@ const PatchSchema = z.object({
 export async function PATCH(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireOnboarded();
+    await enforce(rules().mutation, `ideas:${user.id}`);
     const body = await parseJson(request, PatchSchema);
 
     assertUuid(body.ideaId, "ideaId");

@@ -44,6 +44,7 @@ suite("tenant isolation (integration)", () => {
         userId: owner.id,
         channelId,
         title: "Owner's video",
+        maxVideosPerMonth: null,
       });
 
       // The owner sees it.
@@ -67,9 +68,24 @@ suite("tenant isolation (integration)", () => {
       const ownerChannel = await createChannel(owner.id);
       const otherChannel = await createChannel(other.id);
 
-      await createProject({ userId: owner.id, channelId: ownerChannel, title: "A" });
-      await createProject({ userId: owner.id, channelId: ownerChannel, title: "B" });
-      await createProject({ userId: other.id, channelId: otherChannel, title: "C" });
+      await createProject({
+        userId: owner.id,
+        channelId: ownerChannel,
+        title: "A",
+        maxVideosPerMonth: null,
+      });
+      await createProject({
+        userId: owner.id,
+        channelId: ownerChannel,
+        title: "B",
+        maxVideosPerMonth: null,
+      });
+      await createProject({
+        userId: other.id,
+        channelId: otherChannel,
+        title: "C",
+        maxVideosPerMonth: null,
+      });
 
       const ownerProjects = await listProjects(owner.id);
       const otherProjects = await listProjects(other.id);
@@ -89,6 +105,7 @@ suite("tenant isolation (integration)", () => {
         userId: owner.id,
         channelId,
         title: "Not yours",
+        maxVideosPerMonth: null,
       });
 
       await expect(
@@ -111,6 +128,7 @@ suite("tenant isolation (integration)", () => {
         userId: owner.id,
         channelId,
         title: "Progress",
+        maxVideosPerMonth: null,
       });
 
       // `setProgress` is a blind UPDATE, so it cannot throw — the predicate has
@@ -316,6 +334,7 @@ suite("plan enforcement (integration)", () => {
           userId: user.id,
           channelId,
           title: `Video ${i + 1}`,
+          maxVideosPerMonth: 4,
         });
       }
 
@@ -338,8 +357,18 @@ suite("plan enforcement (integration)", () => {
 
       const user = await createUser({ email: "usage@tally.test" });
       const channelId = await createChannel(user.id);
-      await createProject({ userId: user.id, channelId, title: "One" });
-      await createProject({ userId: user.id, channelId, title: "Two" });
+      await createProject({
+        userId: user.id,
+        channelId,
+        title: "One",
+        maxVideosPerMonth: null,
+      });
+      await createProject({
+        userId: user.id,
+        channelId,
+        title: "Two",
+        maxVideosPerMonth: null,
+      });
 
       const entitlements = await entitlementsFor(user.id, "starter");
       expect(entitlements.usage.videosStartedThisMonth).toBe(2);

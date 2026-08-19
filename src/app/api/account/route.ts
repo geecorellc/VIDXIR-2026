@@ -8,6 +8,7 @@
 import type { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { handle, parseJson, requireUser } from "@/lib/api/guard";
+import { enforce, rules } from "@/lib/api/rate-limit";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { accountPatchSchema } from "@/lib/settings/config";
@@ -15,6 +16,9 @@ import { accountPatchSchema } from "@/lib/settings/config";
 export async function PATCH(request: NextRequest) {
   return handle(request, async () => {
     const { user, log } = await requireUser();
+    // An authenticated write. Bounded so a scripted loop cannot drive unlimited
+    // UPDATEs through a valid session (§34).
+    await enforce(rules().mutation, `account:${user.id}`);
     const patch = await parseJson(request, accountPatchSchema);
 
     if (patch.name !== undefined) {

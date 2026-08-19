@@ -608,17 +608,19 @@ Integration runs use their own Redis namespace (`QUEUE_PREFIX=tally-test`, set i
 into the development namespace and then truncates the `jobs` rows they point at,
 so a developer's worker wakes up to hundreds of jobs it can never complete.
 
-### Two things the test suite cannot check
+### What the test suite cannot check
 
 Both of these hid real defects behind a green run, so they have their own
 verification scripts. Neither is a substitute for the suite; they cover the gap
 the suite has by construction.
 
 ```bash
-npm run verify:worker      # the standalone worker boots and runs a job
+npm run verify:worker       # the standalone worker boots and runs a job
 npm run verify:providers    # one real call per configured provider
 npm run verify:automation   # the scheduler's queries, cadence maths and publish queue
 npm run verify:billing      # the billing schema, idempotency index and HMAC
+npm run verify:analytics    # the analytics schema, revenue precision and experiment policy
+npm run verify:hardening    # the sixteen production safety invariants
 ```
 
 **`verify:worker`** runs the worker's boot path in a real Node process: env,
@@ -666,6 +668,33 @@ Stripe API call: it creates no customer, no session and no subscription, so it c
 charge anyone, and it writes only to `billing_events` under a synthetic provider name
 that it deletes again.
 
+**`verify:hardening`** proves the sixteen safety invariants of §24 in one real
+process: the production configuration guards, the database timeouts and migration
+state, credential storage, cross-tenant refusal, the route-level authorization and
+validation audit, the atomic rate-limit window, worker retry classification and
+enqueue idempotency, distributed locking with stale recovery, webhook
+signature/replay/idempotency, the error taxonomy, response and log redaction, the
+liveness/readiness split, and the production/mock guards.
+
+Two of those are checked structurally rather than by import, and deliberately.
+`lib/api/guard` and `lib/api/rate-limit` carry `server-only`, so the script reads the
+uuid pattern and the Redis Lua window out of their own source and exercises those —
+a change to the real ones changes what it proves — and audits every route file for
+the guard, validation and rate-limit calls it must make. That static audit is the
+stronger check anyway: it covers all 39 routes rather than whichever one a runtime
+probe happened to touch, so a route added later without a guard fails the script.
+
+The production guards run in child `tsx` processes, because proving them in-process
+would mean setting `NODE_ENV=production` and poisoning every later step. A fresh
+process parsing a fresh environment is what a deployment actually does.
+
+It performs no upload, no publication, no Stripe charge, checkout, subscription or
+portal session, and touches no credential. The only external systems it contacts are
+this deployment's own Postgres and Redis; every write is namespaced and removed in a
+`finally`, so a failed run leaves nothing behind either. Where a dependency is
+genuinely absent it reports `NOT_CONFIGURED` and names what was therefore not proven
+— currently only the client-bundle scan, which needs a `npm run build` first.
+
 ### Why lint, not `server-only`
 
 `server-only` is a bundler directive, not a runtime guard: its package exports
@@ -682,9 +711,30 @@ a view type shared between a server page and the client component it renders
 carries no runtime code.
 
 Four modules still carry the marker, and only these four — `lib/api/guard`,
-`lib/api/rate-limit`, `lib/auth/session` and `lib/channels/oauth-state`. Each
-imports `next/server` or `next/headers`, cannot run outside a Next request at all,
-and is not reachable from the worker.
+`lib/api/rate-limit`, `lib/auth/session` and `lib/channels/oauth-state`. Three of
+them import `next/server` or `next/headers` and cannot run outside a Next request at
+all. `lib/api/rate-limit` imports nothing from Next, but keeping the marker there
+costs nothing: no background process needs it.
+
+The same question decided two Phase 10 changes the other way, and the deciding test
+was always *does a Node entrypoint need this module*:
+
+- **`lib/health` lost the marker.** It imports nothing from Next, and it defines a
+  `worker` readiness mode — which the worker could not use, because the marker made
+  the module unimportable by the one process that needed it. `@/lib/health` was added
+  to the `no-restricted-imports` group in the same change, so the client-bundle
+  boundary is unchanged.
+- **`pruneSessions` moved out of `lib/auth/session`** into `lib/auth/session-maintenance`.
+  That one was not a design question but a live defect: the scheduler imported it from
+  the marked module, so `npm run scheduler` died at its first import — before its
+  logger existed. Session pruning, channel-stats refresh, analytics ingestion and
+  every automation tick had never run. `lib/auth/session` re-exports it, so nothing
+  else changed. The prune touches no cookie, header or request; it never belonged
+  behind the marker.
+
+Both are covered by tests that spawn the real entrypoints as `tsx` processes rather
+than importing them, since a test that imports them runs under vitest's
+`server-only` alias and proves nothing about `npm run worker`.
 
 Running the worker under `--conditions react-server` was considered and rejected.
 It would make a plain Node process claim to be a React Server Components runtime,
@@ -692,6 +742,246 @@ so any dependency shipping a `react-server` entry point would hand the worker a
 *different implementation* than the web app runs — a silent divergence between
 what renders a video and what serves the page, which is worse than the crash it
 would paper over.
+
+### Dependency advisories
+
+`npm audit` is not clean, and that is a considered position rather than neglect. Every
+advisory below was checked for reachability in this codebase; the deciding question was
+always whether the vulnerable code path is one Tally executes.
+
+**Runtime, not reachable:**
+
+- **`drizzle-orm` <0.45.2 — high, SQL injection via improperly escaped identifiers.**
+  Requires attacker-controlled SQL *identifiers* (table or column names). Tally has
+  zero `sql.identifier` and zero `sql.raw` calls; every identifier is a compile-time
+  constant from `lib/db/schema`, and every value is a bound parameter. See below for
+  why the fix is not applied.
+- **`sharp` <0.35.0 — high, inherited libvips CVEs**, via `next`. Reached only through
+  the `next/image` optimizer, which Tally does not use — nothing imports the component
+  and no `images` config is set. (`_next/image` appears in the `middleware.ts` matcher
+  as an exclusion, and `next.config.ts` computes a CSP `img-src` list; neither invokes
+  the optimizer.) Thumbnail rendering uses Tally's own direct `sharp` dependency, on
+  images Tally generated itself.
+- **`uuid` <11.1.1 — moderate, missing buffer bounds check**, via `googleapis`. Only
+  affects v3/v5/v6 with a caller-supplied `buf`. Tally calls `randomUUID()` from
+  `node:crypto`.
+- **`postcss` — path traversal via `sourceMappingURL`**, via `next`. A build-time CSS
+  processing path, on CSS in this repository.
+
+**Development-only, not shipped:** `vitest` (critical — but only *when the Vitest UI
+server is listening*, and `@vitest/ui` is not installed and never started), `vite`,
+`esbuild`, `drizzle-kit`. None is in `dependencies`; none runs in production.
+
+#### The `drizzle-orm` upgrade was tested and rejected
+
+Not waved away — installed, and reverted on evidence. `0.45.2` typechecked cleanly and
+all 647 unit tests passed, but two integration tests failed, and the cause matters more
+than the count: **0.45.x wraps driver errors in a `DrizzleQueryError`**, moving the
+Postgres `SQLSTATE` from `error.code` to `error.cause.code`.
+
+`asDatabaseError` classifies on `code` + `severity`. With the SQLSTATE one level
+deeper, it stops seeing it — so a unique violation classifies as `internal_error`
+instead of a conflict, and a dropped connection (`08006`) stops being **retryable**.
+Two concrete regressions, both worse than the advisory they would fix:
+
+- A concurrent duplicate publication returned an unclassified 500 instead of a 409.
+- Recoverable database blips would have been treated as permanent failures, so the
+  worker would abandon work a retry would have completed.
+
+The wrapper also stringifies the failing statement *and its bound parameters* into the
+error message, which is a new leak surface for anything that logs an error message
+directly (§14).
+
+Fixing this is a real change to the error taxonomy plus new tests — §19 permits an
+upgrade only when compatibility is understood *and* tests prove the application still
+works, and a change that silently makes database failures non-retryable is the
+opposite of hardening. So the version stays at `0.38.4`, the advisory is documented as
+unreachable, and the upgrade is scoped as its own work with the taxonomy change it
+requires. `verify:hardening` asserts the current classification, so whoever does that
+upgrade will see these two properties break immediately rather than in production.
+
+---
+
+## Deployment
+
+Tally is three processes against three stateful dependencies. Nothing here assumes a
+particular host: they are ordinary Node processes and can run wherever that works.
+
+| Process | Command | Scale | Notes |
+| --- | --- | --- | --- |
+| Web | `npm run build` then `npm run start` | Horizontal, freely | Stateless. Sessions live in Postgres, not in memory. |
+| Worker | `npm run worker` | Horizontal, freely | BullMQ distributes; concurrency per queue is in `worker/registry.ts`. |
+| Scheduler | `npm run scheduler` | Horizontal, but see below | Safe to run more than one — each task takes a Redis lock per tick — though one is enough. |
+
+Two replicas of the scheduler is a supported configuration rather than a hazard, and
+that is deliberate: it is what makes a rolling restart safe. Overlap is prevented
+twice over — an in-process `Set` stops a slow pass stacking behind itself, and a Redis
+lock stops a second replica running the same task on the same tick. Automation has a
+third guard underneath both: it claims each channel's slot with a conditional
+`UPDATE`, so even a lock failure cannot double-start a video.
+
+### Required configuration
+
+Six variables have no default, and the process **refuses to boot** without them —
+deliberately, since a half-configured backend degrades into exactly the fake
+behaviour §42 forbids:
+
+```
+DATABASE_URL           ENCRYPTION_KEY          S3_BUCKET
+REDIS_URL              SESSION_SECRET          S3_ACCESS_KEY_ID
+                                               S3_SECRET_ACCESS_KEY
+```
+
+`ENCRYPTION_KEY` and `SESSION_SECRET` are each 64 hex characters (32 bytes):
+`openssl rand -hex 32`. **`ENCRYPTION_KEY` cannot be rotated casually** — it decrypts
+every stored OAuth token, so changing it invalidates every connected channel and every
+user has to reconnect YouTube. Treat it as permanent unless you are prepared to
+re-authorise the entire user base.
+
+Four further guards apply in production only, each a refusal to start rather than a
+warning, because none of these is visible in a smoke test:
+
+- `TALLY_USE_MOCK_PROVIDERS` must be `false`. Otherwise Tally fabricates voiceovers
+  and visuals for paying customers (§40).
+- `EMAIL_PROVIDER` must not be `console`, which prints every verification and reset
+  email to stdout.
+- `BILLING_PROVIDER=stripe` requires **both** `STRIPE_SECRET_KEY` and
+  `STRIPE_WEBHOOK_SECRET`. Live billing config is explicit, never inferred: with only
+  the first, checkout takes money while signature verification has nothing to verify
+  against.
+- `APP_URL` must be `https`. Session and OAuth cookies are issued `Secure` and a
+  browser will not return them over `http` — the symptom is a login that appears to
+  succeed and then doesn't.
+
+`npm run verify:hardening` exercises all of these in child processes and fails if any
+is accepted. Provider credentials are all optional: a missing key surfaces as a
+`not_configured` state in the UI, never as a fallback to fakery (§48).
+
+### Migrations
+
+```bash
+npm run db:migrate     # apply; idempotent, safe to run on every deploy
+npm run db:generate    # author a new migration from the schema
+```
+
+Additive and forward-only. Run migrations **before** starting the new web and worker
+processes: every migration so far adds tables, columns or indexes, so an old process
+against a new schema is fine, while a new process against an old schema is not. There
+is no down-migration path — a bad migration is corrected by a new one.
+
+Do not hand-edit anything in `drizzle/`. The `_journal.json` file and the applied-set
+in `drizzle.__drizzle_migrations` have to agree; `verify:hardening` checks that they
+do, because a partially-migrated database produces the most confusing possible
+failures — a route that works until it touches the one column that is missing.
+
+### Health and readiness
+
+Two endpoints, and the distinction matters operationally:
+
+| Endpoint | Question | Failure means |
+| --- | --- | --- |
+| `GET /api/health` | Is this process alive? | Restart the container. |
+| `GET /api/ready?mode=web` | Can this instance serve traffic? | Drain traffic; do not restart. |
+
+Point the **liveness** probe at `/api/health` and the **readiness** probe at
+`/api/ready`. Liveness consults nothing external, on purpose: if it touched Postgres,
+one database blip would restart every replica in the fleet simultaneously.
+
+`mode` selects which dependencies count. `web` wants Postgres and treats Redis as a
+degradation; `worker` requires both, since a worker without Redis has nothing to
+consume; `full` checks everything. Readiness returns `200` when ready and `503`
+otherwise, and unconfigured *optional* providers never make an instance unready — an
+unset ElevenLabs key is a product state, not an outage.
+
+The response carries dependency names and statuses only. Set `HEALTH_PROBE_TOKEN` and
+pass it as `x-tally-probe-token` to see the `detail` strings and mode flags; without
+it, in production, they are withheld. Neither endpoint ever includes a connection
+string, a token or an environment value.
+
+### Startup order
+
+1. Postgres, Redis and object storage reachable.
+2. `npm run db:migrate`.
+3. Worker and scheduler. Both run a dependency preflight and log one legible line
+   before consuming anything. It is intentionally **non-fatal**: a supervisor
+   restarting into an outage produces a crash loop, and BullMQ's own reconnect
+   handles a Redis blip better than a restart does.
+4. Web tier, once `/api/ready` returns `200`.
+
+### Shutdown
+
+All three handle `SIGTERM` and `SIGINT`. The worker stops accepting jobs and lets
+in-flight ones finish — a stage killed mid-flight leaves a project stuck between
+states, which is what the persisted state machine exists to avoid. The scheduler
+clears its timers and waits up to 15 seconds for a running pass. Allow **at least 60
+seconds** of termination grace; a render is the long pole.
+
+An uncaught exception logs through the logger and then exits, in both background
+processes. Exiting is the point: after an uncaught throw the process state is unknown,
+and a worker that keeps pulling jobs in an unknown state fails them one at a time
+until the retry budgets are gone. The supervisor restarts it, BullMQ returns the
+in-flight job when its lock lapses, and the durable `jobs` row means nothing vanishes.
+
+---
+
+## Backup and recovery
+
+What an operator needs to know to rebuild this deployment. No script here performs a
+backup or a restore — that belongs to whatever runs the database.
+
+### What is stateful
+
+| Store | Contents | If lost |
+| --- | --- | --- |
+| **Postgres** | Everything durable: users, sessions, channels (with encrypted OAuth tokens), projects, scripts, jobs, analytics, subscriptions, billing events | Unrecoverable. This is the backup that matters. |
+| **Object storage** | Rendered video, audio, thumbnails, uploaded assets | Rows survive and point at missing keys. Recoverable only by re-rendering. |
+| **Redis** | Queue messages, rate-limit counters, scheduler locks | **Not a backup target.** See below. |
+
+Redis is deliberately not backed up. Every queue message has a durable `jobs` row
+behind it — `enqueue()` writes Postgres *before* pushing to Redis, and the BullMQ job
+id equals the row id, which is what makes a repeated push idempotent. Rate-limit
+counters and scheduler locks are meant to expire. A flushed Redis costs in-flight
+jobs, which are visible in `jobs` and can be requeued; it loses no durable state.
+
+### Restore order
+
+1. **Postgres**, from your snapshot. Then `npm run db:migrate` — the dump may predate
+   the current code.
+2. **Object storage**, from its own snapshot. Independent of the database, but restore
+   both to the *same* point in time or rows will reference keys that never existed.
+3. **Redis**: create it empty. Do not restore it. A stale queue replayed against a
+   restored database re-runs work that already completed.
+4. **Configuration** — all six required variables, and `ENCRYPTION_KEY` must be the
+   *same value* the dump was written with. A restored database with a different key is
+   a database whose channel tokens cannot be decrypted, and there is no recovery from
+   that beyond every user reconnecting.
+5. **Verify** before serving: `npm run verify:hardening`, then `/api/ready`.
+
+### External dependencies that do not come back with a restore
+
+- **YouTube OAuth.** Grants live in the restored rows, so they survive — but only
+  while the Google client credentials are unchanged. Restoring against a different
+  OAuth client, or a revoked one, means every channel needs reconnecting. Tally
+  handles this honestly rather than silently: a rejected refresh sets the re-auth flag
+  and the UI prompts, so the failure mode is a reconnect prompt rather than silent
+  breakage.
+- **Stripe webhooks.** The endpoint URL and its signing secret live in the Stripe
+  dashboard, not in this repository. A new deployment URL means a new endpoint and a
+  new `STRIPE_WEBHOOK_SECRET`. Missed deliveries during downtime can be replayed from
+  the dashboard: `billing_events` has a unique index on
+  `(provider, provider_event_id)`, so replaying is safe — a duplicate is recorded and
+  skipped, never applied twice.
+- **Provider accounts.** API keys are configuration, not data. An exhausted balance
+  restores as an exhausted balance, and reports as `provider_out_of_credit` — a state
+  an operator clears, distinct from a bug.
+
+### Recovery-time reality check
+
+The database is the only irreplaceable component. Rendered media is expensive to
+regenerate but reproducible from the rows describing it; queue state is designed to be
+disposable. Set the Postgres snapshot interval by how much user work you are willing
+to lose, and test that a snapshot actually restores — an untested backup is a
+hypothesis.
 
 ---
 

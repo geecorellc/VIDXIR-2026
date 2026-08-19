@@ -39,6 +39,7 @@ const getSchema = z.object({
 export async function GET(request: NextRequest, { params }: RouteParams) {
   return handle(request, async () => {
     const { user } = await requireUser();
+    await enforce(rules().read, `analytics:${user.id}`);
     const { channelId } = await params;
     const access = await requireChannelAccess(user.id, channelId);
     const { days } = parseQuery(request, getSchema);

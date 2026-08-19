@@ -71,7 +71,9 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     assertUuid(experimentId, "experimentId");
 
     const body = await parseJson(request, BodySchema);
-    await enforce(rules().read, `experiments:${user.id}`);
+    // Up to 400 observation rows per call: a write, and the largest one in the
+    // app. The `mutation` rule, not `read`.
+    await enforce(rules().mutation, `experiments:${user.id}`);
 
     const experiment = await getExperiment(user.id, experimentId);
     if (!experiment) throw new ForbiddenError("Test not found or not accessible.");

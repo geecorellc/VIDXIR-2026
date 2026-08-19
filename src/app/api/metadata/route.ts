@@ -105,6 +105,9 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireOnboarded();
+    // A hand edit, not a generation: `mutation`, not the `generation` rule the
+    // POST above uses for the AI pass.
+    await enforce(rules().mutation, `metadata:${user.id}`);
     const body = await parseJson(request, PatchSchema);
 
     await requireProjectAccess(user.id, body.projectId);

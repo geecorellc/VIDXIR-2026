@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     const tier = await currentTier(user.id);
     requireFeature(tier, "thumbnailAbTest");
 
-    await enforce(rules().read, `experiments:${user.id}`);
+    await enforce(rules().mutation, `experiments:${user.id}`);
 
     // Ownership of the video and of every variant is enforced inside
     // `createExperiment`, in SQL, with the tenant predicate on each query.

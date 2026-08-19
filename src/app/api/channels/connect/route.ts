@@ -70,6 +70,14 @@ export async function GET(request: NextRequest) {
     // Starting an OAuth flow is cheap but not free — each one mints a nonce and
     // may prompt Google. Keyed by IP alongside the auth endpoints.
     await enforce(rules().authIp, clientIp(request));
+    // And by user, which is the key that actually bounds one account: the IP rule
+    // is shared by everyone behind a NAT, and with TRUSTED_PROXY_HOPS=0 it is a
+    // single global bucket. A session is required above, so the id is available.
+    //
+    // The same bucket as the callback, so a complete round trip costs two units.
+    // That is the honest accounting: it is the pair that mints a nonce and spends
+    // a Google token exchange, not either half alone.
+    await enforce(rules().oauth, `oauth:${userId}`);
 
     // §48: no credentials means an explicit configuration state, never a mock
     // consent screen. The channels page already renders the banner; this guards

@@ -165,6 +165,7 @@ suite("scripts and metadata (integration)", () => {
       userId: user.id,
       channelId,
       title: "Budget smart home sensors",
+      maxVideosPerMonth: null,
     });
 
     return { user, channelId, project };

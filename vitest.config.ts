@@ -28,15 +28,18 @@ export default defineConfig({
        * the empty module. Node cannot import it at all, so a test touching a
        * module that carries the marker needs this stub.
        *
-       * Scope worth knowing: only four modules still carry it — `lib/api/guard`,
-       * `lib/api/rate-limit`, `lib/auth/session` and `lib/channels/oauth-state`,
-       * all of which import `next/server` or `next/headers` and genuinely cannot
-       * run outside Next. The shared service, provider, queue and database layers
-       * had the marker removed, because the standalone BullMQ worker imports them
-       * as a plain Node process and this alias was hiding that they were
-       * unimportable there. The client-bundle boundary is enforced by
-       * `no-restricted-imports` in `eslint.config.mjs`, which applies to both
-       * runtimes; this alias no longer stands in for it.
+       * Scope worth knowing: four modules carry it. `lib/api/guard`,
+       * `lib/auth/session` and `lib/channels/oauth-state` import `next/server` or
+       * `next/headers` and genuinely cannot run outside Next. `lib/api/rate-limit`
+       * imports nothing from Next but is only ever reachable from a route handler,
+       * and keeping the marker there costs nothing: no Node entrypoint needs it.
+       *
+       * `lib/health` had the marker removed in Phase 10, because one did need it —
+       * the standalone worker could not import the module defining its own
+       * `worker` readiness mode. The shared service, provider, queue and database
+       * layers were unmarked earlier for the same reason. The client-bundle
+       * boundary is enforced by `no-restricted-imports` in `eslint.config.mjs`,
+       * which applies to both runtimes; this alias does not stand in for it.
        */
       "server-only": fileURLToPath(new URL("./tests/stubs/server-only.ts", import.meta.url)),
     },

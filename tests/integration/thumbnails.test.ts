@@ -290,6 +290,7 @@ suite("thumbnail pipeline (integration)", () => {
       userId: user.id,
       channelId,
       title: "Budget smart home sensors",
+      maxVideosPerMonth: null,
     });
 
     await persistScriptVersion({
@@ -1070,6 +1071,7 @@ suite("thumbnail pipeline (integration)", () => {
         userId: first.user.id,
         channelId: first.channelId,
         title: "A second video",
+        maxVideosPerMonth: null,
       });
       await persistScriptVersion({
         userId: first.user.id,

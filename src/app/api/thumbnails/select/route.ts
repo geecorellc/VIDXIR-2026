@@ -33,10 +33,11 @@ export async function POST(request: NextRequest) {
     const body = await parseJson(request, BodySchema);
 
     await requireProjectAccess(user.id, body.projectId);
-    // The read limit, not the generation one: recording a choice spends no
+    // The `mutation` limit, not the generation one: recording a choice spends no
     // provider credit, and a user comparing four options may well click twice
     // before settling. The generation budget would be the wrong thing to charge.
-    await enforce(rules().read, `thumbnails:${user.id}`);
+    // 60/minute still leaves that comfortable while bounding a scripted loop.
+    await enforce(rules().mutation, `thumbnails:${user.id}`);
 
     const result = await selectVariant({
       userId: user.id,

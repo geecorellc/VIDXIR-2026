@@ -19,10 +19,12 @@ import {
   requireChannelAccess,
   requireOnboarded,
 } from "@/lib/api/guard";
+import { enforce, rules } from "@/lib/api/rate-limit";
 import { db } from "@/lib/db";
 import { channelSettings, ideas, projects } from "@/lib/db/schema";
 import { ValidationError } from "@/lib/errors";
 import { assertCanStartVideo } from "@/lib/plans/enforce";
+import { planByTier } from "@/lib/plans";
 import { createProject } from "@/lib/projects/service";
 
 const CreateSchema = z.object({
@@ -36,6 +38,9 @@ const CreateSchema = z.object({
 export async function POST(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireOnboarded();
+    // Creating a project consumes the month's video allowance and is the entry
+    // point to everything downstream that spends provider credit.
+    await enforce(rules().mutation, `projects:${user.id}`);
     const body = await parseJson(request, CreateSchema);
 
     await requireChannelAccess(user.id, body.channelId);
@@ -99,6 +104,10 @@ export async function POST(request: NextRequest) {
       ideaId,
       origin: "manual",
       targetDurationSeconds: settings[0]?.length ?? null,
+      // The allowance travels into the transaction, where the counter increment
+      // enforces it atomically — the check above is what produces a good error,
+      // not what guarantees the limit (§13).
+      maxVideosPerMonth: planByTier(tier).maxVideosPerMonth,
     });
 
     return { project };
@@ -113,6 +122,7 @@ const ListSchema = z.object({
 export async function GET(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireOnboarded();
+    await enforce(rules().read, `projects:${user.id}`);
     const query = parseQuery(request, ListSchema);
 
     const where = query.channelId

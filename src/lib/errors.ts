@@ -40,6 +40,7 @@ export type ErrorCode =
   | "quality_check_failed"
   | "publish_blocked_dev_mode"
   | "invalid_state_transition"
+  | "database_failure"
   | "internal_error";
 
 export interface AppErrorOptions {
@@ -464,6 +465,161 @@ export class InvalidStateTransitionError extends AppError {
       retryable: false,
       details: { from, to },
     });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Database failures (§14)
+// ---------------------------------------------------------------------------
+
+/**
+ * The database could not serve the query.
+ *
+ * §14 requires "database failure" to be a distinguishable class, and until now it
+ * was not: a dropped connection, a lock timeout and a genuine application bug all
+ * arrived as `internal_error`. That conflation costs twice over — a worker cannot
+ * tell a transient infrastructure fault (retry, and it will probably succeed) from
+ * a logic error (retrying is pointless), and an operator reading logs cannot tell
+ * "Postgres was unreachable for 40 seconds" from "we have a bug".
+ *
+ * The message is fixed and generic. A postgres.js error carries the failing SQL
+ * and often the bound parameters, and §14 forbids either reaching a response;
+ * the original is preserved as `cause` so the logger — which redacts — still has
+ * the full detail.
+ */
+export class DatabaseError extends AppError {
+  /** The Postgres SQLSTATE, when the driver supplied one. */
+  readonly sqlState?: string;
+
+  constructor(
+    operation: string,
+    options: { retryable?: boolean; sqlState?: string; cause?: unknown } = {},
+  ) {
+    super({
+      code: "database_failure",
+      message: "A database operation could not be completed. Please try again.",
+      status: 503,
+      retryable: options.retryable ?? true,
+      // `operation` is a caller-supplied literal like "claim automation slot",
+      // never interpolated user input, so it is safe to return.
+      details: { operation },
+      cause: options.cause,
+    });
+    this.sqlState = options.sqlState;
+  }
+}
+
+/**
+ * SQLSTATE classes that mean "the database was momentarily unable", as opposed to
+ * "this query is wrong".
+ *
+ * Retrying a serialization failure or a deadlock is the documented remedy — one
+ * of the two transactions was chosen as the victim precisely so the other could
+ * proceed. Retrying a syntax error or a constraint violation is not: the same
+ * statement will fail identically forever, and a worker that keeps trying burns
+ * its attempts and delays the visible failure the user needs.
+ *
+ * A unique violation (23505) is deliberately absent. Those are load-bearing in
+ * this codebase — the billing webhook's idempotency check and the analytics
+ * upserts both rely on hitting one — and are handled at the call site with
+ * `onConflictDoNothing`, so a violation reaching here is a real conflict rather
+ * than something to retry.
+ */
+const RETRYABLE_SQL_STATES: readonly string[] = [
+  "08000", // connection_exception
+  "08003", // connection_does_not_exist
+  "08006", // connection_failure
+  "08001", // sqlclient_unable_to_establish_sqlconnection
+  "08004", // sqlserver_rejected_establishment_of_sqlconnection
+  "40001", // serialization_failure
+  "40P01", // deadlock_detected
+  "53300", // too_many_connections
+  "55P03", // lock_not_available
+  "57014", // query_canceled — our own statement_timeout fired
+  "57P01", // admin_shutdown
+  "57P02", // crash_shutdown
+  "57P03", // cannot_connect_now — server still starting
+];
+
+/** Node-level socket failures, which arrive with a `code` rather than a SQLSTATE. */
+const RETRYABLE_SYSTEM_CODES: readonly string[] = [
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "EPIPE",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "CONNECTION_CLOSED",
+  "CONNECTION_ENDED",
+  "CONNECTION_DESTROYED",
+];
+
+/**
+ * Wrap a thrown database error as a `DatabaseError`, or pass through anything
+ * that is already classified.
+ *
+ * Deliberately conservative about what it claims to recognise: an error with no
+ * SQLSTATE and no known system code keeps `internal_error`, because labelling an
+ * unrelated bug a "database failure" would send an operator to inspect a healthy
+ * database.
+ */
+export function asDatabaseError(operation: string, error: unknown): AppError {
+  // An AppError from further down (a ConflictError raised by a handler, say)
+  // already carries the right classification.
+  if (isAppError(error)) return error;
+
+  const candidate = error as { code?: unknown; severity?: unknown } | null;
+  const raw = typeof candidate?.code === "string" ? candidate.code : undefined;
+
+  // postgres.js sets `severity` on server errors; that plus a 5-char SQLSTATE is
+  // what distinguishes a database error from any other object with a `code`.
+  const isSqlState =
+    raw !== undefined && /^[0-9A-Z]{5}$/.test(raw) &&
+    (typeof candidate?.severity === "string" || RETRYABLE_SQL_STATES.includes(raw));
+
+  if (isSqlState) {
+    return new DatabaseError(operation, {
+      retryable: RETRYABLE_SQL_STATES.includes(raw),
+      sqlState: raw,
+      cause: error,
+    });
+  }
+
+  if (raw !== undefined && RETRYABLE_SYSTEM_CODES.includes(raw)) {
+    return new DatabaseError(operation, {
+      retryable: true,
+      cause: error,
+    });
+  }
+
+  return new AppError({
+    code: "internal_error",
+    message: "Something went wrong. The error has been logged.",
+    status: 500,
+    retryable: false,
+    cause: error,
+  });
+}
+
+/**
+ * Run a database operation, classifying any failure.
+ *
+ * Used at the boundaries that need the distinction — the readiness probe and the
+ * worker's own bookkeeping writes — rather than sprinkled over every query.
+ * Wrapping every call site would be the "transactions for appearance" that §13
+ * warns against: most routes are already inside `handle()`, which logs the cause
+ * and returns a generic 500, and the classification only changes behaviour where
+ * something actually branches on `retryable`.
+ */
+export async function withDatabaseErrors<T>(
+  operation: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (error) {
+    throw asDatabaseError(operation, error);
   }
 }
 

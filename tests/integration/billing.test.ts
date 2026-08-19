@@ -403,6 +403,51 @@ suite("billing (integration)", () => {
       expect(result.status).toBe(403);
     });
 
+    it("refuses a correctly-signed delivery replayed outside the timestamp window", async () => {
+      /**
+       * Replay resistance (§8), which the HMAC alone does not provide.
+       *
+       * A signature is valid forever: an attacker who captures one genuine upgrade
+       * delivery off the wire — a misconfigured proxy log, a mirrored request, a
+       * leaked webhook archive — holds a body and header pair that verify perfectly.
+       * Without a bounded window they could re-POST it any number of times, and
+       * `billing_events` only stops the *identical event id*; the danger is a captured
+       * `customer.subscription.updated` replayed after a downgrade, which carries a
+       * new-enough id in no sense but would reinstate the paid tier.
+       *
+       * What stops it is the `t=` timestamp inside the signature header, which is
+       * part of the signed payload and therefore cannot be advanced without the
+       * secret. Stripe's tolerance is 5 minutes, so this signs at 20 minutes old —
+       * with a genuine secret and a genuine HMAC over a genuine body.
+       */
+      const user = await createUser({ email: "replayed@tally.test" });
+      await attachCustomer(user.id, "cus_replayed");
+
+      const event = stripeEvent(
+        "customer.subscription.updated",
+        subscriptionObject({ customer: "cus_replayed", priceId: SCALE_PRICE }),
+      );
+      const payload = JSON.stringify(event);
+
+      const staleSignature = signer.webhooks.generateTestHeaderString({
+        payload,
+        secret: WEBHOOK_SECRET,
+        timestamp: secs(-20 * 60_000),
+      });
+
+      const result = await deliver(event, { signature: staleSignature });
+
+      expect(result.status).toBe(403);
+      // Rejected before parsing, so the replay leaves no trace and grants nothing.
+      expect(await billingEventRows()).toHaveLength(0);
+      expect(await tierOf(user.id)).toBe("starter");
+
+      // The control: the identical body and secret, signed now, is accepted. Without
+      // this the test would also pass if the route rejected everything.
+      const fresh = await deliver(event);
+      expect(fresh.status).toBe(200);
+    });
+
     it("reports a configuration state when the webhook secret is unset", async () => {
       const { resetEnvCache } = await import("@/lib/env");
       const previous = process.env["STRIPE_WEBHOOK_SECRET"];

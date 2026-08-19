@@ -15,6 +15,7 @@ import {
   requireChannelAccess,
   requireOnboarded,
 } from "@/lib/api/guard";
+import { enforce, rules } from "@/lib/api/rate-limit";
 import { db } from "@/lib/db";
 import { researchResults, researchRuns } from "@/lib/db/schema";
 import { getActiveJobs } from "@/lib/queue/jobs";
@@ -29,6 +30,9 @@ const QuerySchema = z.object({
 export async function GET(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireOnboarded();
+    // Polled while a run is in flight, and each call carries a correlated
+    // subquery per row. The `read` ceiling is far above the screen's cadence.
+    await enforce(rules().read, `runs:${user.id}`);
     const query = parseQuery(request, QuerySchema);
 
     await requireChannelAccess(user.id, query.channelId);

@@ -15,6 +15,7 @@ import {
   requireOnboarded,
   requireProjectAccess,
 } from "@/lib/api/guard";
+import { enforce, rules } from "@/lib/api/rate-limit";
 import { approveScript } from "@/lib/scripts/service";
 
 const BodySchema = z.object({
@@ -24,6 +25,9 @@ const BodySchema = z.object({
 export async function POST(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireOnboarded();
+    // A write and a project transition. The `mutation` rule rather than
+    // `generation`: approval deliberately spends nothing (see the note above).
+    await enforce(rules().mutation, `scripts:${user.id}`);
     const { projectId } = await parseJson(request, BodySchema);
 
     await requireProjectAccess(user.id, projectId);

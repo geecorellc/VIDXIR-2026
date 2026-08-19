@@ -24,6 +24,7 @@ import {
   userMessageOf,
 } from "@/lib/errors";
 import { logger, newTraceId, type Logger } from "@/lib/logger";
+import { env } from "@/lib/env";
 import { getSession, type SessionUser } from "@/lib/auth/session";
 
 export interface RequestContext {
@@ -330,14 +331,46 @@ export async function handle<T>(
   }
 }
 
-/** Client IP, honouring the proxy header set by the hosting platform. */
+/**
+ * Client IP for rate-limit keying, read from the right end of the proxy chain.
+ *
+ * `X-Forwarded-For` is a list a client can pre-populate. A proxy *appends* the
+ * peer it saw, so the leftmost entry is whatever the caller typed and the
+ * rightmost entries are the ones our own infrastructure added. Taking the left
+ * entry — as this did previously — means an attacker rotates a header value and
+ * every IP-keyed rule (`authIp`, guarding login and signup) becomes free.
+ *
+ * `TRUSTED_PROXY_HOPS` says how many entries on the right were added by
+ * infrastructure we control. At 0, the header is not consulted at all: there is
+ * no proxy, so anything in it was fabricated. At N, we index N from the right,
+ * which is the last hop the client could not have written.
+ *
+ * A request with a shorter chain than configured falls back to `unknown` rather
+ * than to a client-controlled entry: sharing one bucket degrades the limit, while
+ * trusting a forged entry removes it.
+ */
 export function clientIp(request: NextRequest): string {
+  const hops = env().TRUSTED_PROXY_HOPS;
+  if (hops <= 0) return "direct";
+
   const forwarded = request.headers.get("x-forwarded-for");
   if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
+    const chain = forwarded
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const candidate = chain[chain.length - hops];
+    if (candidate) return candidate;
   }
-  return request.headers.get("x-real-ip") ?? "unknown";
+
+  // Single-proxy setups (nginx, and Vercel's own edge) set this to the peer they
+  // saw, and unlike XFF it is not a list a client can extend.
+  if (hops === 1) {
+    const real = request.headers.get("x-real-ip")?.trim();
+    if (real) return real;
+  }
+
+  return "unknown";
 }
 
 export { AppError };

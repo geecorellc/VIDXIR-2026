@@ -761,6 +761,7 @@ suite("research engine (integration)", () => {
         title: idea.title,
         origin: "manual",
         targetDurationSeconds: 600,
+        maxVideosPerMonth: null,
       });
 
       expect(project.status).toBe("IDEA");
@@ -783,7 +784,12 @@ suite("research engine (integration)", () => {
       );
 
       const { user, channelId } = await seedChannel("quota@tally.test");
-      await createProject({ userId: user.id, channelId, title: "Counted" });
+      await createProject({
+        userId: user.id,
+        channelId,
+        title: "Counted",
+        maxVideosPerMonth: null,
+      });
 
       const rows = await db
         .select()
