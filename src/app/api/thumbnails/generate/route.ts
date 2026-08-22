@@ -26,7 +26,8 @@ import {
 } from "@/lib/api/guard";
 import { enforce, rules } from "@/lib/api/rate-limit";
 import { NotConfiguredError } from "@/lib/errors";
-import { isCapabilityAvailable } from "@/lib/providers/config";
+import { aiProviderLabel } from "@/lib/providers/ai";
+import { capabilityStatus, isCapabilityAvailable } from "@/lib/providers/config";
 import { FONT_ENV_VARS, FONT_HINT } from "@/lib/media/fonts";
 import {
   getThumbnails,
@@ -64,10 +65,14 @@ export async function POST(request: NextRequest) {
     // `canGenerate` is computed from — checked again here because the client's
     // opinion is not authoritative (§34).
     if (!isCapabilityAvailable("ai")) {
+      // Which variable is missing depends on the selected transport, so it comes
+      // from the registry rather than a literal (§48).
+      const ai = capabilityStatus("ai");
       throw new NotConfiguredError(
-        "Claude",
-        ["ANTHROPIC_API_KEY"],
-        "Thumbnail concepts are written from the script by Claude.",
+        aiProviderLabel(),
+        ai.missingEnvVars,
+        "Thumbnail concepts are written from the script by Claude." +
+          (ai.hint ? ` ${ai.hint}` : ""),
       );
     }
 

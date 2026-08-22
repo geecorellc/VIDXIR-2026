@@ -48,11 +48,17 @@ const USAGE = {
 const CHECKS: readonly Check[] = [
   {
     name: "Claude (scripts, research, metadata)",
-    vars: ["ANTHROPIC_API_KEY"],
+    // Either transport satisfies this: AI_PROVIDER decides which of the two
+    // credential sets is the relevant one (§32).
+    vars: ["AI_PROVIDER", "ANTHROPIC_API_KEY", "BEDROCK_REGION"],
     async run() {
-      const { isAiConfigured, generateJson, jsonSchema } = await import(
-        "@/lib/providers/ai"
-      );
+      const {
+        isAiConfigured,
+        generateJson,
+        jsonSchema,
+        aiProviderName,
+        aiModelName,
+      } = await import("@/lib/providers/ai");
       if (!isAiConfigured()) return null;
 
       const { z } = await import("zod");
@@ -69,7 +75,12 @@ const CHECKS: readonly Check[] = [
         effort: "low",
         usage: { ...USAGE, operation: "verify" },
       });
-      return { detail: `model replied ok=${result.ok}` };
+      // Naming the transport is the point of running this on Bedrock: it proves
+      // which surface answered, not merely that something did.
+      return {
+        detail:
+          `${aiProviderName()} / ${aiModelName()} replied ok=${result.ok}`,
+      };
     },
   },
   {

@@ -28,7 +28,8 @@ import {
   getMetadata,
   updateMetadata,
 } from "@/lib/metadata/service";
-import { isCapabilityAvailable } from "@/lib/providers/config";
+import { aiProviderLabel } from "@/lib/providers/ai";
+import { capabilityStatus, isCapabilityAvailable } from "@/lib/providers/config";
 
 const QuerySchema = z.object({ projectId: z.string().uuid() });
 
@@ -82,10 +83,14 @@ export async function POST(request: NextRequest) {
     await requireProjectAccess(user.id, body.projectId);
 
     if (!isCapabilityAvailable("ai")) {
+      // Which variable is missing depends on the selected transport, so it comes
+      // from the registry rather than a literal (§48).
+      const ai = capabilityStatus("ai");
       throw new NotConfiguredError(
-        "Claude",
-        ["ANTHROPIC_API_KEY"],
-        "Metadata is written from the script by Claude.",
+        aiProviderLabel(),
+        ai.missingEnvVars,
+        "Metadata is written from the script by Claude." +
+          (ai.hint ? ` ${ai.hint}` : ""),
       );
     }
 

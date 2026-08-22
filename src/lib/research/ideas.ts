@@ -29,7 +29,7 @@ import {
   generateJson,
   jsonSchema,
   stringArray,
-  AI_PROVIDER,
+  aiProviderName,
 } from "@/lib/providers/ai";
 import {
   parseWeightOverrides,
@@ -170,9 +170,9 @@ export interface GenerateIdeasInput {
 /**
  * Propose scored, original ideas from persisted evidence.
  *
- * Throws `NotConfiguredError` when `ANTHROPIC_API_KEY` is absent (§48) — the
- * worker turns that into a `blocked_not_configured` run so the UI names the
- * missing variable instead of showing an empty idea list.
+ * Throws `NotConfiguredError` when the selected AI transport is unconfigured
+ * (§48) — the worker turns that into a `blocked_not_configured` run so the UI
+ * names the missing variable instead of showing an empty idea list.
  */
 export async function generateIdeas(
   input: GenerateIdeasInput,
@@ -436,7 +436,8 @@ export async function persistIdeas(
           freshness: idea.scores.weights.freshness,
         },
         state: "new",
-        generatedBy: AI_PROVIDER,
+        // The transport that actually produced the idea, not a fixed label (§29).
+        generatedBy: aiProviderName(),
       })),
     )
     .returning({ id: ideas.id });

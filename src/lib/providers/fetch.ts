@@ -87,6 +87,21 @@ export interface FetchRemoteOptions {
 }
 
 /**
+ * True when a download was refused only for being over the byte ceiling.
+ *
+ * A caller holding several candidates for the same slot (stock renditions of one
+ * clip, then other clips) should step over this and try the next; every other
+ * fault means the fetch itself is in trouble and is worth surfacing. Exported so
+ * that judgement is made against a flag rather than an error message.
+ */
+export function isOversizeAsset(error: unknown): boolean {
+  return (
+    error instanceof ProviderError &&
+    (error.details as { oversize?: unknown } | undefined)?.oversize === true
+  );
+}
+
+/**
  * Download a provider asset into memory.
  *
  * In memory rather than streamed to storage because every consumer needs the
@@ -160,7 +175,12 @@ export async function fetchRemoteAsset(
       `asset is ${Math.round(declared / 1_048_576)}MB, over the ${Math.round(
         ceiling / 1_048_576,
       )}MB limit`,
-      { retryable: false, details: { url: url.href, bytes: declared } },
+      {
+        retryable: false,
+        // `oversize` lets a caller with other candidates step over this one
+        // rather than parse the message. See `isOversizeAsset`.
+        details: { url: url.href, bytes: declared, oversize: true },
+      },
     );
   }
 
@@ -438,7 +458,7 @@ async function readCapped(
         throw new ProviderError(
           provider,
           `asset exceeded the ${Math.round(ceiling / 1_048_576)}MB limit mid-download`,
-          { retryable: false, details: { url, bytes: total } },
+          { retryable: false, details: { url, bytes: total, oversize: true } },
         );
       }
       chunks.push(value);

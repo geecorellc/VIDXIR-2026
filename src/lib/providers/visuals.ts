@@ -26,7 +26,7 @@ import { env, usingMockProviders } from "@/lib/env";
 import { AssetMissingError, NotConfiguredError, ProviderError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { solidPng } from "@/lib/media/synthetic";
-import { fetchRemoteAsset } from "@/lib/providers/fetch";
+import { fetchRemoteAsset, isOversizeAsset } from "@/lib/providers/fetch";
 import { providerJson } from "@/lib/providers/http";
 import { withUsage, type UsageContext } from "@/lib/providers/usage";
 
@@ -294,34 +294,53 @@ async function pexelsVideo(
   );
 
   for (const video of videos) {
-    const file = bestVideoFile(video.video_files ?? []);
-    if (!file) continue;
+    for (const file of rankedVideoFiles(video.video_files ?? [])) {
+      let asset;
+      try {
+        asset = await fetchRemoteAsset(file.link, {
+          provider: "Pexels",
+          maxBytes: MAX_CLIP_BYTES,
+        });
+      } catch (error) {
+        /**
+         * An over-size or unreachable rendition is not a failed search — there
+         * are usually three more encodes of the same clip and fourteen more
+         * clips behind it. Only oversize is stepped over; anything else (a
+         * refused host, a DNS answer inside the network) is a fault worth
+         * surfacing rather than papering over with a different download.
+         */
+        if (isOversizeAsset(error)) {
+          log.debug("skipped oversize rendition", {
+            provider: "pexels",
+            sceneIndex: request.sceneIndex,
+            width: file.width,
+          });
+          continue;
+        }
+        throw error;
+      }
 
-    const asset = await fetchRemoteAsset(file.link, {
-      provider: "Pexels",
-      maxBytes: MAX_CLIP_BYTES,
-    });
-
-    return {
-      provider: "pexels",
-      kind: "stock_video",
-      bytes: asset.bytes,
-      mimeType: asset.contentType.startsWith("video/")
-        ? asset.contentType
-        : "video/mp4",
-      extension: "mp4",
-      width: file.width ?? video.width,
-      height: file.height ?? video.height,
-      durationMs: Math.round((video.duration || 0) * 1000) || null,
-      providerAssetId: pexelsId("video", video.id),
-      sourceUrl: video.url,
-      license: PEXELS_LICENSE,
-      attribution: video.user?.name
-        ? `Video by ${video.user.name} on Pexels`
-        : "Video from Pexels",
-      authorName: video.user?.name ?? null,
-      matchedOn: term,
-    };
+      return {
+        provider: "pexels",
+        kind: "stock_video",
+        bytes: asset.bytes,
+        mimeType: asset.contentType.startsWith("video/")
+          ? asset.contentType
+          : "video/mp4",
+        extension: "mp4",
+        width: file.width ?? video.width,
+        height: file.height ?? video.height,
+        durationMs: Math.round((video.duration || 0) * 1000) || null,
+        providerAssetId: pexelsId("video", video.id),
+        sourceUrl: video.url,
+        license: PEXELS_LICENSE,
+        attribution: video.user?.name
+          ? `Video by ${video.user.name} on Pexels`
+          : "Video from Pexels",
+        authorName: video.user?.name ?? null,
+        matchedOn: term,
+      };
+    }
   }
 
   return null;
@@ -387,27 +406,32 @@ function pexelsId(kind: "video" | "photo", id: number): string {
 }
 
 /**
- * Pick the download.
+ * Rank the downloads, best first.
  *
  * Prefers the largest MP4 that is still at or under 1080p. Going above wastes
  * bandwidth and render time for a frame nobody sees; HLS is skipped because it is
  * a playlist, not a file, and a render provider handed an `.m3u8` fails late.
+ *
+ * The whole ranked list is returned rather than only the winner because
+ * resolution does not predict file size: Pexels serves some 1080p clips at well
+ * over `MAX_CLIP_BYTES` (a long, high-bitrate encode), and the byte ceiling is
+ * only discovered on download. With one candidate the caller had nothing to fall
+ * back to and the scene failed; a lower rendition of the same clip is a far
+ * better answer than no visual at all.
  */
-function bestVideoFile(files: readonly PexelsVideoFile[]): PexelsVideoFile | null {
-  const usable = files.filter(
-    (f) =>
-      f.link &&
-      f.file_type !== "video/hls" &&
-      f.quality !== "hls" &&
-      (f.width ?? 0) > 0 &&
-      (f.width ?? 0) <= TARGET_WIDTH + 200,
-  );
-
-  if (usable.length === 0) return null;
-
-  return usable.reduce((best, file) =>
-    (file.width ?? 0) > (best.width ?? 0) ? file : best,
-  );
+function rankedVideoFiles(
+  files: readonly PexelsVideoFile[],
+): PexelsVideoFile[] {
+  return files
+    .filter(
+      (f) =>
+        f.link &&
+        f.file_type !== "video/hls" &&
+        f.quality !== "hls" &&
+        (f.width ?? 0) > 0 &&
+        (f.width ?? 0) <= TARGET_WIDTH + 200,
+    )
+    .sort((a, b) => (b.width ?? 0) - (a.width ?? 0));
 }
 
 /** Search terms, longest-first, with the visual prompt as a last resort. */

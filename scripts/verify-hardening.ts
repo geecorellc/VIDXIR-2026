@@ -1444,6 +1444,14 @@ async function main(): Promise<void> {
         e.GOOGLE_CLIENT_SECRET,
         e.ELEVENLABS_API_KEY,
         e.S3_SECRET_ACCESS_KEY,
+        /**
+         * The ambient AWS credentials, when Bedrock is the AI transport. Read
+         * from `process.env` rather than `e` on purpose: they are deliberately
+         * absent from Tally's typed configuration (§33), which is exactly why a
+         * copy appearing in a browser chunk would be worth catching.
+         */
+        process.env["AWS_SECRET_ACCESS_KEY"],
+        process.env["AWS_SESSION_TOKEN"],
       ].filter(
         (value): value is string => typeof value === "string" && value.length > 12,
       );

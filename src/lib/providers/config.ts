@@ -10,7 +10,7 @@
  * through a factory that throws NotConfiguredError when credentials are absent,
  * so there is nowhere for a silent fake to hide.
  */
-import { env, usingMockProviders } from "@/lib/env";
+import { bedrockRegion, env, usingMockProviders } from "@/lib/env";
 import { hasFfmpeg } from "@/lib/media/ffmpeg";
 import { FONT_HINT, hasThumbnailFont } from "@/lib/media/fonts";
 
@@ -86,9 +86,31 @@ const SPECS: Spec[] = [
     capability: "ai",
     label: "AI generation",
     optional: false,
-    provider: () => (usingMockProviders() ? "mock" : "anthropic"),
-    required: (p) => (p === "mock" ? [] : ["ANTHROPIC_API_KEY"]),
-    hint: "Create a key at https://console.anthropic.com/settings/keys",
+    // Two transports to the same models (§32). Which one is selected decides
+    // which credentials are missing, so the banner and the 503 must follow it
+    // rather than always naming the first-party key (§48).
+    provider: () => (usingMockProviders() ? "mock" : env().AI_PROVIDER),
+    required: (p) => {
+      if (p === "mock") return [];
+      // Region only. AWS credentials resolve asynchronously through the standard
+      // chain — an instance role, an SSO cache, a profile — none of which is an
+      // env var this registry could check for, and reporting "ready" or
+      // "missing" on a guess is what §42 forbids. A credential that is actually
+      // absent surfaces as a ProviderAuthError naming the chain.
+      if (p === "bedrock") return ["BEDROCK_REGION"];
+      return ["ANTHROPIC_API_KEY"];
+    },
+    // `AWS_REGION` / `AWS_DEFAULT_REGION` satisfy Bedrock without BEDROCK_REGION
+    // being set, so the presence check above is not the whole truth on its own.
+    available: (p) => (p === "bedrock" ? Boolean(bedrockRegion()) : true),
+    unavailableHint:
+      "Set BEDROCK_REGION (or AWS_REGION) to a region where your account has " +
+      "access to the Claude model in BEDROCK_MODEL.",
+    hint:
+      env().AI_PROVIDER === "bedrock"
+        ? "Bedrock uses the standard AWS credential chain — no key is stored in " +
+          "Tally's configuration. Enable Claude model access in the AWS console."
+        : "Create a key at https://console.anthropic.com/settings/keys",
   },
   {
     capability: "youtube",

@@ -38,8 +38,7 @@ import {
 } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { queuePriorityFor } from "@/lib/plans/enforce";
-import { AI_PROVIDER, generateJson } from "@/lib/providers/ai";
-import { env } from "@/lib/env";
+import { aiModelName, aiProviderName, generateJson } from "@/lib/providers/ai";
 import { enqueue, hasActiveJob, reportProgress } from "@/lib/queue/jobs";
 import { getProject, transition } from "@/lib/projects/service";
 import { loadOwnPerformance } from "@/lib/research/signals";
@@ -459,7 +458,6 @@ export async function persistScriptVersion(
 ): Promise<ExecuteScriptResult> {
   const wordCount = countSpokenWords(input.draft);
   const estimated = estimateDuration(wordCount);
-  const e = env();
 
   return db.transaction(async (tx) => {
     // Upsert the script row. `onConflictDoUpdate` rather than a read-then-insert
@@ -503,8 +501,11 @@ export async function persistScriptVersion(
         estimatedDurationSeconds: estimated,
         wordCount,
         source: input.source,
-        provider: input.source === "ai" ? AI_PROVIDER : null,
-        model: input.source === "ai" ? e.ANTHROPIC_MODEL : null,
+        // Recorded per version: with two transports the question "what wrote
+        // this?" has to be answerable from the row, not inferred from today's
+        // configuration (§29).
+        provider: input.source === "ai" ? aiProviderName() : null,
+        model: input.source === "ai" ? aiModelName() : null,
       })
       .returning({ id: scriptVersions.id });
 

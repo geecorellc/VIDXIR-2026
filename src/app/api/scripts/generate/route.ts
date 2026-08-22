@@ -21,7 +21,8 @@ import {
 } from "@/lib/api/guard";
 import { enforce, rules } from "@/lib/api/rate-limit";
 import { NotConfiguredError } from "@/lib/errors";
-import { isCapabilityAvailable } from "@/lib/providers/config";
+import { aiProviderLabel } from "@/lib/providers/ai";
+import { capabilityStatus, isCapabilityAvailable } from "@/lib/providers/config";
 import { startScriptGeneration } from "@/lib/scripts/service";
 
 const BodySchema = z.object({
@@ -38,10 +39,16 @@ export async function POST(request: NextRequest) {
     await requireProjectAccess(user.id, body.projectId);
 
     if (!isCapabilityAvailable("ai")) {
+      // The variables come from the capability registry rather than a literal:
+      // which one is missing depends on whether AI_PROVIDER selects the
+      // first-party API or Bedrock, and naming the wrong one sends the operator
+      // to the wrong console (§48).
+      const ai = capabilityStatus("ai");
       throw new NotConfiguredError(
-        "Claude",
-        ["ANTHROPIC_API_KEY"],
-        "Scripts are written by Claude; nothing else can stand in for it.",
+        aiProviderLabel(),
+        ai.missingEnvVars,
+        "Scripts are written by Claude; nothing else can stand in for it." +
+          (ai.hint ? ` ${ai.hint}` : ""),
       );
     }
 

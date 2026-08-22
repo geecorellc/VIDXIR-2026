@@ -119,6 +119,63 @@ The raw API body is never shown. Provider errors are translated in
 pins the table — which failures retry, and what each one tells the operator to
 fix.
 
+### AI provider
+
+Every AI feature — research angles, scripts, scene direction, thumbnail concepts,
+metadata — goes through the single factory in `src/lib/providers/ai.ts`. There is
+one entry point, `generateJson()`, and two transports to the same Claude models.
+`AI_PROVIDER` picks one:
+
+| | `AI_PROVIDER=anthropic` (default) | `AI_PROVIDER=bedrock` |
+|---|---|---|
+| Credentials | `ANTHROPIC_API_KEY` | standard AWS provider chain |
+| Region | n/a | `BEDROCK_REGION`, or `AWS_REGION` |
+| Model | `ANTHROPIC_MODEL` (`claude-opus-5`) | `BEDROCK_MODEL` (`anthropic.claude-opus-5`) |
+| SDK | `@anthropic-ai/sdk` | `@anthropic-ai/bedrock-sdk` |
+
+Callers cannot tell which one answered: the options struct, the Zod validation,
+the `api_usage` accounting and the error taxonomy are identical. What is recorded
+*does* differ, deliberately — `api_usage.provider`, `ideas.generated_by` and
+`script_versions.provider`/`model` store the transport and model that actually
+produced the row, so provenance survives a later change of configuration (§29).
+
+Three things are worth knowing before switching to Bedrock.
+
+**Credentials never enter Tally's configuration.** There is no
+`BEDROCK_ACCESS_KEY_ID`. The client is constructed without credentials, which is
+what selects the standard AWS chain — environment variables,
+`~/.aws/credentials`, an SSO cache, or an instance/container role (§33). The IAM
+principal needs `bedrock:InvokeModel`. Confirm the identity with
+`aws sts get-caller-identity`.
+
+**Model ids are namespaced.** Bedrock answers the bare `claude-opus-5` with a 404
+"does not exist"; it wants `anthropic.claude-opus-5`. The prefix is added when
+absent, so either form in `BEDROCK_MODEL` works. A 404 from Bedrock is translated
+into a message naming `BEDROCK_MODEL` and `BEDROCK_REGION`, because the usual
+cause is a model that is not enabled for the account in that region rather than a
+bad credential.
+
+**The two surfaces do not accept the same request.** Bedrock rejects
+`output_config.format` (*"Extra inputs are not permitted"*) and `strict: true` on
+a tool, so the first-party path uses a `json_schema` output format while the
+Bedrock path uses a single-tool schema with a forced `tool_choice`. Both send
+adaptive thinking and `ANTHROPIC_EFFORT`. This is the only branch in the module,
+and it is confined to `requestFor()` and `extractPayload()`. The consequence
+matters: on Bedrock the schema is advisory rather than enforced by the decoder,
+which is why the local Zod pass in `generateJson()` is load-bearing there and not
+merely a second opinion.
+
+Readiness is reported honestly on both. `BEDROCK_REGION` (or `AWS_REGION`) is
+checkable, so a missing one is `not_configured` naming the variable. AWS
+credentials are **not** checked up front: the chain resolves them asynchronously
+from sources this process cannot inspect, so claiming to have verified them would
+be a guess dressed as a fact (§42). An absent or expired credential surfaces
+instead as `provider_auth_failed` pointing at the AWS chain — never at
+`ANTHROPIC_API_KEY`, which would send the operator to a console they do not use.
+
+Verify a real call end-to-end with `npm run verify:providers claude`, which prints
+the transport and model that answered.
+
 ---
 
 ## Connecting YouTube
@@ -232,10 +289,12 @@ rather than exact numbers, so tuning a weight does not read as a regression.
 
 ### Credential
 
-`ANTHROPIC_API_KEY` is what step 3 needs. Without it, signal collection and
-scoring still run and persist; idea generation throws `NotConfiguredError`, the
-run is recorded as `blocked_not_configured`, and the Research screen names the
-missing variable instead of displaying invented ideas.
+A configured AI provider is what step 3 needs — `ANTHROPIC_API_KEY` on the
+first-party API, or `BEDROCK_REGION` plus AWS credentials when
+`AI_PROVIDER=bedrock` (see [AI provider](#ai-provider)). Without one, signal
+collection and scoring still run and persist; idea generation throws
+`NotConfiguredError`, the run is recorded as `blocked_not_configured`, and the
+Research screen names the missing variable instead of displaying invented ideas.
 
 ---
 
@@ -308,12 +367,13 @@ chapter list that is dropped below three entries or without a marker at exactly
 
 ### Credential
 
-`ANTHROPIC_API_KEY` is what both stages need, and `ANTHROPIC_MODEL` selects the
-model (default `claude-opus-5`). Without the key, `/api/scripts/generate` and
-`POST /api/metadata` refuse up front with `503` and the variable's name — checked
-in the route as well as the worker, because otherwise the project would move to
-`SCRIPT_GENERATING` and instantly to `FAILED`, which reads as a bug rather than as
-something to configure.
+A configured AI provider is what both stages need; see
+[AI provider](#ai-provider) for the two ways to supply one and which variable
+selects the model. Without one, `/api/scripts/generate` and `POST /api/metadata`
+refuse up front with `503` and the name of whichever variable is actually missing
+for the selected transport — checked in the route as well as the worker, because
+otherwise the project would move to `SCRIPT_GENERATING` and instantly to
+`FAILED`, which reads as a bug rather than as something to configure.
 
 ---
 
@@ -453,7 +513,8 @@ while the UI showed a tick beside it.
 
 ### Credential
 
-Concepts need `ANTHROPIC_API_KEY`; backgrounds need a configured visual provider.
+Concepts need a configured [AI provider](#ai-provider); backgrounds need a
+configured visual provider.
 The third requirement is a **font file**, which is where thumbnails differ from
 captions: `drawtext` needs a path, while libass takes a font *name* and lets
 fontconfig resolve it.

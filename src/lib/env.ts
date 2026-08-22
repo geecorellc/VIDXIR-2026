@@ -72,11 +72,49 @@ const schema = z.object({
   EMAIL_FROM: z.string().default("Tally <no-reply@tally.app>"),
   RESEND_API_KEY: z.string().optional(),
 
+  /**
+   * Which surface Claude is reached through (§32).
+   *
+   * `anthropic` is the first-party API and the default, so an existing
+   * deployment is unaffected by this variable existing. `bedrock` routes the
+   * same calls through AWS Bedrock, for an account that buys inference through
+   * AWS. Both run the same models; nothing else in the app changes.
+   *
+   * Not `mock`: there is no fake AI transport (§42). Mock selection stays with
+   * TALLY_USE_MOCK_PROVIDERS, which the capability registry reads.
+   */
+  AI_PROVIDER: z.enum(["anthropic", "bedrock"]).default("anthropic"),
+
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default("claude-opus-5"),
+  /** Reasoning effort. Sent on both transports; Bedrock accepts it unchanged. */
   ANTHROPIC_EFFORT: z
     .enum(["low", "medium", "high", "xhigh", "max"])
     .default("high"),
+
+  /**
+   * AWS region for Bedrock, e.g. `us-east-1`.
+   *
+   * Optional here, and required only when `AI_PROVIDER=bedrock` — enforced by
+   * the provider factory, which throws `NotConfiguredError` naming this variable
+   * rather than letting the SDK constructor throw an unclassified error. Falls
+   * back to the standard `AWS_REGION` / `AWS_DEFAULT_REGION` when unset, so a
+   * deployment that already sets those does not have to repeat itself.
+   *
+   * There is deliberately no `BEDROCK_ACCESS_KEY_ID` or secret here.
+   * Credentials come from the standard AWS provider chain, so they can live in
+   * an instance role, a container role or an SSO cache and never enter Tally's
+   * configuration (§33). Note this is distinct from `S3_*` and
+   * `REMOTION_AWS_REGION`: those are storage and render, and an operator may
+   * legitimately run them in a different account or region from inference.
+   */
+  BEDROCK_REGION: z.string().optional(),
+  /**
+   * Bedrock model id. Bedrock namespaces them — `anthropic.claude-opus-5`, not
+   * the bare `claude-opus-5`, which Bedrock answers with a 404. The `anthropic.`
+   * prefix is added when absent, so either form works.
+   */
+  BEDROCK_MODEL: z.string().default("anthropic.claude-opus-5"),
 
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
@@ -273,6 +311,27 @@ export function resetEnvCache(): void {
     throw new Error("resetEnvCache() is a test-only helper.");
   }
   cached = undefined;
+}
+
+/**
+ * The AWS region Bedrock should be called in, or undefined.
+ *
+ * `BEDROCK_REGION` is Tally's own knob and wins. `AWS_REGION` /
+ * `AWS_DEFAULT_REGION` are the standard AWS variables the credential chain
+ * already honours, and a deployment that sets them should not have to repeat
+ * itself. Those two are read from `process.env` rather than the typed schema
+ * because they are the ambient AWS environment, not Tally configuration.
+ *
+ * Lives here rather than in `providers/ai` so the capability registry can resolve
+ * a region without importing the Bedrock SDK.
+ */
+export function bedrockRegion(): string | undefined {
+  const candidates = [
+    env().BEDROCK_REGION,
+    process.env["AWS_REGION"],
+    process.env["AWS_DEFAULT_REGION"],
+  ];
+  return candidates.find((v) => typeof v === "string" && v.trim().length > 0)?.trim();
 }
 
 /** True when mock providers are active (development/test only). */
