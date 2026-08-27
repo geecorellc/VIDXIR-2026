@@ -128,6 +128,67 @@ const schema = z.object({
   PEXELS_API_KEY: z.string().optional(),
   RUNWAY_API_KEY: z.string().optional(),
 
+  /**
+   * AI video-generation providers an operator has enabled (Phase 11 §10).
+   *
+   * A comma-separated allow-list of provider ids — `fal`, `veo`, `runway`.
+   * Empty is the default and means link mode offers stock footage only, which is
+   * the pre-Phase-11 behaviour.
+   *
+   * `fal` is the fal.ai provider and carries a catalogue of models (Seedance,
+   * Kling, Hailuo/MiniMax, Hunyuan, Wan, Veo 3) behind one key. The older value
+   * `seedance` is still accepted and resolves to `fal`, so an environment written
+   * before the catalogue existed keeps working.
+   *
+   * This is the *server's* list, and it is what makes §10's rule enforceable: a
+   * client sends a provider id and the server answers from this variable plus the
+   * credential check. A provider absent here is unavailable however the request
+   * is manipulated, and a provider present here but missing its key reports
+   * `not_configured` rather than being quietly skipped (§11, §12).
+   *
+   * Deliberately separate from `VISUAL_PROVIDERS`: that list decides how the
+   * existing b-roll stage finds stock footage, and turning on AI video generation
+   * for one project must not change how every other project acquires visuals.
+   */
+  VIDEO_GEN_PROVIDERS: csv,
+  /**
+   * fal.ai API key — one credential for the whole fal.ai model catalogue (§11).
+   *
+   * fal.ai hosts video models from ByteDance (Seedance), Kuaishou (Kling), MiniMax
+   * (Hailuo), Tencent (Hunyuan), Alibaba (Wan) and Google (Veo 3) behind a single
+   * queue API. Most of those vendors publish no first-party public API Tally could
+   * integrate against, so fal.ai is the actual, verifiable service. Unset means
+   * every fal model reports NOT_CONFIGURED, never faked.
+   */
+  FAL_KEY: z.string().optional(),
+  /**
+   * Superseded, and kept only so setting it is not an error.
+   *
+   * Each fal model now carries its own endpoint slug in the catalogue in
+   * `providers/video-gen.ts`, because one variable cannot express ten endpoints.
+   * Retained rather than deleted: `env.ts` parses strictly, and removing a key an
+   * existing deployment sets would turn a harmless stale line into a boot failure.
+   * Nothing reads it.
+   *
+   * @deprecated Model endpoints come from `FAL_MODELS`, not from configuration.
+   */
+  FAL_SEEDANCE_MODEL: z
+    .string()
+    .default("fal-ai/bytedance/seedance/v1/pro/text-to-video"),
+  /**
+   * Google AI (Gemini) API key for Veo video generation (§12).
+   *
+   * Distinct from `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and not derivable
+   * from them. Those are an OAuth client for acting *as a user's YouTube
+   * channel*, granted YouTube scopes at consent; Veo is a first-party Google AI
+   * API authenticated with a project API key. Reusing the OAuth client here is
+   * not possible, so no duplicate Google auth infrastructure is created —
+   * `GEMINI_API_KEY` is simply a different credential for a different API.
+   */
+  GEMINI_API_KEY: z.string().optional(),
+  /** Veo model id. Overridable because Google versions these behind previews. */
+  GEMINI_VEO_MODEL: z.string().default("veo-3.1-generate-preview"),
+
   MUSIC_PROVIDER: z.enum(["freesound", "mock"]).default("mock"),
   FREESOUND_API_KEY: z.string().optional(),
 

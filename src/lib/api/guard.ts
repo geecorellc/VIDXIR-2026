@@ -106,9 +106,40 @@ export async function requireChannelAccess(
 export interface ProjectAccess {
   id: string;
   userId: string;
-  channelId: string;
+  /**
+   * Null for a project created from a pasted YouTube link (Phase 11 §4).
+   *
+   * Widened from `string`, which is why every route that needs a channel now has
+   * to say so. That is the intended consequence: the type makes "this endpoint
+   * requires a connected channel" explicit at each call site instead of assuming
+   * it, and publishing is the case where the assumption mattered.
+   */
+  channelId: string | null;
   title: string;
   status: (typeof projects.status.enumValues)[number];
+}
+
+/**
+ * Load a project and insist it has a channel.
+ *
+ * For the endpoints where a channel is genuinely required — publishing, YouTube
+ * metadata, anything acting on a real channel. Ownership of the channel is already
+ * implied: the project is the user's and `projects.channelId` was validated
+ * against `requireChannelAccess` when it was set.
+ */
+export async function requireProjectChannel(
+  userId: string,
+  projectId: string,
+): Promise<ProjectAccess & { channelId: string }> {
+  const project = await requireProjectAccess(userId, projectId);
+  if (!project.channelId) {
+    throw new ValidationError(
+      "This project is not linked to a YouTube channel. Connect a channel and " +
+        "assign it to this project first.",
+      { field: "channelId" },
+    );
+  }
+  return { ...project, channelId: project.channelId };
 }
 
 /** Load a project the user owns, or throw. */

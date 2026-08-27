@@ -27,6 +27,7 @@ import {
   Search,
   Send,
   Settings,
+  Youtube,
   type LucideIcon,
 } from "lucide-react";
 import { TallyLogo } from "@/components/ui/TallyLogo";
@@ -45,6 +46,7 @@ const ICONS: Record<string, LucideIcon> = {
   Radio,
   Settings,
   CreditCard,
+  Youtube,
 };
 
 export interface SidebarProps {
@@ -75,7 +77,12 @@ export function Sidebar({
    * state, which is more useful than a dead button.
    */
   function isPending(item: NavItem): boolean {
-    if (!hasChannel) return item.segment !== "channels" && item.segment !== "";
+    // A channel-less stage is never waiting on a channel (Phase 11 §2): link mode
+    // is the one content stage that works before anything is connected, so muting
+    // it would advertise the opposite of what it does.
+    if (!hasChannel && !item.channelless) {
+      return item.segment !== "channels" && item.segment !== "";
+    }
     if (!item.requires) return false;
     return REACH_ORDER[projectReach] < REACH_ORDER[item.requires];
   }

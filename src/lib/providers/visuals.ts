@@ -29,6 +29,12 @@ import { solidPng } from "@/lib/media/synthetic";
 import { fetchRemoteAsset, isOversizeAsset } from "@/lib/providers/fetch";
 import { providerJson } from "@/lib/providers/http";
 import { withUsage, type UsageContext } from "@/lib/providers/usage";
+import {
+  formatSpec,
+  pixelRatioLabel,
+  type FormatSpec,
+  type VideoFormat,
+} from "@/lib/video/format";
 
 const log = logger.child({ component: "visuals" });
 
@@ -42,9 +48,14 @@ const RUNWAY_API = "https://api.dev.runwayml.com/v1";
  */
 const RUNWAY_VERSION = "2024-11-06";
 
-/** 1080p output, so a portrait clip would letterbox badly. */
-const TARGET_WIDTH = 1920;
-const TARGET_HEIGHT = 1080;
+/*
+ * The target frame used to be two constants here, `TARGET_WIDTH` and
+ * `TARGET_HEIGHT`, both 1080p. It is now `VisualRequest.format`, resolved through
+ * `formatSpec()` at each use (Phase 11 §16): a portrait video wants portrait
+ * stock, because matching orientation is the difference between filling the frame
+ * and cropping the subject out of it. `formatSpec(undefined)` is landscape, so a
+ * caller that does not pass a format behaves exactly as before.
+ */
 
 /** A single b-roll clip. Anything larger is a 4K master we do not need. */
 const MAX_CLIP_BYTES = 120 * 1_048_576;
@@ -78,6 +89,14 @@ export interface VisualRequest {
    * deduplicated afterwards.
    */
   exclude?: ReadonlySet<string>;
+  /**
+   * Output frame this scene will be rendered into (Phase 11 §16).
+   *
+   * Optional, and landscape when omitted — the shape every pre-Phase-11 caller
+   * implicitly asked for. Pexels takes it as an `orientation` filter and Runway as
+   * a generation ratio, so it is a request parameter rather than a post-hoc crop.
+   */
+  format?: VideoFormat;
 }
 
 export interface AcquiredVisual {
@@ -274,14 +293,28 @@ async function pexelsVisual(
   return null;
 }
 
+/**
+ * The `orientation` value Pexels accepts for a target frame.
+ *
+ * Pexels has exactly three: `landscape`, `portrait`, `square`, which happens to
+ * match Tally's formats one-for-one. Filtering server-side rather than ranking
+ * client-side matters because the API returns 15 results per page — a portrait
+ * request that filtered afterwards would usually be left with none.
+ */
+function pexelsOrientation(spec: FormatSpec): string {
+  return spec.format;
+}
+
 async function pexelsVideo(
   term: string,
   key: string,
   request: VisualRequest,
 ): Promise<AcquiredVisual | null> {
+  const target = formatSpec(request.format);
   const url =
     `${PEXELS_API}/videos/search?query=${encodeURIComponent(term)}` +
-    `&per_page=${CANDIDATES_PER_TERM}&orientation=landscape&size=medium`;
+    `&per_page=${CANDIDATES_PER_TERM}&orientation=${pexelsOrientation(target)}` +
+    `&size=medium`;
 
   const body = await providerJson<{ videos?: PexelsVideo[] | null }>({
     provider: "Pexels",
@@ -294,7 +327,7 @@ async function pexelsVideo(
   );
 
   for (const video of videos) {
-    for (const file of rankedVideoFiles(video.video_files ?? [])) {
+    for (const file of rankedVideoFiles(video.video_files ?? [], target)) {
       let asset;
       try {
         asset = await fetchRemoteAsset(file.link, {
@@ -351,9 +384,10 @@ async function pexelsPhoto(
   key: string,
   request: VisualRequest,
 ): Promise<AcquiredVisual | null> {
+  const target = formatSpec(request.format);
   const url =
     `${PEXELS_API}/v1/search?query=${encodeURIComponent(term)}` +
-    `&per_page=${CANDIDATES_PER_TERM}&orientation=landscape`;
+    `&per_page=${CANDIDATES_PER_TERM}&orientation=${pexelsOrientation(target)}`;
 
   const body = await providerJson<{ photos?: PexelsPhoto[] | null }>({
     provider: "Pexels",
@@ -421,6 +455,7 @@ function pexelsId(kind: "video" | "photo", id: number): string {
  */
 function rankedVideoFiles(
   files: readonly PexelsVideoFile[],
+  target: FormatSpec,
 ): PexelsVideoFile[] {
   return files
     .filter(
@@ -429,7 +464,7 @@ function rankedVideoFiles(
         f.file_type !== "video/hls" &&
         f.quality !== "hls" &&
         (f.width ?? 0) > 0 &&
-        (f.width ?? 0) <= TARGET_WIDTH + 200,
+        (f.width ?? 0) <= target.width + 200,
     )
     .sort((a, b) => (b.width ?? 0) - (a.width ?? 0));
 }
@@ -478,6 +513,10 @@ async function runwayVisual(
   const prompt = (request.visualPrompt ?? request.searchTerms.join(", ")).trim();
   if (prompt.length < 8) return null;
 
+  const target = formatSpec(request.format);
+  // Runway spells a ratio as pixel dimensions and rejects the reduced "16:9".
+  const ratio = pixelRatioLabel(target);
+
   const headers = {
     authorization: `Bearer ${key}`,
     "x-runway-version": RUNWAY_VERSION,
@@ -491,7 +530,7 @@ async function runwayVisual(
     body: {
       model: "gen4_image",
       promptText: prompt.slice(0, 900),
-      ratio: `${TARGET_WIDTH}:${TARGET_HEIGHT}`,
+      ratio,
     },
   });
 
@@ -509,7 +548,7 @@ async function runwayVisual(
       model: "gen4_turbo",
       promptImage: imageUrl,
       promptText: prompt.slice(0, 900),
-      ratio: `${TARGET_WIDTH}:${TARGET_HEIGHT}`,
+      ratio,
       duration: 5,
     },
   });
@@ -530,8 +569,8 @@ async function runwayVisual(
     bytes: asset.bytes,
     mimeType: "video/mp4",
     extension: "mp4",
-    width: TARGET_WIDTH,
-    height: TARGET_HEIGHT,
+    width: target.width,
+    height: target.height,
     durationMs: 5_000,
     providerAssetId: `runway:${videoTask.id}`,
     sourceUrl: null,
@@ -606,9 +645,13 @@ function sleep(ms: number): Promise<void> {
  */
 async function mockVisual(request: VisualRequest): Promise<AcquiredVisual> {
   const seed = `${request.sceneIndex}:${request.searchTerms.join(",")}`;
-  // A quarter-size frame: the renderer scales it, and a full 1920×1080 PNG per
-  // scene is megabytes of storage for a development artefact.
-  const bytes = solidPng({ width: TARGET_WIDTH / 4, height: TARGET_HEIGHT / 4, seed });
+  const target = formatSpec(request.format);
+  // A quarter-size frame: the renderer scales it, and a full-resolution PNG per
+  // scene is megabytes of storage for a development artefact. Quartered from the
+  // *requested* frame so a portrait mock render is still portrait.
+  const width = Math.round(target.width / 4);
+  const height = Math.round(target.height / 4);
+  const bytes = solidPng({ width, height, seed });
 
   return {
     provider: "mock",
@@ -616,8 +659,8 @@ async function mockVisual(request: VisualRequest): Promise<AcquiredVisual> {
     bytes,
     mimeType: "image/png",
     extension: "png",
-    width: TARGET_WIDTH / 4,
-    height: TARGET_HEIGHT / 4,
+    width,
+    height,
     durationMs: null,
     providerAssetId: `mock:${request.sceneIndex}`,
     sourceUrl: null,

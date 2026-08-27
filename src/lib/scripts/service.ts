@@ -52,6 +52,7 @@ import {
   type ScriptBrief,
   type ScriptDraft,
 } from "@/lib/scripts/prompt";
+import { generationPlanFor } from "@/lib/video/generation-plan";
 import type { PlanTier } from "@/lib/plans";
 
 const log = logger.child({ component: "scripts" });
@@ -101,9 +102,25 @@ export async function startScriptGeneration(
     );
   }
 
-  if (await hasActiveJob(input.userId, project.channelId, SCRIPT_JOB_NAME)) {
+  /**
+   * Duplicate-job protection is per channel, or per project when there is none.
+   *
+   * `hasActiveJob` scopes by channel because writing two scripts for one channel at
+   * once wastes tokens and races on the version number. A link-mode project has no
+   * channel (Phase 11 §4), so the natural scope narrows to the project itself —
+   * which still prevents the double-submit this guard exists for, and correctly
+   * does *not* stop a user researching two pasted links at the same time.
+   */
+  if (
+    await hasActiveJob(
+      input.userId,
+      project.channelId ?? null,
+      SCRIPT_JOB_NAME,
+      project.channelId ? undefined : project.id,
+    )
+  ) {
     throw new ConflictError(
-      "A script is already being written for this channel. Wait for it to finish.",
+      "A script is already being written. Wait for it to finish.",
     );
   }
 
@@ -308,44 +325,55 @@ export async function buildBrief(
 ): Promise<ScriptBrief> {
   const project = await getProject(userId, projectId);
 
-  const [channelRows, settingsRows, brandRows] = await Promise.all([
-    db
-      .select({ title: channels.title })
-      .from(channels)
-      .where(
-        and(eq(channels.id, project.channelId), eq(channels.userId, userId)),
-      )
-      .limit(1),
-    db
-      .select({
-        niche: channelSettings.niche,
-        targetAudience: channelSettings.targetAudience,
-        contentLanguage: channelSettings.contentLanguage,
-        preferredLengthSeconds: channelSettings.preferredLengthSeconds,
-        contentStyle: channelSettings.contentStyle,
-      })
-      .from(channelSettings)
-      .where(
-        and(
-          eq(channelSettings.channelId, project.channelId),
-          eq(channelSettings.userId, userId),
-        ),
-      )
-      .limit(1),
-    db
-      .select({
-        brandName: brandKits.brandName,
-        defaultCta: brandKits.defaultCta,
-      })
-      .from(brandKits)
-      .where(
-        and(
-          eq(brandKits.channelId, project.channelId),
-          eq(brandKits.userId, userId),
-        ),
-      )
-      .limit(1),
-  ]);
+  /**
+   * Channel context, when there is a channel (Phase 11 §4).
+   *
+   * All three lookups supply *voice*: who the channel talks to, in what style, with
+   * what CTA. A link-mode project has none of that yet, and the brief is still
+   * complete without it — the topic, the chosen angle and the research findings are
+   * what the script is actually written from. Every field below is already nullable
+   * because a channel whose settings screen was never filled in produces the same
+   * empty brief, so the model has no new case to handle.
+   */
+  const channelId = project.channelId;
+  const [channelRows, settingsRows, brandRows] = channelId
+    ? await Promise.all([
+        db
+          .select({ title: channels.title })
+          .from(channels)
+          .where(and(eq(channels.id, channelId), eq(channels.userId, userId)))
+          .limit(1),
+        db
+          .select({
+            niche: channelSettings.niche,
+            targetAudience: channelSettings.targetAudience,
+            contentLanguage: channelSettings.contentLanguage,
+            preferredLengthSeconds: channelSettings.preferredLengthSeconds,
+            contentStyle: channelSettings.contentStyle,
+          })
+          .from(channelSettings)
+          .where(
+            and(
+              eq(channelSettings.channelId, channelId),
+              eq(channelSettings.userId, userId),
+            ),
+          )
+          .limit(1),
+        db
+          .select({
+            brandName: brandKits.brandName,
+            defaultCta: brandKits.defaultCta,
+          })
+          .from(brandKits)
+          .where(
+            and(
+              eq(brandKits.channelId, channelId),
+              eq(brandKits.userId, userId),
+            ),
+          )
+          .limit(1),
+      ])
+    : ([[], [], []] as const);
 
   const settings = settingsRows[0];
 
@@ -357,7 +385,10 @@ export async function buildBrief(
     ? await loadSourceTitles(userId, idea.sourceResultIds)
     : [];
 
-  const own = await loadOwnPerformance(userId, project.channelId);
+  // "What has worked for you before" needs a channel to have a before. Empty for
+  // a link-mode project, which the prompt already handles — a new channel's first
+  // script has the same empty list.
+  const own = channelId ? await loadOwnPerformance(userId, channelId) : [];
 
   return {
     projectTitle: project.title,
@@ -377,6 +408,8 @@ export async function buildBrief(
           rationale: idea.rationale ?? "",
           topic: idea.topic ?? "",
           targetKeywords: idea.targetKeywords,
+          hook: idea.hook,
+          trendSignal: idea.trendSignal,
         }
       : null,
     sourceTitles,
@@ -385,7 +418,45 @@ export async function buildBrief(
       brandName: brandRows[0]?.brandName ?? null,
       defaultCta: brandRows[0]?.defaultCta ?? null,
     },
+    generation: generationBrief(project),
   };
+}
+
+/**
+ * How the video will be made, for the prompt (Phase 11 §8, §16).
+ *
+ * Returns null for a project with no stored choice — a pre-Phase-11 project, and
+ * saying nothing is right: it will render stock, but the script was written without
+ * that in mind and retrofitting the instruction changes nothing about the draft
+ * already stored.
+ *
+ * Note the `catch`. `generationPlanFor` throws when a stored model has since been
+ * removed or its credential rotated away, and that is the correct behaviour *in the
+ * visuals stage*, which is about to spend money on it. Here it would fail the script
+ * for a reason that has nothing to do with writing, so the choice is dropped from
+ * the prompt and the visuals stage remains the place that reports it (§42).
+ */
+function generationBrief(project: {
+  generationMode: string | null;
+  generationModel: string | null;
+  videoFormat: string | null;
+}): ScriptBrief["generation"] {
+  if (!project.generationMode) return null;
+
+  try {
+    const plan = generationPlanFor(project);
+    return {
+      mode: plan.mode,
+      modelLabel: plan.model?.label ?? null,
+      maxClipSeconds: plan.model?.maxClipSeconds ?? null,
+      format: plan.format,
+    };
+  } catch (error) {
+    log.warn("could not resolve the generation plan for the script brief", {
+      error,
+    });
+    return null;
+  }
 }
 
 async function loadIdea(userId: string, ideaId: string) {
@@ -397,6 +468,8 @@ async function loadIdea(userId: string, ideaId: string) {
       topic: ideas.topic,
       targetKeywords: ideas.targetKeywords,
       sourceResultIds: ideas.sourceResultIds,
+      hook: ideas.hook,
+      trendSignal: ideas.trendSignal,
     })
     .from(ideas)
     .where(and(eq(ideas.id, ideaId), eq(ideas.userId, userId)))

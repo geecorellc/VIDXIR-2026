@@ -39,8 +39,8 @@ import {
   type SignalInput,
 } from "@/lib/research/scoring";
 import type {
-  ChannelResearchContext,
   CollectedSignal,
+  ResearchContext,
 } from "@/lib/research/signals";
 
 const log = logger.child({ component: "research-ideas" });
@@ -65,6 +65,17 @@ const IdeaSchema = z.object({
   title: z.string().min(8).max(200),
   angle: z.string().min(10),
   rationale: z.string().min(10),
+  /**
+   * Phase 11 §7's opening line and trend justification.
+   *
+   * Optional in the parse, required in the JSON schema below. The asymmetry is
+   * deliberate: the model is *asked* for both on every generation, but an idea that
+   * arrives without a hook is still a usable idea, and failing the whole batch —
+   * five good angles discarded because the sixth omitted one prose field — is the
+   * worse outcome. The columns are nullable for the same reason.
+   */
+  hook: z.string().max(400).optional(),
+  trendSignal: z.string().max(600).optional(),
   topic: z.string().min(2).max(160),
   targetKeywords: z.array(z.string()).max(12),
   /** 1-based indices into the evidence list the model was shown. */
@@ -103,6 +114,20 @@ const IDEA_JSON_SCHEMA = jsonSchema({
               "engagement, an unanswered question in the comments-heavy videos) " +
               "points at unmet demand.",
           },
+          hook: {
+            type: "string",
+            description:
+              "The first one or two spoken sentences of the video — what makes a " +
+              "viewer stay past three seconds. Written to be said aloud, not read. " +
+              "Must not quote any source video.",
+          },
+          trendSignal: {
+            type: "string",
+            description:
+              "One sentence naming the observed evidence behind this angle, e.g. " +
+              "\"three uploads in the last two weeks are averaging 4x the topic's " +
+              "usual velocity\". State what was measured, not a score.",
+          },
           topic: {
             type: "string",
             description:
@@ -124,6 +149,8 @@ const IDEA_JSON_SCHEMA = jsonSchema({
           "title",
           "angle",
           "rationale",
+          "hook",
+          "trendSignal",
           "topic",
           "targetKeywords",
           "sourceIndices",
@@ -134,21 +161,26 @@ const IDEA_JSON_SCHEMA = jsonSchema({
   required: ["ideas"],
 });
 
-const SYSTEM_PROMPT = `You are Tally's research analyst. You study public YouTube performance data for one channel's niche and propose ORIGINAL video ideas.
+const SYSTEM_PROMPT = `You are Tally's research analyst. You study public YouTube performance data for one topic area and propose ORIGINAL video ideas.
 
 Your discipline:
 - Diagnose, do not copy. The evidence shows what earned attention; your job is to work out WHY and then propose something new that serves that same demand better or from a different angle.
 - Never restate a source title. An idea that is a source video with different words is a failure, not an idea.
 - Prefer specific over broad. "Why index funds beat picking stocks over 30 years" beats "Investing tips".
 - Ground every idea in the evidence. If a signal does not support an idea, do not propose it.
-- Respect the channel's niche, language and audience. An idea outside the niche is useless however good it is.
+- Respect the stated niche, language and audience. An idea outside the niche is useless however good it is.
 - No misleading claims, no fabricated statistics, no titles the video could not honestly deliver.
-- Never propose reusing, re-uploading, reacting to, or compiling someone else's footage. Every idea must be producible as original content.`;
+- Never propose reusing, re-uploading, reacting to, or compiling someone else's footage. Every idea must be producible as original content.
+- When a SOURCE VIDEO is given, it is research material: study what topic it serves and propose original videos serving that same audience. Never propose remaking it, re-titling it, responding to it, or reproducing its content.`;
 
 export interface GeneratedIdea {
   title: string;
   angle: string;
   rationale: string;
+  /** §7's opening line. Null when the model omitted it. */
+  hook: string | null;
+  /** §7's "why this angle": the observed evidence, in one sentence. */
+  trendSignal: string | null;
   topic: string;
   targetKeywords: string[];
   /** `research_results.id` values this idea was derived from. */
@@ -156,12 +188,31 @@ export interface GeneratedIdea {
   scores: ScoredOpportunity;
 }
 
+/**
+ * The pasted video, as the prompt sees it (Phase 11 §7).
+ *
+ * Title, channel and topics only — deliberately not the description, the tags or
+ * anything resembling a transcript. §22 makes this a research source, and the
+ * narrowest thing that still answers "what is this about" is the safest thing to
+ * put in a prompt that generates original titles.
+ */
+export interface IdeaSourceSeed {
+  title: string;
+  channelTitle: string | null;
+  niche: string | null;
+  topics: string[];
+  viewCount: number | null;
+  durationSeconds: number | null;
+}
+
 export interface GenerateIdeasInput {
   userId: string;
-  context: ChannelResearchContext;
+  context: ResearchContext;
   /** Persisted evidence: the row id paired with the signal it came from. */
   evidence: Array<{ id: string; signal: CollectedSignal }>;
   ownTopPerformers: Array<{ title: string; views: number | null }>;
+  /** Present only for a link-mode run. */
+  source?: IdeaSourceSeed | null;
   jobId?: string | null;
   traceId?: string | null;
   now?: Date;
@@ -189,7 +240,12 @@ export async function generateIdeas(
 
   const batch = await generateJson({
     system: SYSTEM_PROMPT,
-    prompt: buildPrompt(input.context, evidence, input.ownTopPerformers),
+    prompt: buildPrompt(
+      input.context,
+      evidence,
+      input.ownTopPerformers,
+      input.source ?? null,
+    ),
     schema: IdeaBatchSchema,
     jsonSchema: IDEA_JSON_SCHEMA,
     maxTokens: 8_000,
@@ -229,10 +285,19 @@ export async function generateIdeas(
 
     const scoringSet = supporting.length > 0 ? supporting : evidence;
 
-    if (isDerivative(idea.title, scoringSet.map((e) => e.signal.title))) {
+    // The pasted video's own title is checked alongside the evidence titles. §7
+    // forbids copying the source title specifically, and the source is not
+    // guaranteed to appear in `evidence` — §6 excludes it from its own results, so
+    // without this line it would be the one title the check could not see.
+    const forbiddenTitles = [
+      ...scoringSet.map((e) => e.signal.title),
+      ...(input.source ? [input.source.title] : []),
+    ];
+
+    if (isDerivative(idea.title, forbiddenTitles)) {
       log.warn("rejected derivative idea", {
         userId: input.userId,
-        channelId: input.context.channelId,
+        channelId: input.context.channelId ?? undefined,
         traceId: input.traceId ?? undefined,
         title: idea.title,
       });
@@ -255,6 +320,8 @@ export async function generateIdeas(
       title: idea.title,
       angle: idea.angle,
       rationale: idea.rationale,
+      hook: idea.hook?.trim() || null,
+      trendSignal: idea.trendSignal?.trim() || null,
       topic: idea.topic,
       targetKeywords: idea.targetKeywords,
       sourceResultIds,
@@ -311,13 +378,38 @@ export function isDerivative(
  * 5-year-old hit with a breakout; views/hour is what distinguishes them.
  */
 function buildPrompt(
-  context: ChannelResearchContext,
+  context: ResearchContext,
   evidence: Array<{ id: string; signal: CollectedSignal }>,
   ownTopPerformers: Array<{ title: string; views: number | null }>,
+  source: IdeaSourceSeed | null,
 ): string {
   const lines: string[] = [];
 
-  lines.push("CHANNEL");
+  if (source) {
+    // Stated before the brief and framed as reference material, because the
+    // instruction that matters most is what *not* to do with it (§22).
+    lines.push(
+      "SOURCE VIDEO — the user pasted this link as a starting point. It is " +
+        "RESEARCH MATERIAL ONLY. Do not remake it, re-title it, summarise it, " +
+        "respond to it, or reuse its content. Use it only to understand which " +
+        "topic and audience the user wants to make videos for.",
+    );
+    lines.push(`- Title: "${source.title}"`);
+    if (source.channelTitle) lines.push(`- Published by: ${source.channelTitle}`);
+    if (source.niche) lines.push(`- Apparent subject area: ${source.niche}`);
+    if (source.topics.length > 0)
+      lines.push(`- Topic signals: ${source.topics.join(", ")}`);
+    if (source.viewCount !== null)
+      lines.push(`- Views: ${formatNumber(source.viewCount)}`);
+    if (source.durationSeconds !== null)
+      lines.push(
+        `- Length: ${Math.round(source.durationSeconds / 60)} minutes ` +
+          "(a guide to the format the user has in mind)",
+      );
+    lines.push("");
+  }
+
+  lines.push(source ? "BRIEF" : "CHANNEL");
   lines.push(`- Niche: ${context.niche ?? "(not specified)"}`);
   lines.push(
     `- Keywords: ${context.keywords.length > 0 ? context.keywords.join(", ") : "(none given)"}`,
@@ -370,10 +462,14 @@ function buildPrompt(
   lines.push("");
   lines.push("TASK");
   lines.push(
-    `Propose up to ${IDEA_COUNT} original video ideas for this channel. For each, ` +
-      "state the angle that makes it different from the evidence, the rationale " +
-      "grounded in specific numbered signals, and the evidence indices you used. " +
-      "Do not restate any evidence title.",
+    `Propose up to ${IDEA_COUNT} original video ideas ` +
+      (source ? "for this topic and audience" : "for this channel") +
+      ". For each, state the angle that makes it different from the evidence, the " +
+      "rationale grounded in specific numbered signals, the hook the video opens " +
+      "with, the trend signal that justifies it, and the evidence indices you " +
+      "used. Do not restate any evidence title" +
+      (source ? " or the source video's title" : "") +
+      ".",
   );
 
   return lines.join("\n");
@@ -394,10 +490,13 @@ function formatNumber(value: number): string {
  * can still be explained even after the defaults or the channel's overrides have
  * changed. §8 calls the formula configurable; that is only safe if history
  * records the configuration it was computed under.
+ *
+ * `channelId` is null for a link-mode run (Phase 11 §4): the idea belongs to the
+ * user, and every read path already filters on `userId`.
  */
 export async function persistIdeas(
   userId: string,
-  channelId: string,
+  channelId: string | null,
   runId: string,
   generated: readonly GeneratedIdea[],
 ): Promise<string[]> {
@@ -413,6 +512,8 @@ export async function persistIdeas(
         title: idea.title,
         angle: idea.angle,
         rationale: idea.rationale,
+        hook: idea.hook,
+        trendSignal: idea.trendSignal,
         topic: idea.topic,
         targetKeywords: idea.targetKeywords,
         sourceResultIds: idea.sourceResultIds,

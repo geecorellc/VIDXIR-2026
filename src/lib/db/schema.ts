@@ -641,12 +641,42 @@ export const researchRuns = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    channelId: uuid("channel_id")
-      .notNull()
-      .references(() => channels.id, { onDelete: "cascade" }),
+    /**
+     * Nullable since Phase 11 (§4).
+     *
+     * A run seeded by a pasted YouTube link belongs to a user, not to a channel —
+     * §4 requires that researching a link needs no connected channel at all. Every
+     * channel-mode run still sets it, and every query that reads a channel's runs
+     * still filters on it, so nothing about Phases 1-10 changes. The column was
+     * `NOT NULL`, which made channel-coupling a constraint rather than a
+     * convention; dropping the constraint is what makes link mode expressible.
+     */
+    channelId: uuid("channel_id").references(() => channels.id, {
+      onDelete: "cascade",
+    }),
     status: jobStatusEnum("status").notNull().default("queued"),
-    /** `manual` | `automation` — who asked for this run. */
+    /** `manual` | `automation` | `youtube_link` — who or what asked for this run. */
     trigger: varchar("trigger", { length: 32 }).notNull().default("manual"),
+    /**
+     * The pasted video this run was seeded from (Phase 11 §4, §6).
+     *
+     * A research *source*, never a template: §22 makes the source video reference
+     * material and nothing else. Stored so the analysis screen can show what was
+     * pasted and so a repeat paste is recognisable, not so anything can be copied
+     * from it.
+     */
+    sourceVideoId: varchar("source_video_id", { length: 32 }),
+    /**
+     * What the source video turned out to be about (§5).
+     *
+     * Denormalised from the analysis so the trend stage and the angle stage can
+     * read the seed topic without re-fetching from YouTube — and so a run whose
+     * source has since been deleted from YouTube still explains itself.
+     */
+    sourceTitle: text("source_title"),
+    sourceChannelTitle: varchar("source_channel_title", { length: 200 }),
+    /** Full §5 analysis, exactly as the provider returned it, minus nothing. */
+    sourceAnalysis: jsonb("source_analysis").$type<Record<string, unknown>>(),
     niche: varchar("niche", { length: 160 }),
     keywords: jsonb("keywords")
       .notNull()
@@ -694,9 +724,10 @@ export const researchResults = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    channelId: uuid("channel_id")
-      .notNull()
-      .references(() => channels.id, { onDelete: "cascade" }),
+    /** Nullable since Phase 11 — a link-mode run has no channel (§4). */
+    channelId: uuid("channel_id").references(() => channels.id, {
+      onDelete: "cascade",
+    }),
     source: varchar("source", { length: 48 }).notNull(),
     youtubeVideoId: varchar("youtube_video_id", { length: 32 }),
     youtubeChannelId: varchar("youtube_channel_id", { length: 64 }),
@@ -733,15 +764,34 @@ export const ideas = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    channelId: uuid("channel_id")
-      .notNull()
-      .references(() => channels.id, { onDelete: "cascade" }),
+    /** Nullable since Phase 11 — a link-mode idea has no channel (§4, §7). */
+    channelId: uuid("channel_id").references(() => channels.id, {
+      onDelete: "cascade",
+    }),
     runId: uuid("run_id").references(() => researchRuns.id, {
       onDelete: "set null",
     }),
     title: text("title").notNull(),
     angle: text("angle"),
     rationale: text("rationale"),
+    /**
+     * The opening line the video leads with (Phase 11 §7).
+     *
+     * §7 asks each proposal to carry a title *and* a hook. Before Phase 11 the
+     * hook was written during scripting, which meant a user chose an angle without
+     * seeing how it would open — the part that decides whether the video is
+     * watched. Nullable: a channel-mode idea from Phases 1-10 has none, and that is
+     * not a defect.
+     */
+    hook: text("hook"),
+    /**
+     * Which research signal supports this angle (§7).
+     *
+     * One sentence naming the observed evidence, so "why this angle" is answerable
+     * from the row rather than from a scoring number. Distinct from `rationale`,
+     * which argues the creative case.
+     */
+    trendSignal: text("trend_signal"),
     /** The underlying topic opportunity, not a copy of a source title (§7). */
     topic: varchar("topic", { length: 200 }),
     targetKeywords: jsonb("target_keywords")
@@ -794,9 +844,17 @@ export const projects = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    channelId: uuid("channel_id")
-      .notNull()
-      .references(() => channels.id, { onDelete: "cascade" }),
+    /**
+     * Nullable since Phase 11 (§4).
+     *
+     * A project created from a pasted link has no channel until the user connects
+     * one. Research, scripting, generation and preview all work without it;
+     * publishing does not, and the publish guard refuses a channel-less project
+     * explicitly rather than relying on this column having been non-null.
+     */
+    channelId: uuid("channel_id").references(() => channels.id, {
+      onDelete: "cascade",
+    }),
     ideaId: uuid("idea_id").references(() => ideas.id, { onDelete: "set null" }),
     title: text("title").notNull(),
     status: projectStatusEnum("status").notNull().default("IDEA"),
@@ -818,6 +876,41 @@ export const projects = pgTable(
     traceId: varchar("trace_id", { length: 64 }),
 
     targetDurationSeconds: integer("target_duration_seconds"),
+
+    /**
+     * How this project's visuals are produced (Phase 11 §9).
+     *
+     * `STOCK` or `AI_VIDEO`. Nullable rather than defaulted so an existing project
+     * reads as "never chose", which `generationModeOf()` resolves to `STOCK` — the
+     * behaviour it actually rendered with. A default of `'STOCK'` would be almost
+     * the same thing and would lose the distinction between a user who picked stock
+     * and a row that predates the choice.
+     */
+    generationMode: varchar("generation_mode", { length: 16 }),
+    /**
+     * The AI model selected, e.g. `veo/3.1` (§10).
+     *
+     * Only meaningful when `generationMode` is `AI_VIDEO`. Re-validated against the
+     * server's current catalogue on every use, never trusted because it was
+     * accepted once: a provider can be switched off between choosing and rendering.
+     */
+    generationModel: varchar("generation_model", { length: 64 }),
+    /**
+     * Output frame: `landscape` | `portrait` | `square` (§16).
+     *
+     * Null means landscape, which is what every pre-Phase-11 render produced.
+     */
+    videoFormat: varchar("video_format", { length: 16 }),
+
+    /**
+     * The pasted YouTube video this project was seeded from (§4, §22).
+     *
+     * A provenance record, not an input to generation. Nothing reads this to copy
+     * from — the script is written from the research findings and the chosen angle.
+     * Kept so a project can be traced back to what prompted it.
+     */
+    sourceVideoId: varchar("source_video_id", { length: 32 }),
+
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

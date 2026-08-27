@@ -66,6 +66,7 @@ describe("feature gating", () => {
   const PAID_ONLY: FeatureKey[] = [
     "aiVoiceover",
     "brollLibrary",
+    "aiVideoGeneration",
     "thumbnailAbTest",
     "autoPublish",
     "scheduling",
@@ -75,6 +76,7 @@ describe("feature gating", () => {
     for (const feature of PAID_ONLY) {
       expect(hasFeature("starter", feature)).toBe(false);
     }
+    expect(hasFeature("starter", "premiumVideoModels")).toBe(false);
     expect(hasFeature("starter", "crossChannelAnalytics")).toBe(false);
     expect(hasFeature("starter", "priorityRenderQueue")).toBe(false);
   });
@@ -90,6 +92,16 @@ describe("feature gating", () => {
     expect(hasFeature("studio", "priorityRenderQueue")).toBe(false);
     expect(hasFeature("scale", "crossChannelAnalytics")).toBe(true);
     expect(hasFeature("scale", "priorityRenderQueue")).toBe(true);
+  });
+
+  it("keeps premium video models on Scale only (Phase 11 §19)", () => {
+    // The commercial point of the split: Studio pays for AI video, Scale pays for
+    // the models that cost several times more per clip. Studio having both would
+    // make the tier difference free to exploit.
+    expect(hasFeature("studio", "aiVideoGeneration")).toBe(true);
+    expect(hasFeature("studio", "premiumVideoModels")).toBe(false);
+    expect(hasFeature("scale", "aiVideoGeneration")).toBe(true);
+    expect(hasFeature("scale", "premiumVideoModels")).toBe(true);
   });
 
   it("gives Scale everything Studio has", () => {

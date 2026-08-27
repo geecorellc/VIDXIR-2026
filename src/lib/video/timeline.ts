@@ -22,7 +22,17 @@
  * asset.
  */
 
-/** 1080p at 30fps. YouTube's sweet spot for talking-head-plus-b-roll content. */
+import { formatSpec, type VideoFormat } from "@/lib/video/format";
+
+/**
+ * 1080p at 30fps — YouTube's sweet spot for talking-head-plus-b-roll content, and
+ * the frame every render produced before Phase 11.
+ *
+ * Still exported, and still the default when `BuildTimelineInput.format` is
+ * absent, so an existing project's document comes out byte-identical. The frame is
+ * now a parameter rather than a fact (§16); these are the landscape values, kept
+ * as named constants because tests and the render provider assert against them.
+ */
 export const OUTPUT_WIDTH = 1920;
 export const OUTPUT_HEIGHT = 1080;
 export const OUTPUT_FPS = 30;
@@ -110,6 +120,11 @@ export interface SceneInput {
 }
 
 export interface BuildTimelineInput {
+  /**
+   * Output frame (Phase 11 §16). Landscape 1920x1080 when omitted, which is what
+   * every pre-Phase-11 caller asked for implicitly.
+   */
+  format?: VideoFormat | null;
   scenes: readonly SceneInput[];
   music: TimelineMusic | null;
   captionCues: ReadonlyArray<{ startMs: number; endMs: number; text: string }>;
@@ -151,6 +166,7 @@ const MIN_SCENE_MS = 1_500;
  * already, which is what makes the offsets testable without generating audio.
  */
 export function buildTimeline(input: BuildTimelineInput): TimelineDocument {
+  const frame = formatSpec(input.format);
   const scenes: TimelineScene[] = [];
   let cursor = 0;
 
@@ -185,9 +201,9 @@ export function buildTimeline(input: BuildTimelineInput): TimelineDocument {
   };
 
   return {
-    width: OUTPUT_WIDTH,
-    height: OUTPUT_HEIGHT,
-    fps: OUTPUT_FPS,
+    width: frame.width,
+    height: frame.height,
+    fps: frame.fps,
     durationMs,
     scenes,
     music: input.music,

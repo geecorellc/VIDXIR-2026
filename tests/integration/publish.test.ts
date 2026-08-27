@@ -1285,7 +1285,12 @@ suite("youtube publishing (integration)", () => {
       // an empty project rather than someone else's rendered video.
       const readiness = await publishReadiness(intruder.id, owner.project.id);
       expect(readiness.ready).toBe(false);
-      expect(readiness.blocked).toHaveLength(3);
+      // Four rather than the owner's three: the channel lookup is scoped by
+      // `userId` too, so an intruder is also told the project has no channel.
+      // That is the point — the answer describes an empty project and reveals
+      // nothing about the real one, including whether it is connected.
+      expect(readiness.blocked).toHaveLength(4);
+      expect(readiness.blocked[0]).toMatch(/not linked to a YouTube channel/i);
     }, 120_000);
   });
 });

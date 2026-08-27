@@ -65,7 +65,16 @@ import {
   transcribe,
   transcriptionProviderName,
 } from "@/lib/providers/transcription";
-import { acquireVisual, isVisualsConfigured } from "@/lib/providers/visuals";
+import {
+  acquireVisual,
+  isVisualsConfigured,
+  type AcquiredVisual,
+} from "@/lib/providers/visuals";
+import {
+  generateClip,
+  isVideoGenConfigured,
+  type GenerationMode,
+} from "@/lib/providers/video-gen";
 import { isVoiceConfigured, synthesize } from "@/lib/providers/voice";
 import {
   deriveProgress,
@@ -83,6 +92,11 @@ import {
   storageKey,
 } from "@/lib/storage";
 import type { PipelineStage } from "@/lib/stages";
+import { formatSpec } from "@/lib/video/format";
+import {
+  generationPlanFor,
+  type GenerationPlan,
+} from "@/lib/video/generation-plan";
 import { directScenes, segmentScript } from "@/lib/video/scenes";
 import { buildTimeline, type TimelineDocument } from "@/lib/video/timeline";
 import type { PlanTier } from "@/lib/plans";
@@ -178,8 +192,16 @@ export async function startVideoBuild(
 
   await assertCanStartVideo(input.userId, input.tier);
 
-  // One build per project at a time. A second would spend a second voiceover and
-  // a second render to produce a duplicate of what the first is producing.
+  /**
+   * One build per project at a time. A second would spend a second voiceover and
+   * a second render to produce a duplicate of what the first is producing.
+   *
+   * Scoped by channel when there is one, and by the project itself when there is
+   * not (Phase 11 §4). Passing a null channel with no fallback would throw inside
+   * `hasActiveJob`, which is why the narrowing is explicit here: a link-mode
+   * project must still be protected against a double-submit.
+   */
+  const scope = project.channelId ? undefined : project.id;
   for (const name of [
     SCENE_PLAN_JOB,
     VOICEOVER_JOB,
@@ -189,9 +211,11 @@ export async function startVideoBuild(
     TIMELINE_JOB,
     RENDER_JOB,
   ]) {
-    if (await hasActiveJob(input.userId, project.channelId, name)) {
+    if (
+      await hasActiveJob(input.userId, project.channelId ?? null, name, scope)
+    ) {
       throw new ConflictError(
-        "A video is already being built for this channel. Wait for it to finish.",
+        "A video is already being built. Wait for it to finish.",
       );
     }
   }
@@ -471,6 +495,14 @@ export async function executeVoiceover(input: StageInput): Promise<{
  * concurrently is the fastest way to earn a 429 from Pexels and lose the whole
  * stage. Sequential also lets each scene exclude the provider asset ids already
  * used, which is what prevents the same clip appearing four times in one video.
+ *
+ * Phase 11 (§9, §17) adds a second way to fill a scene. This is the single place
+ * where "stock or AI" is decided, and it is a branch inside the existing stage
+ * rather than a new stage: an AI clip and a stock clip both end up as one asset row
+ * with a `visualAssetId` on the scene, so everything downstream — the timeline, the
+ * renderer, the FFmpeg assembly that holds a short clip to fill its slot — is
+ * untouched. Adding an eighth stage would have meant two paths through the pipeline
+ * and two places for progress, retries and failure to diverge.
  */
 export async function executeVisuals(input: StageInput): Promise<{
   acquired: number;
@@ -479,6 +511,12 @@ export async function executeVisuals(input: StageInput): Promise<{
     const sceneRows = await loadScenes(input.userId, input.projectId);
     const narration = await loadNarrationDurations(input.userId, input.projectId);
 
+    // Resolved once for the whole stage, and before any provider call: a project
+    // whose chosen model has become unavailable should fail having spent nothing,
+    // not halfway through scene nine.
+    const project = await getProject(input.userId, input.projectId);
+    const plan = generationPlanFor(project);
+
     const used = new Set<string>();
     let acquired = 0;
 
@@ -486,26 +524,39 @@ export async function executeVisuals(input: StageInput): Promise<{
       await reportProgress(
         input.jobId,
         Math.round((position / Math.max(1, sceneRows.length)) * 95),
-        `Finding b-roll for scene ${position + 1} of ${sceneRows.length}`,
+        plan.mode === "AI_VIDEO"
+          ? `Generating scene ${position + 1} of ${sceneRows.length}`
+          : `Finding b-roll for scene ${position + 1} of ${sceneRows.length}`,
       );
 
-      const visual = await acquireVisual(
-        {
-          sceneIndex: scene.index,
-          visualPrompt: scene.visualPrompt,
-          searchTerms: scene.searchTerms,
-          durationMs: narration.get(scene.index) ?? 6_000,
-          exclude: used,
-        },
-        {
-          usage: {
-            userId: input.userId,
-            projectId: input.projectId,
-            jobId: input.jobId,
-            traceId: input.traceId ?? null,
-          },
-        },
-      );
+      const durationMs = narration.get(scene.index) ?? 6_000;
+      const usage = {
+        userId: input.userId,
+        projectId: input.projectId,
+        jobId: input.jobId,
+        traceId: input.traceId ?? null,
+      };
+
+      const visual =
+        plan.mode === "AI_VIDEO" && plan.model
+          ? await generateSceneClip({
+              plan,
+              modelId: plan.model.id,
+              scene,
+              durationMs,
+              usage,
+            })
+          : await acquireVisual(
+              {
+                sceneIndex: scene.index,
+                visualPrompt: scene.visualPrompt,
+                searchTerms: scene.searchTerms,
+                durationMs,
+                format: plan.format,
+                exclude: used,
+              },
+              { usage },
+            );
 
       if (visual.providerAssetId) used.add(visual.providerAssetId);
 
@@ -547,6 +598,80 @@ export async function executeVisuals(input: StageInput): Promise<{
 
     return { acquired };
   });
+}
+
+/**
+ * Generate one scene's clip with the selected AI model (§9, §15).
+ *
+ * An adapter, and only an adapter: it turns a scene row into a prompt and a
+ * `GeneratedClip` back into the `AcquiredVisual` shape the rest of the stage already
+ * stores. Nothing new is invented about how an asset is persisted, which is what
+ * keeps the AI branch and the stock branch from drifting apart.
+ *
+ * Two details worth stating:
+ *
+ *  - **The prompt is the scene's visual direction, not its narration.** The scene
+ *    director already writes `visualPrompt` as a description of a shot; handing a
+ *    model the spoken words instead would produce footage of someone talking. The
+ *    search terms are appended as a fallback for a scene whose direction is empty,
+ *    since a model given nothing generates nothing useful.
+ *  - **`kind` follows the bytes, not the intent.** A provider that returned a still
+ *    is recorded as `generated_image`, so the timeline holds it for its slot rather
+ *    than expecting motion. Recording it as `generated_video` because AI mode was
+ *    requested is exactly the sort of claim §42 forbids.
+ */
+async function generateSceneClip(args: {
+  plan: GenerationPlan;
+  modelId: string;
+  scene: { index: number; visualPrompt: string | null; searchTerms: string[] };
+  durationMs: number;
+  usage: {
+    userId: string;
+    projectId: string;
+    jobId: string;
+    traceId: string | null;
+  };
+}): Promise<AcquiredVisual> {
+  const { plan, modelId, scene, durationMs, usage } = args;
+
+  const prompt =
+    scene.visualPrompt?.trim() ||
+    scene.searchTerms.filter(Boolean).join(", ") ||
+    // Nothing to go on. Better than an empty prompt, and the scene director
+    // producing no direction at all is itself a defect worth seeing in the output.
+    "A clean, well-lit establishing shot relevant to the narration";
+
+  const clip = await generateClip(
+    {
+      prompt,
+      modelId,
+      format: plan.format,
+      durationMs,
+      sceneIndex: scene.index,
+    },
+    { usage: { ...usage, operation: "video.scene.generate" } },
+  );
+
+  return {
+    provider: clip.provider,
+    kind: clip.mimeType.startsWith("video/")
+      ? "generated_video"
+      : "generated_image",
+    bytes: clip.bytes,
+    mimeType: clip.mimeType,
+    extension: clip.extension,
+    width: clip.width,
+    height: clip.height,
+    durationMs: clip.durationMs,
+    providerAssetId: clip.providerAssetId,
+    // No source URL: the bytes came from a generation call, not from a page a user
+    // could be sent to. A fabricated attribution link would be worse than none.
+    sourceUrl: null,
+    license: clip.license,
+    attribution: clip.attribution,
+    authorName: null,
+    matchedOn: clip.matchedOn,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1126,8 +1251,9 @@ export async function assembleTimeline(
     throw new AssetMissingError("a scene plan for this video");
   }
 
-  const [narrationAssets, visualAssets, music, captionRow, brand] =
+  const [project, narrationAssets, visualAssets, music, captionRow, brand] =
     await Promise.all([
+      getProject(userId, projectId),
       loadNarrationAssets(userId, projectId),
       loadVisualAssets(userId, projectId),
       loadMusic(userId, projectId),
@@ -1158,6 +1284,11 @@ export async function assembleTimeline(
   });
 
   return buildTimeline({
+    // The frame the project chose, or landscape when it chose none (§16). Read from
+    // the project rather than from the clips: a portrait video whose stock provider
+    // only had landscape footage is still a portrait video, and the renderer crops.
+    // `formatSpec` is what turns the nullable column into a known format.
+    format: formatSpec(project.videoFormat).format,
     scenes: timelineScenes,
     music,
     captionCues: captionRow?.cues ?? [],
@@ -1427,29 +1558,40 @@ interface SettingsView {
   language: string | null;
 }
 
+/**
+ * Voice and style settings, when a channel has any.
+ *
+ * The all-null fallback below already existed for a channel whose settings were
+ * never saved. Phase 11 (§4) adds a second way to reach it — a project with no
+ * channel at all — and it resolves to the same defaults: the platform voice, the
+ * default style. Nothing here needs a channel to produce a video.
+ */
 async function loadSettings(
   userId: string,
   projectId: string,
 ): Promise<SettingsView> {
   const project = await getProject(userId, projectId);
+  const channelId = project.channelId;
 
-  const rows = await db
-    .select({
-      niche: channelSettings.niche,
-      videoStyle: channelSettings.videoStyle,
-      voiceId: channelSettings.voiceProviderVoiceId,
-      voiceStyle: channelSettings.voiceStyle,
-      voiceSpeed: channelSettings.voiceSpeed,
-      language: channelSettings.contentLanguage,
-    })
-    .from(channelSettings)
-    .where(
-      and(
-        eq(channelSettings.channelId, project.channelId),
-        eq(channelSettings.userId, userId),
-      ),
-    )
-    .limit(1);
+  const rows = channelId
+    ? await db
+        .select({
+          niche: channelSettings.niche,
+          videoStyle: channelSettings.videoStyle,
+          voiceId: channelSettings.voiceProviderVoiceId,
+          voiceStyle: channelSettings.voiceStyle,
+          voiceSpeed: channelSettings.voiceSpeed,
+          language: channelSettings.contentLanguage,
+        })
+        .from(channelSettings)
+        .where(
+          and(
+            eq(channelSettings.channelId, channelId),
+            eq(channelSettings.userId, userId),
+          ),
+        )
+        .limit(1)
+    : [];
 
   return (
     rows[0] ?? {
@@ -1638,6 +1780,11 @@ async function loadBrandKit(
   fontPreference: string | null;
 } | null> {
   const project = await getProject(userId, projectId);
+  const channelId = project.channelId;
+  // A brand kit belongs to a channel, so a channel-less project has none. Null is
+  // already the "no kit" answer and the timeline falls back to its default caption
+  // look, which is what an unbranded channel gets today (Phase 11 §4).
+  if (!channelId) return null;
 
   const rows = await db
     .select({
@@ -1648,10 +1795,7 @@ async function loadBrandKit(
     })
     .from(brandKits)
     .where(
-      and(
-        eq(brandKits.channelId, project.channelId),
-        eq(brandKits.userId, userId),
-      ),
+      and(eq(brandKits.channelId, channelId), eq(brandKits.userId, userId)),
     )
     .limit(1);
 
@@ -1783,10 +1927,26 @@ export interface VideoReadiness {
  * this is the server-side equivalent, so a build cannot be started by a client
  * that ignored the banner (§34: never trust the frontend).
  */
-export function videoReadiness(): VideoReadiness {
+export function videoReadiness(
+  mode: GenerationMode = "STOCK",
+): VideoReadiness {
   const blocked: string[] = [];
   if (!isVoiceConfigured()) blocked.push("voice");
-  if (!isVisualsConfigured()) blocked.push("visuals");
+
+  /**
+   * Which visual capability has to be configured depends on the mode (Phase 11 §9).
+   *
+   * In `AI_VIDEO` the stock library is never called, so requiring `visuals` would
+   * refuse a build that would have worked — and in `STOCK` the AI providers are
+   * irrelevant, so requiring them would break every pre-Phase-11 deployment. Each
+   * mode is checked against the capability it actually uses.
+   */
+  if (mode === "AI_VIDEO") {
+    if (!isVideoGenConfigured()) blocked.push("video_gen");
+  } else if (!isVisualsConfigured()) {
+    blocked.push("visuals");
+  }
+
   // Music and captions degrade rather than block; render is checked by the
   // provider itself at submission, and a missing encoder must not stop a user
   // from generating the assets they can.

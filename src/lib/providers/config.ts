@@ -19,6 +19,7 @@ export type Capability =
   | "youtube"
   | "voice"
   | "visuals"
+  | "video_gen"
   | "music"
   | "transcription"
   | "render"
@@ -148,6 +149,44 @@ const SPECS: Spec[] = [
       return names;
     },
     hint: "Pexels: https://www.pexels.com/api/new/ · Runway: https://dev.runwayml.com",
+  },
+  {
+    capability: "video_gen",
+    label: "AI video generation",
+    // Optional, and genuinely so: with no AI provider enabled, link mode and the
+    // whole pipeline still work on stock footage, which is what every deployment
+    // before Phase 11 did. This capability being unconfigured removes a choice,
+    // not a feature (§13).
+    optional: true,
+    // Registered here rather than in a second registry of its own (§10). The
+    // capability answers "can this deployment generate AI video at all?"; which
+    // *models* are on offer is `video-gen.ts`'s `availableModels()`, since a
+    // per-model catalogue does not fit the one-provider-per-capability shape the
+    // rest of this table has.
+    provider: () => {
+      if (usingMockProviders()) return "mock";
+      const list = env().VIDEO_GEN_PROVIDERS;
+      // "stock" is not a provider in the AI sense — it is the absence of one, and
+      // saying so is more honest than reporting `not_configured` for a deployment
+      // that deliberately offers stock footage only.
+      return list.length > 0 ? list.join("+") : "stock";
+    },
+    required: (p) => {
+      const names: string[] = [];
+      // "seedance" is the pre-catalogue name for the fal provider and still
+      // resolves to it, so either spelling requires the same key.
+      if (p.includes("fal") || p.includes("seedance")) names.push("FAL_KEY");
+      if (p.includes("veo")) names.push("GEMINI_API_KEY");
+      if (p.includes("runway")) names.push("RUNWAY_API_KEY");
+      return names;
+    },
+    hint:
+      "Set VIDEO_GEN_PROVIDERS to any of fal,veo,runway. `fal` offers the whole " +
+      "fal.ai catalogue — Seedance, Kling, Hailuo, Hunyuan, Wan and Veo 3 — on " +
+      "one key (https://fal.ai/dashboard/keys); `veo` calls Google's own Gemini " +
+      "API and needs a Google AI key (https://aistudio.google.com/apikey), which " +
+      "is separate from the YouTube OAuth client; `runway` uses the existing " +
+      "RUNWAY_API_KEY.",
   },
   {
     capability: "music",

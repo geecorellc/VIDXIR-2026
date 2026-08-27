@@ -38,6 +38,7 @@ import { db } from "@/lib/db";
 import {
   assets,
   channels,
+  projects,
   publishJobs,
   publishedVideos,
   renders,
@@ -188,6 +189,18 @@ export async function startPublish(
     throw new ValidationError(ready.blocked[0] ?? "This video cannot be published yet.");
   }
 
+  // Readiness already refused a channel-less project, so this holds. Re-read as a
+  // narrowing rather than a cast: `channelId` is nullable since Phase 11 (§4), and
+  // an assertion here would be the one place a future edit to `publishReadiness`
+  // could silently start queueing an upload with no channel.
+  const channelId = project.channelId;
+  if (!channelId) {
+    throw new ValidationError(
+      "This video is not linked to a YouTube channel. Connect a channel to " +
+        "publish it.",
+    );
+  }
+
   // Scheduling is a Studio feature (§23). Checked here rather than in the worker
   // because a plan gate the user can act on belongs in the response to their
   // click, and because `scheduledFor` reaching YouTube is what makes it real.
@@ -208,7 +221,7 @@ export async function startPublish(
   // One upload at a time per channel. The `publish` queue's concurrency of 1
   // serialises execution, but two queued jobs would still upload twice, and a
   // duplicate upload cannot be undone.
-  if (await hasActiveJob(input.userId, project.channelId, PUBLISH_JOB)) {
+  if (await hasActiveJob(input.userId, channelId, PUBLISH_JOB)) {
     throw new ConflictError(
       "An upload is already in progress for this channel. Wait for it to finish.",
     );
@@ -221,7 +234,7 @@ export async function startPublish(
     .values({
       projectId: project.id,
       userId: input.userId,
-      channelId: project.channelId,
+      channelId,
       status: scheduled ? "scheduled" : "queued",
       visibility: input.visibility,
       scheduledFor: scheduled,
@@ -341,6 +354,36 @@ export async function publishReadiness(
   projectId: string,
 ): Promise<PublishReadiness> {
   const blocked: string[] = [];
+
+  /**
+   * A channel first (Phase 11 §4).
+   *
+   * Link mode deliberately removes the channel requirement from research and
+   * generation — a user can paste any URL and get a finished video with nothing
+   * connected. Publishing is where that stops: uploading needs a channel's OAuth
+   * grant, and §4 keeps publishing subject to the existing requirement. Reported
+   * first because it is the earliest thing to fix, and as a blocker rather than an
+   * exception so the UI shows it beside the others instead of erroring the screen.
+   *
+   * Read with its own scoped query rather than through `getProject`, which throws
+   * `ForbiddenError` for a project the caller does not own. Every other read in
+   * this function carries `userId` and *reports* what it cannot see, so a foreign
+   * caller is told three things are missing rather than being told the project
+   * exists — and answering with the same shape for "not yours" and "not ready"
+   * is what keeps this endpoint from confirming another tenant's project id.
+   */
+  const channelRows = await db
+    .select({ channelId: projects.channelId })
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
+    .limit(1);
+
+  if (!channelRows[0]?.channelId) {
+    blocked.push(
+      "This video is not linked to a YouTube channel. Connect a channel to " +
+        "publish it — everything up to this point works without one.",
+    );
+  }
 
   const video = await renderedVideo(userId, projectId);
   if (!video) {

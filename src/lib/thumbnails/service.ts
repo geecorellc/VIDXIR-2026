@@ -158,10 +158,19 @@ export async function startThumbnails(
   }
 
   // One generation per project at a time. A second would spend a second AI call
-  // and four more stock downloads to overwrite the first one's rows.
-  if (await hasActiveJob(input.userId, project.channelId, THUMBNAIL_JOB)) {
+  // and four more stock downloads to overwrite the first one's rows. Scoped to the
+  // project when there is no channel (Phase 11 §4) — `hasActiveJob` needs one or
+  // the other, and a link-mode project needs this guard just as much.
+  if (
+    await hasActiveJob(
+      input.userId,
+      project.channelId ?? null,
+      THUMBNAIL_JOB,
+      project.channelId ? undefined : project.id,
+    )
+  ) {
     throw new ConflictError(
-      "Thumbnails are already being designed for this channel. Wait for that to " +
+      "Thumbnails are already being designed for this video. Wait for that to " +
         "finish.",
     );
   }
@@ -777,46 +786,62 @@ async function posterFrame(
 }
 
 /** Everything the concept prompt needs, in one pass. */
+/**
+ * The thumbnail brief.
+ *
+ * `channelId` is nullable since Phase 11 (§4): the three channel lookups supply
+ * brand face and audience, which a link-mode project does not have yet. The script
+ * and the metadata title — the parts the headline is actually written from — do not
+ * depend on a channel, so the brief is still complete without one.
+ */
 async function loadBrief(
   input: ThumbnailStageInput,
-  channelId: string,
+  channelId: string | null,
   script: NonNullable<Awaited<ReturnType<typeof activeVersion>>>,
 ): Promise<Parameters<typeof buildThumbnailPrompt>[0]> {
   const [channelRows, settingsRows, brandRows, metadataRows, previous] =
     await Promise.all([
-      db
-        .select({ title: channels.title })
-        .from(channels)
-        .where(and(eq(channels.id, channelId), eq(channels.userId, input.userId)))
-        .limit(1),
-      db
-        .select({
-          niche: channelSettings.niche,
-          targetAudience: channelSettings.targetAudience,
-          contentLanguage: channelSettings.contentLanguage,
-          thumbnailStyle: channelSettings.thumbnailStyle,
-        })
-        .from(channelSettings)
-        .where(
-          and(
-            eq(channelSettings.channelId, channelId),
-            eq(channelSettings.userId, input.userId),
-          ),
-        )
-        .limit(1),
-      db
-        .select({
-          brandName: brandKits.brandName,
-          primaryColor: brandKits.primaryColor,
-        })
-        .from(brandKits)
-        .where(
-          and(
-            eq(brandKits.channelId, channelId),
-            eq(brandKits.userId, input.userId),
-          ),
-        )
-        .limit(1),
+      channelId
+        ? db
+            .select({ title: channels.title })
+            .from(channels)
+            .where(
+              and(eq(channels.id, channelId), eq(channels.userId, input.userId)),
+            )
+            .limit(1)
+        : [],
+      channelId
+        ? db
+            .select({
+              niche: channelSettings.niche,
+              targetAudience: channelSettings.targetAudience,
+              contentLanguage: channelSettings.contentLanguage,
+              thumbnailStyle: channelSettings.thumbnailStyle,
+            })
+            .from(channelSettings)
+            .where(
+              and(
+                eq(channelSettings.channelId, channelId),
+                eq(channelSettings.userId, input.userId),
+              ),
+            )
+            .limit(1)
+        : [],
+      channelId
+        ? db
+            .select({
+              brandName: brandKits.brandName,
+              primaryColor: brandKits.primaryColor,
+            })
+            .from(brandKits)
+            .where(
+              and(
+                eq(brandKits.channelId, channelId),
+                eq(brandKits.userId, input.userId),
+              ),
+            )
+            .limit(1)
+        : [],
       db
         .select({ title: videoMetadata.title })
         .from(videoMetadata)

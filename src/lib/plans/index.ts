@@ -9,10 +9,35 @@
 
 export type PlanTier = "starter" | "studio" | "scale";
 
-/** Feature gates checked by `requireFeature()` before doing paid work. */
+/**
+ * Feature gates checked by `requireFeature()` before doing paid work.
+ *
+ * Two were added in Phase 11 (§19) and the reasoning is worth recording, because
+ * §19 explicitly asks whether a new entitlement is needed or an existing one fits:
+ *
+ *  - `aiVideoGeneration` — generating every scene with a video model costs
+ *    roughly two orders of magnitude more per video than searching a stock library.
+ *    `brollLibrary` is the closest existing flag and it is the wrong one: it means
+ *    "may use the licensed stock library", which is a different capability at a
+ *    different price, and reusing it would have made the cheap feature and the
+ *    expensive one impossible to price apart.
+ *  - `premiumVideoModels` — within AI video the models differ by several times in
+ *    cost, so the tier that pays for AI video at all does not necessarily pay for
+ *    the most expensive model. `VideoGenModel.premium` marks which ones this gates.
+ *
+ * Note what is deliberately absent: **there is no credit system.** §19 asks for
+ * that decision to be stated rather than silently invented, so — Tally meters video
+ * generation by the plan's monthly `maxVideosPerMonth` allowance, atomically claimed
+ * when a project is created (see `createProject`), and gates *capability* by these
+ * flags. Per-generation credits would be a second billing system alongside Stripe
+ * subscriptions, with its own balance, top-up, refund-on-failure and expiry rules,
+ * and Phase 11 is not the place to introduce one.
+ */
 export type FeatureKey =
   | "aiVoiceover"
   | "brollLibrary"
+  | "aiVideoGeneration"
+  | "premiumVideoModels"
   | "thumbnailAbTest"
   | "autoPublish"
   | "scheduling"
@@ -50,6 +75,8 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
     features: {
       aiVoiceover: false,
       brollLibrary: false,
+      aiVideoGeneration: false,
+      premiumVideoModels: false,
       thumbnailAbTest: false,
       autoPublish: false,
       scheduling: false,
@@ -74,6 +101,11 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
     features: {
       aiVoiceover: true,
       brollLibrary: true,
+      aiVideoGeneration: true,
+      // The standard models only. Premium is what Scale adds, and it is the one
+      // feature difference between the tiers that costs money per video rather
+      // than per month.
+      premiumVideoModels: false,
       thumbnailAbTest: true,
       autoPublish: true,
       scheduling: true,
@@ -85,6 +117,7 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
       "3 channels",
       "Unlimited videos",
       "AI voiceover + b-roll",
+      "AI video generation",
       "Thumbnail A/B testing",
       "Auto-publish & scheduling",
     ],
@@ -101,6 +134,8 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
     features: {
       aiVoiceover: true,
       brollLibrary: true,
+      aiVideoGeneration: true,
+      premiumVideoModels: true,
       thumbnailAbTest: true,
       autoPublish: true,
       scheduling: true,
@@ -111,6 +146,7 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
     bullets: [
       "Unlimited channels",
       "Everything in Studio",
+      "Premium video models",
       "Cross-channel analytics",
       "Priority render queue",
     ],

@@ -18,10 +18,31 @@ export interface NavItem {
    * the sidebar shows a muted dot the way the prototype did for locked tabs.
    */
   requires?: "idea" | "script" | "video";
+  /**
+   * This stage works without a connected YouTube channel (Phase 11 §2, §4).
+   *
+   * Every other content stage is gated on a channel, because it is the channel
+   * that gives research its niche and publishing its destination. Link mode is
+   * the exception the phase exists to add: paste a URL and research it with no
+   * channel at all. Declared here rather than as a segment check in the sidebar
+   * so the fact lives with the route it describes.
+   */
+  channelless?: boolean;
 }
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { segment: "", href: "/dashboard", label: "Overview", icon: "LayoutDashboard" },
+  {
+    /**
+     * Placed directly above Research because it is the same step by a different
+     * door: research seeded by a pasted link rather than by a connected channel.
+     */
+    segment: "youtube",
+    href: "/dashboard/youtube",
+    label: "Create from YouTube",
+    icon: "Youtube",
+    channelless: true,
+  },
   { segment: "research", href: "/dashboard/research", label: "Research", icon: "Search" },
   {
     segment: "script",

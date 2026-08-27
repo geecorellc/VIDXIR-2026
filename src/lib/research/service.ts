@@ -19,7 +19,9 @@ import { db } from "@/lib/db";
 import { channels, researchRuns } from "@/lib/db/schema";
 import {
   ConflictError,
+  NotConfiguredError,
   NotFoundError,
+  ProviderError,
   errorCodeOf,
   isAppError,
   isBlockingCode,
@@ -30,11 +32,23 @@ import { queuePriorityFor } from "@/lib/plans/enforce";
 import { enqueue, hasActiveJob, reportProgress } from "@/lib/queue/jobs";
 import { generateIdeas, persistIdeas } from "@/lib/research/ideas";
 import {
+  channelSignalReader,
   collectSignals,
+  contextFromSource,
   loadResearchContext,
   persistSignals,
+  publicSignalReader,
+  type ResearchContext,
+  type SignalReader,
 } from "@/lib/research/signals";
+import {
+  analyzeVideoId,
+  toStoredAnalysis,
+  type SourceAnalysis,
+} from "@/lib/youtube/source-analysis";
+import type { IdeaSourceSeed } from "@/lib/research/ideas";
 import type { PlanTier } from "@/lib/plans";
+import type { YouTubeLinkForm } from "@/lib/youtube/url";
 
 const log = logger.child({ component: "research" });
 
@@ -105,26 +119,119 @@ export async function startResearchRun(
 
     return { runId: run.id, jobId: job.id };
   } catch (error) {
-    // The queue push failed, so nothing will ever pick this run up. Fail the row
-    // now rather than leaving a permanent "queued" the UI would spin on (§30).
-    await db
-      .update(researchRuns)
-      .set({
-        status: "failed",
-        error: "Could not reach the job queue. Please try again.",
-        errorCode: "internal_error",
-        completedAt: new Date(),
-      })
-      .where(eq(researchRuns.id, run.id));
-    throw error;
+    return failQueuedRun(run.id, error);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Link mode (Phase 11 §4, §6, §7)
+// ---------------------------------------------------------------------------
+
+export interface StartLinkRunInput {
+  userId: string;
+  /** Already-validated video id. The route parses the URL; this trusts nothing. */
+  videoId: string;
+  tier: PlanTier;
+  /**
+   * The project this research belongs to.
+   *
+   * Required, and it is what makes the duplicate guard work without a channel:
+   * `hasActiveJob` scopes on the project instead, so pasting the same link twice
+   * is refused while researching a *different* link concurrently is not.
+   */
+  projectId: string;
+  /** Which URL form was pasted, for the analysis record. */
+  linkForm?: YouTubeLinkForm;
+  traceId?: string | null;
+}
+
+/**
+ * Create and enqueue a research run seeded by a pasted link (§4).
+ *
+ * Note what this does *not* do: it does not analyse the source video. That is a
+ * network read of unbounded latency, and §10 keeps those out of request handlers —
+ * the worker does it as the run's first step, so a slow or unreachable YouTube
+ * shows up as a job the user can watch rather than a request that hangs.
+ */
+export async function startLinkResearchRun(
+  input: StartLinkRunInput,
+): Promise<StartRunResult> {
+  if (
+    await hasActiveJob(input.userId, null, RESEARCH_JOB_NAME, input.projectId)
+  ) {
+    throw new ConflictError(
+      "Research is already running for this video. Wait for it to finish.",
+    );
+  }
+
+  const inserted = await db
+    .insert(researchRuns)
+    .values({
+      userId: input.userId,
+      // §4: no channel, and none required.
+      channelId: null,
+      status: "queued",
+      trigger: "youtube_link",
+      sourceVideoId: input.videoId,
+      // `niche` and `keywords` are filled in by the worker once the source has
+      // been read. Left empty rather than guessed from the id.
+      keywords: [],
+      sources: [],
+    })
+    .returning({ id: researchRuns.id });
+
+  const run = inserted[0];
+  if (!run) throw new Error("Failed to create research run.");
+
+  try {
+    const job = await enqueue({
+      queue: "research",
+      name: RESEARCH_JOB_NAME,
+      userId: input.userId,
+      channelId: null,
+      projectId: input.projectId,
+      stage: "RESEARCH",
+      payload: {
+        runId: run.id,
+        sourceVideoId: input.videoId,
+        linkForm: input.linkForm ?? "bare_id",
+      },
+      priority: queuePriorityFor(input.tier),
+      traceId: input.traceId ?? null,
+      statusMessage: "Queued",
+    });
+
+    return { runId: run.id, jobId: job.id };
+  } catch (error) {
+    return failQueuedRun(run.id, error);
+  }
+}
+
+/** Shared tail of both start functions: the queue push failed. */
+async function failQueuedRun(runId: string, error: unknown): Promise<never> {
+  // Nothing will ever pick this run up. Fail the row now rather than leaving a
+  // permanent "queued" the UI would spin on (§30).
+  await db
+    .update(researchRuns)
+    .set({
+      status: "failed",
+      error: "Could not reach the job queue. Please try again.",
+      errorCode: "internal_error",
+      completedAt: new Date(),
+    })
+    .where(eq(researchRuns.id, runId));
+  throw error;
 }
 
 export interface ExecuteRunInput {
   userId: string;
-  channelId: string;
+  /** Null for a link-mode run (Phase 11 §4). */
+  channelId: string | null;
   runId: string;
   jobId: string;
+  /** Set for a link-mode run: the pasted video to seed from. */
+  sourceVideoId?: string | null;
+  linkForm?: YouTubeLinkForm;
   traceId?: string | null;
 }
 
@@ -136,6 +243,12 @@ export interface ExecuteRunResult {
 
 /**
  * Execute a research run. Called by the worker, never by a request handler.
+ *
+ * One function for both modes (Phase 11 §3, §6). What differs is decided in the
+ * first twenty lines — where the context comes from, and which credential reads
+ * YouTube — and everything after that is the Phase 7 pipeline unchanged: collect,
+ * score, persist, generate angles. That is the point: link mode is a second way
+ * *in*, not a second implementation.
  *
  * Failure handling is the interesting part. A run that throws is marked failed
  * with the real reason, and the error is rethrown so the worker can decide
@@ -149,20 +262,29 @@ export async function executeResearchRun(
   const startedAt = new Date();
 
   // Ownership is re-verified here rather than trusted from the payload: the job
-  // arrives from Redis, and a payload is not an authorisation.
+  // arrives from Redis, and a payload is not an authorisation. The channel
+  // predicate is `IS NULL` for a link-mode run rather than omitted, so a payload
+  // claiming no channel cannot be used to reach a channel-mode run.
   const runRows = await db
-    .select({ id: researchRuns.id, channelId: researchRuns.channelId })
+    .select({
+      id: researchRuns.id,
+      channelId: researchRuns.channelId,
+      sourceVideoId: researchRuns.sourceVideoId,
+    })
     .from(researchRuns)
     .where(
       and(
         eq(researchRuns.id, input.runId),
         eq(researchRuns.userId, input.userId),
-        eq(researchRuns.channelId, input.channelId),
+        input.channelId
+          ? eq(researchRuns.channelId, input.channelId)
+          : isNull(researchRuns.channelId),
       ),
     )
     .limit(1);
 
-  if (!runRows[0]) throw new NotFoundError("Research run not found.");
+  const runRow = runRows[0];
+  if (!runRow) throw new NotFoundError("Research run not found.");
 
   await db
     .update(researchRuns)
@@ -170,12 +292,54 @@ export async function executeResearchRun(
     .where(eq(researchRuns.id, input.runId));
 
   try {
-    const context = await loadResearchContext(input.userId, input.channelId);
-    if (!context) throw new NotFoundError("Channel not found.");
+    // The stored id wins over the payload's. Both are written by Tally, but only
+    // the row was written inside the request that authorised this run.
+    const sourceVideoId = runRow.sourceVideoId ?? input.sourceVideoId ?? null;
+
+    let context: ResearchContext;
+    let reader: SignalReader;
+    let source: IdeaSourceSeed | null = null;
+
+    if (input.channelId) {
+      const loaded = await loadResearchContext(input.userId, input.channelId);
+      if (!loaded) throw new NotFoundError("Channel not found.");
+      context = loaded;
+      reader = channelSignalReader(input.userId, input.channelId);
+    } else {
+      if (!sourceVideoId) {
+        // A run with neither a channel nor a source has nothing to research. This
+        // is unreachable through either start function; it is here because the
+        // alternative is researching whatever the empty context happens to yield.
+        throw new NotFoundError(
+          "This research run has no channel and no source video.",
+        );
+      }
+
+      await reportProgress(input.jobId, 5, "Analysing the source video");
+
+      const analysis = await analyzeSourceOrThrow(sourceVideoId, input);
+      context = contextFromSource(analysis);
+      reader = publicSignalReader();
+      source = sourceSeed(analysis);
+
+      // Persist the analysis before researching. If the research half fails, the
+      // screen can still show what the pasted video was — and §5's degradation
+      // states are only useful if they survive the job that produced them.
+      await db
+        .update(researchRuns)
+        .set({
+          sourceTitle: analysis.title,
+          sourceChannelTitle: analysis.channelTitle,
+          sourceAnalysis: toStoredAnalysis(analysis),
+          niche: context.niche,
+          keywords: context.keywords,
+        })
+        .where(eq(researchRuns.id, input.runId));
+    }
 
     await reportProgress(input.jobId, 10, "Reading YouTube signals");
 
-    const collected = await collectSignals(input.userId, context, {
+    const collected = await collectSignals(reader, input.userId, context, {
       traceId: input.traceId ?? undefined,
     });
 
@@ -210,6 +374,7 @@ export async function executeResearchRun(
       context,
       evidence,
       ownTopPerformers: collected.ownTopPerformers,
+      source,
       jobId: input.jobId,
       traceId: input.traceId ?? null,
     });
@@ -231,7 +396,7 @@ export async function executeResearchRun(
 
     log.info("research run complete", {
       userId: input.userId,
-      channelId: input.channelId,
+      channelId: input.channelId ?? undefined,
       jobId: input.jobId,
       traceId: input.traceId ?? undefined,
       stage: "RESEARCH",
@@ -271,7 +436,7 @@ export async function executeResearchRun(
 
     log.error("research run failed", {
       userId: input.userId,
-      channelId: input.channelId,
+      channelId: input.channelId ?? undefined,
       jobId: input.jobId,
       traceId: input.traceId ?? undefined,
       stage: "RESEARCH",
@@ -282,6 +447,75 @@ export async function executeResearchRun(
 
     throw error;
   }
+}
+
+/**
+ * Read the source video, or fail the run with the right kind of error (§5, §42).
+ *
+ * `analyzeVideoId` returns a state rather than throwing, because the *route* needs
+ * to render every outcome. The worker needs the opposite: a run that cannot be
+ * researched must stop, and its status has to say why. So the six states are mapped
+ * back onto the error taxonomy the worker already classifies:
+ *
+ *  - `not_configured` → `NotConfiguredError`, which becomes
+ *    `blocked_not_configured` and names `YOUTUBE_API_KEY` on screen. Not retried,
+ *    because retrying a missing key fails identically.
+ *  - `quota_exceeded` / `unavailable` → retryable `ProviderError`. The quota window
+ *    resets and a 5xx passes.
+ *  - `not_found` / `forbidden` → `NotFoundError` / non-retryable `ProviderError`.
+ *    The video will not become readable by trying again.
+ *
+ * The message carried through is the one `analyzeVideoId` wrote for a user, never a
+ * provider string (§21).
+ */
+async function analyzeSourceOrThrow(
+  videoId: string,
+  input: ExecuteRunInput,
+): Promise<SourceAnalysis> {
+  const result = await analyzeVideoId(videoId, input.linkForm ?? "bare_id", {
+    userId: input.userId,
+    traceId: input.traceId ?? null,
+  });
+
+  if (result.state === "ok") return result.analysis;
+
+  if (result.state === "not_configured") {
+    throw new NotConfiguredError(
+      "YouTube public reads",
+      result.missingEnvVars.length > 0
+        ? result.missingEnvVars
+        : ["YOUTUBE_API_KEY"],
+    );
+  }
+
+  if (result.state === "not_found") {
+    throw new NotFoundError(result.message);
+  }
+
+  throw new ProviderError("YouTube", result.message, {
+    retryable: result.retryable,
+    status: result.state === "forbidden" ? 403 : 502,
+    details: { sourceState: result.state },
+  });
+}
+
+/**
+ * The subset of the analysis the angle prompt is allowed to see (§7, §22).
+ *
+ * Built here rather than passing the whole analysis, so what reaches a generative
+ * prompt is a decision made in one visible place. The description is excluded
+ * deliberately: it is the longest piece of the source creator's own prose, and the
+ * topic is already carried by `niche` and `topics`.
+ */
+function sourceSeed(analysis: SourceAnalysis): IdeaSourceSeed {
+  return {
+    title: analysis.title,
+    channelTitle: analysis.channelTitle,
+    niche: analysis.niche,
+    topics: analysis.topics,
+    viewCount: analysis.viewCount,
+    durationSeconds: analysis.durationSeconds,
+  };
 }
 
 /**

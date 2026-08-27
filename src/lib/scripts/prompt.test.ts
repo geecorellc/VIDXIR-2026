@@ -43,10 +43,15 @@ function brief(overrides: Partial<ScriptBrief> = {}): ScriptBrief {
       rationale: "Every top performer reviews flagship kit.",
       topic: "budget smart home",
       targetKeywords: ["budget smart home", "cheap sensors"],
+      hook: null,
+      trendSignal: null,
     },
     sourceTitles: ["I tested 40 smart home gadgets", "Smart home on a budget"],
     ownTopPerformers: ["The plug that saved me £90"],
     brand: { brandName: "Wired Cottage", defaultCta: "Grab the parts list" },
+    // Phase 11 §8: null is the pre-Phase-11 project, which the prompt says nothing
+    // about. The cases where it is set are asserted in their own tests below.
+    generation: null,
     ...overrides,
   };
 }
@@ -204,6 +209,68 @@ describe("buildScriptPrompt", () => {
     expect(prompt).toContain("Write the complete script in de-DE");
   });
 
+  it("passes the chosen hook on as a promise, not as a line to reproduce", () => {
+    const prompt = buildScriptPrompt(
+      brief({
+        idea: {
+          title: "Why cheap sensors beat expensive ones",
+          angle: "Measure the failure rate of the budget tier nobody reviews.",
+          rationale: "Every top performer reviews flagship kit.",
+          topic: "budget smart home",
+          targetKeywords: [],
+          hook: "Nine of the ten sensors in this drawer cost under a fiver.",
+          trendSignal: "Budget-tier uploads are averaging triple the usual velocity.",
+        },
+      }),
+    );
+
+    expect(prompt).toContain("Nine of the ten sensors");
+    expect(prompt).toMatch(/in your own words/i);
+    expect(prompt).toMatch(/not.*a line to reproduce/i);
+    expect(prompt).toContain("triple the usual velocity");
+  });
+
+  it("says nothing about filming when no generation choice has been made", () => {
+    expect(buildScriptPrompt(brief())).not.toMatch(/HOW THIS WILL BE FILMED/);
+  });
+
+  it("tells the writer to keep beats findable in stock mode (§8, §16)", () => {
+    const prompt = buildScriptPrompt(
+      brief({
+        generation: {
+          mode: "STOCK",
+          modelLabel: null,
+          maxClipSeconds: null,
+          format: "landscape",
+        },
+      }),
+    );
+
+    expect(prompt).toMatch(/HOW THIS WILL BE FILMED/);
+    expect(prompt).toMatch(/stock footage/i);
+    expect(prompt).not.toMatch(/AI-generated clip/i);
+  });
+
+  it("tells the writer to keep beats short and visual in AI mode (§8, §17)", () => {
+    const prompt = buildScriptPrompt(
+      brief({
+        generation: {
+          mode: "AI_VIDEO",
+          modelLabel: "Seedance 1 Pro",
+          maxClipSeconds: 10,
+          format: "portrait",
+        },
+      }),
+    );
+
+    expect(prompt).toMatch(/AI-generated clip/i);
+    expect(prompt).toContain("Seedance 1 Pro");
+    expect(prompt).toContain("at most 10 seconds");
+    // The format instruction is real guidance, not decoration: a vertical video
+    // has to land its opening faster.
+    expect(prompt).toMatch(/vertical/i);
+  });
+
   it("survives an empty brief without emitting the word undefined", () => {
     const sparse = buildScriptPrompt({
       projectTitle: "Untitled",
@@ -217,6 +284,7 @@ describe("buildScriptPrompt", () => {
       sourceTitles: [],
       ownTopPerformers: [],
       brand: { brandName: null, defaultCta: null },
+      generation: null,
     });
 
     // A brand-new channel with no settings still gets a usable prompt. "Niche:

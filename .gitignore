@@ -6,7 +6,10 @@ node_modules/
 # next
 .next/
 out/
-build/
+# Anchored with a leading slash: an unanchored `build/` matches at *any* depth, and
+# it was silently excluding `src/app/api/video/build/route.ts` — a real route that
+# had therefore never been committed. Only the root-level output directory is meant.
+/build/
 next-env.d.ts
 
 # secrets — never commit (§33)

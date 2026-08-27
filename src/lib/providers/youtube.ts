@@ -145,11 +145,81 @@ function oauthClient(): OAuth2Client {
   });
 }
 
+/**
+ * How a read is authorised (Phase 11 §4).
+ *
+ * Two credentials reach the same Data API, and which one a read may use is a
+ * property of the read, not a preference:
+ *
+ *  - `oauth` acts **as a channel**. Required for anything about the user's own
+ *    channel — analytics, uploads, captions they own — and it is the only
+ *    credential that exists in Phases 1-10.
+ *  - `api_key` acts as **the Tally project** with no user identity. It can read
+ *    public data only: `videos.list` on a public id, `search.list`, the
+ *    most-popular chart. That is exactly what link mode needs, and it is why link
+ *    mode does not require a connected channel (§2B).
+ *
+ * Both go through this one module. §4 forbids a second YouTube client, and the
+ * reason is not tidiness: quota accounting, error translation and the
+ * not-configured contract all live here, and a second client would have to
+ * reimplement three things that are only correct once.
+ */
+export type YouTubeReadCredential =
+  | { kind: "oauth"; accessToken: string }
+  | { kind: "api_key"; apiKey: string };
+
+/** True when public, channel-less reads are possible. */
+export function isYouTubePublicReadConfigured(): boolean {
+  return Boolean(env().YOUTUBE_API_KEY);
+}
+
+/** Missing credential names for the public-read path. Empty when ready. */
+export function youtubePublicReadMissingEnvVars(): string[] {
+  return env().YOUTUBE_API_KEY ? [] : ["YOUTUBE_API_KEY"];
+}
+
+const PUBLIC_READ_HINT =
+  "Google Cloud console -> APIs & Services -> Credentials -> Create credentials " +
+  "-> API key, restricted to YouTube Data API v3. This key reads public video " +
+  "metadata only; it cannot act on a channel.";
+
+/**
+ * The public-read credential or a 503.
+ *
+ * A separate variable from the OAuth pair on purpose. An API key is not a user
+ * credential: restricting it to the Data API and rotating it has no effect on a
+ * connected channel, and using the OAuth client for public reads would mean link
+ * mode could not work until someone connected a channel — the thing §2B says it
+ * must not require.
+ */
+export function requirePublicReadCredential(): YouTubeReadCredential {
+  const apiKey = env().YOUTUBE_API_KEY;
+  if (!apiKey) {
+    throw new NotConfiguredError(
+      "YouTube public reads",
+      ["YOUTUBE_API_KEY"],
+      PUBLIC_READ_HINT,
+    );
+  }
+  return { kind: "api_key", apiKey };
+}
+
+/** An API client bound to a read credential. */
+function clientFor(credential: YouTubeReadCredential): youtube_v3.Youtube {
+  if (credential.kind === "api_key") {
+    // `googleapis` accepts an API key string as `auth`, which attaches it as the
+    // `key` parameter. No OAuth client is constructed, so there is no token to
+    // refresh and no user identity in play.
+    return google.youtube({ version: "v3", auth: credential.apiKey });
+  }
+  const auth = new OAuth2Client();
+  auth.setCredentials({ access_token: credential.accessToken });
+  return google.youtube({ version: "v3", auth });
+}
+
 /** An API client bound to one channel's access token. */
 function youtubeClient(accessToken: string): youtube_v3.Youtube {
-  const auth = new OAuth2Client();
-  auth.setCredentials({ access_token: accessToken });
-  return google.youtube({ version: "v3", auth });
+  return clientFor({ kind: "oauth", accessToken });
 }
 
 // ---------------------------------------------------------------------------
@@ -542,7 +612,22 @@ export async function searchVideos(
   accessToken: string,
   query: SearchVideosQuery,
 ): Promise<SearchHit[]> {
-  const client = youtubeClient(accessToken);
+  return searchVideosAs({ kind: "oauth", accessToken }, query);
+}
+
+/**
+ * `searchVideos` against an explicit credential (Phase 11 §6).
+ *
+ * `search.list` returns public data and needs no user identity, so link-mode
+ * research runs it with the project API key. Same request, same quota cost, same
+ * translation — only the credential differs, which is why this is a parameter
+ * rather than a second function body.
+ */
+export async function searchVideosAs(
+  credential: YouTubeReadCredential,
+  query: SearchVideosQuery,
+): Promise<SearchHit[]> {
+  const client = clientFor(credential);
   try {
     const response = await client.search.list({
       part: ["snippet"],
@@ -598,8 +683,25 @@ export async function fetchVideosByIds(
   accessToken: string,
   videoIds: string[],
 ): Promise<YouTubeVideoSummary[]> {
+  return fetchVideosByIdsAs({ kind: "oauth", accessToken }, videoIds);
+}
+
+/**
+ * `fetchVideosByIds` against an explicit credential (Phase 11 §5).
+ *
+ * The read link mode depends on. A public video's snippet, statistics,
+ * contentDetails and status are all visible to an API key, and an id that is
+ * private, deleted or region-blocked is *absent from the response* rather than an
+ * error — so a caller that wants to distinguish "no such video" from "quota
+ * exhausted" gets the distinction for free: the former is an empty array, the
+ * latter throws `ProviderRateLimitError`.
+ */
+export async function fetchVideosByIdsAs(
+  credential: YouTubeReadCredential,
+  videoIds: string[],
+): Promise<YouTubeVideoSummary[]> {
   if (videoIds.length === 0) return [];
-  const client = youtubeClient(accessToken);
+  const client = clientFor(credential);
   const unique = [...new Set(videoIds)];
   const out: YouTubeVideoSummary[] = [];
 
@@ -639,6 +741,147 @@ export async function fetchVideosByIds(
   return out;
 }
 
+/**
+ * Everything legitimately readable about somebody else's public video (§5).
+ *
+ * A superset of `YouTubeVideoSummary`, kept separate rather than widening it,
+ * because the research pipeline's signal type maps onto the summary and adding
+ * fields there would silently change five call sites that do not want them.
+ *
+ * What is *not* here is the point of the type:
+ *
+ *  - No transcript. `captions.download` requires the video owner's OAuth
+ *    credentials, so a third-party video's captions are not legitimately
+ *    available to Tally at all. `captionsAvailable` reports whether YouTube says
+ *    the video has captions, which is an honest signal about the source and not a
+ *    promise that Tally can read them (§42).
+ *  - No media. §22 makes the source a research input; there is no code path here
+ *    that downloads the video, its audio or its thumbnail file.
+ */
+export interface YouTubeVideoDetail {
+  videoId: string;
+  title: string;
+  description: string | null;
+  channelId: string | null;
+  channelTitle: string | null;
+  publishedAt: Date | null;
+  /** Region-dependent numeric category id, e.g. "27" for Education. */
+  categoryId: string | null;
+  tags: string[];
+  /** ISO-8601 duration, e.g. `PT12M34S`. */
+  durationIso: string | null;
+  /** `public` | `unlisted` | `private`, as YouTube reports it. */
+  privacyStatus: string | null;
+  /** BCP-47, when the uploader set one. */
+  defaultLanguage: string | null;
+  defaultAudioLanguage: string | null;
+  viewCount: number | null;
+  likeCount: number | null;
+  commentCount: number | null;
+  thumbnailUrl: string | null;
+  /** YouTube's own claim about whether the video carries captions. */
+  captionsAvailable: boolean | null;
+  /** True when YouTube reports the upload as made for kids. */
+  madeForKids: boolean | null;
+}
+
+/**
+ * Read one public video in full detail, or return null when it is not readable.
+ *
+ * Null covers every "the video is not there for us" case in one value — deleted,
+ * private, unlisted-without-access, region-blocked, or an id that never existed.
+ * YouTube reports all of them identically (an empty `items` array), so pretending
+ * to distinguish them would be invention. A *failure* to reach YouTube still
+ * throws, because "we could not ask" and "the answer is no" are different
+ * answers and only one of them should stop the user (§5).
+ */
+export async function fetchVideoDetailAs(
+  credential: YouTubeReadCredential,
+  videoId: string,
+): Promise<YouTubeVideoDetail | null> {
+  const client = clientFor(credential);
+  try {
+    const response = await client.videos.list({
+      part: ["snippet", "statistics", "contentDetails", "status"],
+      id: [videoId],
+      maxResults: 1,
+    });
+
+    const item = (response.data.items ?? [])[0];
+    if (!item) return null;
+
+    const snippet = item.snippet;
+    const stats = item.statistics;
+
+    return {
+      videoId: item.id ?? videoId,
+      title: snippet?.title ?? "",
+      description: snippet?.description ?? null,
+      channelId: snippet?.channelId ?? null,
+      channelTitle: snippet?.channelTitle ?? null,
+      publishedAt: snippet?.publishedAt ? new Date(snippet.publishedAt) : null,
+      categoryId: snippet?.categoryId ?? null,
+      tags: snippet?.tags ?? [],
+      durationIso: item.contentDetails?.duration ?? null,
+      privacyStatus: item.status?.privacyStatus ?? null,
+      defaultLanguage: snippet?.defaultLanguage ?? null,
+      defaultAudioLanguage: snippet?.defaultAudioLanguage ?? null,
+      viewCount: numberOrNull(stats?.viewCount),
+      likeCount: numberOrNull(stats?.likeCount),
+      // Absent when the uploader disabled comments, which is not zero comments.
+      commentCount: numberOrNull(stats?.commentCount),
+      thumbnailUrl:
+        snippet?.thumbnails?.maxres?.url ??
+        snippet?.thumbnails?.high?.url ??
+        snippet?.thumbnails?.medium?.url ??
+        null,
+      captionsAvailable:
+        item.contentDetails?.caption === undefined ||
+        item.contentDetails?.caption === null
+          ? null
+          : item.contentDetails.caption === "true",
+      madeForKids: item.status?.madeForKids ?? null,
+    };
+  } catch (error) {
+    throw translate(error, "videos.list.detail");
+  }
+}
+
+/**
+ * Human-readable names for YouTube's numeric category ids (Phase 11 §5).
+ *
+ * `snippet.categoryId` is a number whose meaning is region-dependent ("27" is
+ * Education in the US), and §5 asks for the source video's category. Reporting
+ * "27" to a user is not reporting a category, and hardcoding a table of ids would
+ * be a guess that silently rots when YouTube changes one — so the names are read
+ * from the API, for 1 quota unit, and a lookup that fails leaves the category
+ * unnamed rather than mislabelled.
+ *
+ * Returns a map from id to title. An empty map means "could not be named", which
+ * every caller must handle without treating it as an error.
+ */
+export async function fetchVideoCategoryTitlesAs(
+  credential: YouTubeReadCredential,
+  regionCode: string,
+): Promise<Map<string, string>> {
+  const client = clientFor(credential);
+  try {
+    const response = await client.videoCategories.list({
+      part: ["snippet"],
+      regionCode,
+    });
+    const out = new Map<string, string>();
+    for (const item of response.data.items ?? []) {
+      const id = item.id;
+      const title = item.snippet?.title;
+      if (id && title) out.set(id, title);
+    }
+    return out;
+  } catch (error) {
+    throw translate(error, "videoCategories.list");
+  }
+}
+
 /** A competitor channel as YouTube reports it, for the §7 competitor view. */
 export interface CompetitorChannel {
   channelId: string;
@@ -660,8 +903,16 @@ export async function fetchChannelsByIds(
   accessToken: string,
   channelIds: string[],
 ): Promise<CompetitorChannel[]> {
+  return fetchChannelsByIdsAs({ kind: "oauth", accessToken }, channelIds);
+}
+
+/** `fetchChannelsByIds` against an explicit credential (Phase 11 §6). */
+export async function fetchChannelsByIdsAs(
+  credential: YouTubeReadCredential,
+  channelIds: string[],
+): Promise<CompetitorChannel[]> {
   if (channelIds.length === 0) return [];
-  const client = youtubeClient(accessToken);
+  const client = clientFor(credential);
   const unique = [...new Set(channelIds)];
   const out: CompetitorChannel[] = [];
 
@@ -711,7 +962,21 @@ export async function fetchMostPopular(
   accessToken: string,
   options: { regionCode?: string; videoCategoryId?: string; maxResults?: number } = {},
 ): Promise<YouTubeVideoSummary[]> {
-  const client = youtubeClient(accessToken);
+  return fetchMostPopularAs({ kind: "oauth", accessToken }, options);
+}
+
+/**
+ * `fetchMostPopular` against an explicit credential (Phase 11 §6).
+ *
+ * The chart is public data with no user dimension — `chart: "mostPopular"` takes a
+ * region, not an identity — so link-mode research reads it with the project API
+ * key. Same request, same 1-unit cost.
+ */
+export async function fetchMostPopularAs(
+  credential: YouTubeReadCredential,
+  options: { regionCode?: string; videoCategoryId?: string; maxResults?: number } = {},
+): Promise<YouTubeVideoSummary[]> {
+  const client = clientFor(credential);
   try {
     const response = await client.videos.list({
       part: ["snippet", "statistics", "contentDetails", "status"],

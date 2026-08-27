@@ -382,24 +382,73 @@ export async function getActiveJobs(
 }
 
 /**
+ * Active jobs for one project (Phase 11 §4, §18).
+ *
+ * The channel-less counterpart of `getActiveJobs`. A project created from a
+ * pasted link has no channel, so there is no channel to poll by — but every job
+ * it enqueues carries its `projectId`, which is a *narrower* scope than the
+ * channel and therefore the better one to show a single video's progress from.
+ *
+ * §18 requires progress to come from the real job records, and this is the read
+ * that makes that possible without a channel. Owner-scoped in the predicate, like
+ * every other read here (§34).
+ */
+export async function getActiveProjectJobs(
+  userId: string,
+  projectId: string,
+): Promise<JobView[]> {
+  return db
+    .select(JOB_VIEW_COLUMNS)
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.userId, userId),
+        eq(jobs.projectId, projectId),
+        inArray(jobs.status, ["queued", "running"]),
+      ),
+    )
+    .orderBy(sql`${jobs.createdAt} DESC`);
+}
+
+/**
  * True when a job of this name is already queued or running for the channel.
  *
  * Used to refuse a second research run on the same channel: the first would have
  * spent the quota anyway, and two concurrent runs writing results for the same
  * channel produce a confusing half-merged view.
+ *
+ * Since Phase 11 (§4) work can exist without a channel, so the scope is a
+ * parameter rather than always the channel:
+ *
+ *  - `channelId` set  — the original behaviour, unchanged.
+ *  - `projectId` set  — scope to one project. The right narrowing for a
+ *    channel-less project: it still stops a double-submit on *this* video without
+ *    stopping the user from working on another link at the same time.
+ *
+ * Passing neither would match every channel-less job of that name for the user,
+ * which is a broader lock than any caller wants, so it is refused rather than
+ * silently applied.
  */
 export async function hasActiveJob(
   userId: string,
-  channelId: string,
+  channelId: string | null,
   name: string,
+  projectId?: string,
 ): Promise<boolean> {
+  if (!channelId && !projectId) {
+    throw new Error(
+      "hasActiveJob needs a channelId or a projectId to scope the check",
+    );
+  }
+
   const rows = await db
     .select({ id: jobs.id })
     .from(jobs)
     .where(
       and(
         eq(jobs.userId, userId),
-        eq(jobs.channelId, channelId),
+        ...(channelId ? [eq(jobs.channelId, channelId)] : []),
+        ...(projectId ? [eq(jobs.projectId, projectId)] : []),
         eq(jobs.name, name),
         inArray(jobs.status, ["queued", "running"]),
       ),

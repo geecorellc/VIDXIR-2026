@@ -227,6 +227,15 @@ export interface ScriptBrief {
     rationale: string;
     topic: string;
     targetKeywords: string[];
+    /**
+     * The opening line the user chose with the angle (Phase 11 §7 → §8).
+     *
+     * A *starting point*, not a script line to reproduce: the writer is told to
+     * open on this promise in its own words. Null for a Phase 1-10 idea.
+     */
+    hook: string | null;
+    /** The trend signal that justified the angle, for the writer's framing. */
+    trendSignal: string | null;
   } | null;
   /** Public titles the idea was derived from — context, never material to copy. */
   sourceTitles: string[];
@@ -237,6 +246,27 @@ export interface ScriptBrief {
     brandName: string | null;
     defaultCta: string | null;
   };
+  /**
+   * How the video will be made (Phase 11 §8, §16, §17).
+   *
+   * §8 lists the generation method and the format among the script's inputs, and
+   * they genuinely change the writing rather than only the rendering. Stock footage
+   * means a beat has to be *findable* in a library, so a narrated abstraction works
+   * better than a specific object; an AI model means each beat becomes one
+   * generated clip of a few seconds, so short concrete visual beats work better than
+   * long argued ones. Portrait means less on-screen room and a faster open.
+   *
+   * Null when the choice has not been made yet — a pre-Phase-11 project, and the
+   * prompt then says nothing about it rather than assuming stock.
+   */
+  generation: {
+    mode: "STOCK" | "AI_VIDEO";
+    /** Display label of the chosen model, or null in stock mode. */
+    modelLabel: string | null;
+    /** Longest clip the chosen model produces, when that is bounded. */
+    maxClipSeconds: number | null;
+    format: "landscape" | "portrait" | "square";
+  } | null;
   /** Operator note for a regeneration ("shorter hook", "less formal"). */
   feedback?: string | null;
 }
@@ -281,6 +311,17 @@ export function buildScriptPrompt(brief: ScriptBrief): string {
     lines.push(`- Topic: ${brief.idea.topic}`);
     lines.push(`- The angle to take: ${brief.idea.angle}`);
     lines.push(`- Why this idea was chosen: ${brief.idea.rationale}`);
+    if (brief.idea.trendSignal) {
+      lines.push(`- The trend behind it: ${brief.idea.trendSignal}`);
+    }
+    if (brief.idea.hook) {
+      // Framed as the promise to open on rather than as a line to use. Quoting it
+      // verbatim is not wrong, but a writer told to reproduce it stops writing.
+      lines.push(
+        `- The opening promise the user picked: "${brief.idea.hook}" — open on ` +
+          "this idea in your own words. Do not treat it as a line to reproduce.",
+      );
+    }
     if (brief.idea.targetKeywords.length > 0) {
       lines.push(`- Search terms to serve: ${brief.idea.targetKeywords.join(", ")}`);
     }
@@ -312,6 +353,42 @@ export function buildScriptPrompt(brief: ScriptBrief): string {
         "keeping everything that already worked:",
     );
     lines.push(brief.feedback);
+  }
+
+  if (brief.generation) {
+    lines.push("");
+    lines.push("HOW THIS WILL BE FILMED");
+    if (brief.generation.mode === "AI_VIDEO") {
+      lines.push(
+        "Every beat of this script becomes one short AI-generated clip" +
+          (brief.generation.modelLabel
+            ? ` (${brief.generation.modelLabel})`
+            : "") +
+          (brief.generation.maxClipSeconds
+            ? `, at most ${brief.generation.maxClipSeconds} seconds long`
+            : "") +
+          ". So write in short, visually concrete beats: each paragraph should " +
+          "describe or imply one thing that can be *seen*. Avoid long stretches " +
+          "of abstract argument with nothing to show.",
+      );
+    } else {
+      lines.push(
+        "This script will be cut to real stock footage searched by keyword. So " +
+          "keep each beat's subject something that plausibly exists as a library " +
+          "clip — a place, an action, an object, a person doing something. Avoid " +
+          "beats whose only visual is a specific named individual, a specific " +
+          "product screen, or an on-screen diagram.",
+      );
+    }
+    if (brief.generation.format === "portrait") {
+      lines.push(
+        "The video is vertical and will be watched on a phone, often in a feed: " +
+          "the first sentence has to land in under three seconds, and sentences " +
+          "should be shorter throughout.",
+      );
+    } else if (brief.generation.format === "square") {
+      lines.push("The video is square, for a feed rather than a widescreen player.");
+    }
   }
 
   lines.push("");

@@ -136,46 +136,57 @@ export async function generateMetadata(
     );
   }
 
-  const [channelRows, settingsRows, brandRows] = await Promise.all([
-    db
-      .select({ title: channels.title })
-      .from(channels)
-      .where(
-        and(
-          eq(channels.id, project.channelId),
-          eq(channels.userId, input.userId),
-        ),
-      )
-      .limit(1),
-    db
-      .select({
-        niche: channelSettings.niche,
-        targetAudience: channelSettings.targetAudience,
-        contentLanguage: channelSettings.contentLanguage,
-        keywords: channelSettings.keywords,
-      })
-      .from(channelSettings)
-      .where(
-        and(
-          eq(channelSettings.channelId, project.channelId),
-          eq(channelSettings.userId, input.userId),
-        ),
-      )
-      .limit(1),
-    db
-      .select({
-        brandName: brandKits.brandName,
-        defaultCta: brandKits.defaultCta,
-      })
-      .from(brandKits)
-      .where(
-        and(
-          eq(brandKits.channelId, project.channelId),
-          eq(brandKits.userId, input.userId),
-        ),
-      )
-      .limit(1),
-  ]);
+  /**
+   * Channel context is optional (Phase 11 §4).
+   *
+   * The channel title, settings and brand kit only *enrich* the prompt — they name
+   * the audience, the niche and the CTA. A project created from a pasted YouTube
+   * link has no channel yet, and metadata for it is still worth writing: the model
+   * falls back to the same defaults it already uses for a channel whose settings
+   * screen was never filled in. So the three lookups are skipped rather than being
+   * made to fail, and nothing downstream distinguishes "no channel" from "channel
+   * with nothing configured", because for a prompt they are the same thing.
+   */
+  const channelId = project.channelId;
+  const [channelRows, settingsRows, brandRows] = channelId
+    ? await Promise.all([
+        db
+          .select({ title: channels.title })
+          .from(channels)
+          .where(
+            and(eq(channels.id, channelId), eq(channels.userId, input.userId)),
+          )
+          .limit(1),
+        db
+          .select({
+            niche: channelSettings.niche,
+            targetAudience: channelSettings.targetAudience,
+            contentLanguage: channelSettings.contentLanguage,
+            keywords: channelSettings.keywords,
+          })
+          .from(channelSettings)
+          .where(
+            and(
+              eq(channelSettings.channelId, channelId),
+              eq(channelSettings.userId, input.userId),
+            ),
+          )
+          .limit(1),
+        db
+          .select({
+            brandName: brandKits.brandName,
+            defaultCta: brandKits.defaultCta,
+          })
+          .from(brandKits)
+          .where(
+            and(
+              eq(brandKits.channelId, channelId),
+              eq(brandKits.userId, input.userId),
+            ),
+          )
+          .limit(1),
+      ])
+    : ([[], [], []] as const);
 
   const settings = settingsRows[0];
   const language = settings?.contentLanguage ?? "en-US";
