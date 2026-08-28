@@ -32,11 +32,19 @@ import { pipeline as streamPipeline } from "node:stream/promises";
 import { env, usingMockProviders } from "@/lib/env";
 import { NotConfiguredError, RenderError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
-import { ffmpegBinary } from "@/lib/media/ffmpeg";
+import { assColour } from "@/lib/media/ass";
+import { ffmpegBinary, secondsArg } from "@/lib/media/ffmpeg";
 import { escapeFilterPath } from "@/lib/media/filter";
 import { fetchRemoteAsset } from "@/lib/providers/fetch";
 import { providerJson } from "@/lib/providers/http";
+import {
+  editFfmpegArgs,
+  editOverlayScript,
+  editRenderClips,
+  isStillClip,
+} from "@/lib/providers/render-edit";
 import { getObjectBuffer } from "@/lib/storage";
+import { isAudioTrack, type CompiledEdit } from "@/lib/video/edit-document";
 import {
   MUSIC_FADE_MS,
   type TimelineDocument,
@@ -95,6 +103,19 @@ export interface SubmitOptions {
   traceId?: string | null;
   /** Called with real percentages during a local encode. */
   onProgress?: (progress: number) => void | Promise<void>;
+  /**
+   * The project's compiled cut, when it has one (Phase B).
+   *
+   * Absent for a project that was never opened in the editor, and that absence is the
+   * whole backwards-compatibility story: the local encoder falls back to the sequential
+   * builder it has always used, so an unedited render is unchanged.
+   *
+   * When present it is the **source of truth** — it carries trims, absolute positions,
+   * gaps, stacked tracks and per-clip gains that `TimelineDocument` has no fields for,
+   * and its `timeline` is the same document derived in the same pass, so the two cannot
+   * describe different videos.
+   */
+  edit?: CompiledEdit | null;
 }
 
 export function renderProviderName(): string {
@@ -161,11 +182,19 @@ export async function submitRender(
     projectId: options.projectId,
     scenes: timeline.scenes.length,
     durationMs: timeline.durationMs,
+    edited: Boolean(options.edit),
     traceId: options.traceId ?? undefined,
   });
 
+  // The hosted providers are submitted the timeline document, edited or not. That is not
+  // a gap: the compiler collapses a cut onto exactly that document, so a hosted render
+  // of an edited project honours the new order, positions and durations. What it cannot
+  // express is a per-clip trim or two visuals stacked at one moment, because Shotstack's
+  // and Remotion's schemas here take one visual per scene. Local ffmpeg is the renderer
+  // that reads the cut in full, and it is Tally's default (§40).
   if (provider === "shotstack") return shotstackSubmit(timeline, assets);
   if (provider === "remotion-lambda") return remotionSubmit(timeline, assets);
+  if (options.edit) return ffmpegRenderEdit(options.edit, options);
   return ffmpegRender(timeline, options);
 }
 
@@ -719,6 +748,148 @@ async function ffmpegRender(
   }
 }
 
+/**
+ * Encode an **edited** timeline locally (Phase B).
+ *
+ * The same shape as `ffmpegRender` — pull every input to disk, build a graph, run one
+ * pass, return the bytes — and deliberately so: `runFfmpeg`, the progress reporting, the
+ * output limits and the temp-directory cleanup are all the existing renderer's, and the
+ * only thing that differs is which builder produced the arguments.
+ *
+ * Two differences worth naming:
+ *
+ *  - **only referenced media is downloaded.** `editRenderClips` decides what the graph
+ *    will touch, so a hidden track's footage is never fetched. The original builder
+ *    downloads one file per scene because in a pipeline timeline every scene is visible.
+ *  - **the graph goes to a file.** A cut with a few hundred clips produces a
+ *    `-filter_complex` value well past Windows' ~32KB command-line limit, and the
+ *    failure mode is a truncated graph rather than a clean error.
+ *    `-filter_complex_script` was verified to drive a byte-identical encode.
+ */
+async function ffmpegRenderEdit(
+  edit: CompiledEdit,
+  options: SubmitOptions,
+): Promise<RenderSubmission> {
+  const binary = ffmpegBinary();
+  if (!binary) {
+    throw new RenderError("no ffmpeg binary is available", { retryable: false });
+  }
+
+  const { visuals, audio } = editRenderClips(edit);
+
+  if (visuals.length === 0) {
+    throw new RenderError("the edit has no visible clips to render", {
+      retryable: false,
+    });
+  }
+
+  const dir = await mkdtemp(join(tmpdir(), "tally-render-"));
+
+  try {
+    const inputs: string[] = [];
+    const clipInputIndex = new Map<string, number>();
+
+    /**
+     * One download per storage key, not per clip.
+     *
+     * A split produces two clips over one asset, and re-fetching the same object for
+     * each half would double the transfer on the single most common edit there is.
+     */
+    const pathByKey = new Map<string, string>();
+
+    for (const clip of [...visuals, ...audio]) {
+      const key = clip.storageKey;
+      if (!key) continue;
+
+      let path = pathByKey.get(key);
+      if (path === undefined) {
+        // The extension is a hint for ffmpeg's probe, not a claim about the container;
+        // it demuxes by content. `.img` matches what the sequential path writes.
+        const extension = isAudioTrack(clip.trackKind)
+          ? "audio"
+          : isStillClip(clip)
+            ? "img"
+            : "mp4";
+        path = join(dir, `clip-${pathByKey.size}.${extension}`);
+        await writeFile(path, await getObjectBuffer(key));
+        pathByKey.set(key, path);
+      }
+
+      // Each clip gets its **own** input even when two share a file: the two halves of
+      // a split seek to different offsets, so they cannot share one decoder.
+      clipInputIndex.set(clip.clipId, inputs.length);
+      inputs.push(path);
+    }
+
+    const captions = edit.timeline.captions;
+    const subtitlePath =
+      captions && captions.burnedIn && captions.cues.length > 0
+        ? join(dir, "captions.srt")
+        : null;
+    if (subtitlePath && captions) {
+      await writeFile(subtitlePath, toSrt(captions.cues), "utf8");
+    }
+
+    const overlay = editOverlayScript(edit);
+    const overlayPath = overlay ? join(dir, "overlay.ass") : null;
+    if (overlayPath && overlay) {
+      await writeFile(overlayPath, overlay, "utf8");
+    }
+
+    const output = join(dir, "output.mp4");
+
+    const plan = editFfmpegArgs({
+      edit,
+      inputs,
+      clipInputIndex,
+      subtitlePath,
+      overlayPath,
+      output,
+    });
+
+    // The graph via a file rather than an argument, for the length reason above.
+    const graphPath = join(dir, "graph.txt");
+    await writeFile(graphPath, plan.filterGraph, "utf8");
+
+    const args = plan.args.map((arg, index) =>
+      plan.args[index - 1] === "-filter_complex" ? graphPath : arg,
+    );
+    const complexAt = args.indexOf("-filter_complex");
+    if (complexAt >= 0) args[complexAt] = "-filter_complex_script";
+
+    await runFfmpeg(binary, args, {
+      durationMs: edit.durationMs,
+      onProgress: options.onProgress,
+    });
+
+    const bytes = await readFile(output);
+    if (bytes.byteLength === 0) {
+      throw new RenderError("ffmpeg produced an empty file");
+    }
+
+    log.info("local edited render complete", {
+      projectId: options.projectId,
+      bytes: bytes.byteLength,
+      durationMs: edit.durationMs,
+      clips: visuals.length,
+      audioClips: audio.length,
+    });
+
+    return {
+      provider: "ffmpeg",
+      providerRenderId: `local:${options.projectId}`,
+      output: {
+        bytes,
+        mimeType: "video/mp4",
+        extension: "mp4",
+        durationMs: edit.durationMs,
+      },
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 interface FfmpegArgsInput {
   timeline: TimelineDocument;
   inputs: readonly string[];
@@ -1099,28 +1270,6 @@ export function toVtt(
 
 function isVideo(scene: TimelineScene): boolean {
   return scene.visualKind === "stock_video" || scene.visualKind === "generated_video";
-}
-
-function secondsArg(ms: number): string {
-  return (Math.max(0, Math.round(ms)) / 1000).toFixed(3);
-}
-
-/**
- * `#RRGGBB[AA]` → ASS `&HAABBGGRR`.
- *
- * ASS reverses the channel order *and* inverts alpha — 0 is opaque, 255 is
- * transparent — so a naive translation produces invisible captions.
- */
-function assColour(hex: string): string {
-  const clean = hex.replace(/^#/, "");
-  const r = clean.slice(0, 2) || "FF";
-  const g = clean.slice(2, 4) || "FF";
-  const b = clean.slice(4, 6) || "FF";
-  const alpha = clean.slice(6, 8);
-  const inverted = alpha
-    ? (255 - parseInt(alpha, 16)).toString(16).padStart(2, "0")
-    : "00";
-  return `&H${inverted}${b}${g}${r}`.toUpperCase();
 }
 
 /** Unused elsewhere, kept for the storage streaming path in service code. */

@@ -92,6 +92,8 @@ import {
   storageKey,
 } from "@/lib/storage";
 import type { PipelineStage } from "@/lib/stages";
+import type { CompiledEdit } from "@/lib/video/edit-document";
+import { compileProjectEdit, markEditRendered } from "@/lib/video/edit-service";
 import { formatSpec } from "@/lib/video/format";
 import {
   generationPlanFor,
@@ -1028,7 +1030,33 @@ export async function executeRender(input: StageInput): Promise<{
   }
 
   return runStage(input, "RENDER", async () => {
-    const timeline = await assembleTimeline(input.userId, input.projectId);
+    /**
+     * The project's saved cut, if it has one (Phase B).
+     *
+     * Null for a project that was never opened in the editor, and that is what keeps an
+     * unedited render on exactly the path it was on before the editor existed. When a cut
+     * *does* exist it is the source of truth: its compiled timeline replaces the one
+     * assembled from scene rows, so a render cannot quietly ignore an edit the user made
+     * and saved.
+     */
+    const edit = await compileProjectEdit(input.userId, input.projectId);
+
+    // `assembleTimeline` is still called when there is no cut — it is the pipeline's own
+    // assembly, unchanged. When there is one, the compiler already produced the same
+    // document shape in the same pass that produced the clip list, so re-assembling from
+    // rows would discard the edit.
+    const timeline = edit
+      ? edit.timeline
+      : await assembleTimeline(input.userId, input.projectId);
+
+    if (timeline.scenes.length === 0) {
+      // A cut with every clip deleted compiles to a document with no scenes. Refusing
+      // here names the cause; `submitRender` would otherwise reject it as an empty
+      // timeline, which reads like a pipeline fault rather than an edit.
+      throw new RenderError("the saved edit has no visible clips to render", {
+        retryable: false,
+      });
+    }
 
     const [renderRow] = await db
       .insert(renders)
@@ -1050,7 +1078,7 @@ export async function executeRender(input: StageInput): Promise<{
     if (!renderRow) throw new RenderError("could not record the render");
 
     try {
-      const urls = await signTimelineAssets(timeline);
+      const urls = await signTimelineAssets(timeline, edit);
 
       await reportProgress(input.jobId, 5, "Submitting the render");
 
@@ -1061,6 +1089,7 @@ export async function executeRender(input: StageInput): Promise<{
           projectId: input.projectId,
           userId: input.userId,
           traceId: input.traceId ?? null,
+          edit,
           onProgress: async (progress) => {
             await recordRenderProgress(input, renderRow.id, progress);
           },
@@ -1107,6 +1136,11 @@ export async function executeRender(input: StageInput): Promise<{
         .where(
           and(eq(renders.id, renderRow.id), eq(renders.userId, input.userId)),
         );
+
+      // Stamp the cut as exported, so the editor can show whether the saved edit is the
+      // one in the finished video. Only when there was a cut, and only after the render
+      // actually succeeded.
+      if (edit) await markEditRendered(input.userId, input.projectId);
 
       await transition(input.userId, input.projectId, "VIDEO_READY", {
         stage: "RENDER",
@@ -1311,6 +1345,7 @@ export async function assembleTimeline(
  */
 async function signTimelineAssets(
   timeline: TimelineDocument,
+  edit?: CompiledEdit | null,
 ): Promise<Map<string, string>> {
   const keys = new Set<string>();
   for (const scene of timeline.scenes) {
@@ -1318,6 +1353,18 @@ async function signTimelineAssets(
     if (scene.narrationKey) keys.add(scene.narrationKey);
   }
   if (timeline.music) keys.add(timeline.music.key);
+
+  /**
+   * Keys the cut references that the collapsed timeline does not.
+   *
+   * `TimelineScene` holds one visual and one narration per scene, so a stacked cutaway's
+   * footage and narration that sits under no visual appear on the clip list only. They
+   * are still in the export, so they still need signing — a hosted provider handed an
+   * unsigned key fails with a message that says nothing useful.
+   */
+  for (const clip of edit?.clips ?? []) {
+    if (clip.storageKey) keys.add(clip.storageKey);
+  }
 
   const entries = await Promise.all(
     [...keys].map(

@@ -56,3 +56,19 @@ export function ffmpegBinary(): string | null {
 export function hasFfmpeg(): boolean {
   return ffmpegBinary() !== null;
 }
+
+/**
+ * Milliseconds → a seconds argument for `-t`, `-ss`, `trim=duration` and friends.
+ *
+ * Three decimals because that is the resolution the timeline model has — every offset
+ * in it is an integer millisecond — and because ffmpeg parses a bare number as seconds.
+ * Clamped at zero: a negative duration makes ffmpeg read the flag as absent and encode
+ * the entire input, which is a much worse failure than a zero-length one.
+ *
+ * Here rather than in `render.ts` because both the sequential builder and the edit
+ * compositor format times, and two copies of a rounding rule eventually disagree by a
+ * frame.
+ */
+export function secondsArg(ms: number): string {
+  return (Math.max(0, Math.round(ms)) / 1000).toFixed(3);
+}

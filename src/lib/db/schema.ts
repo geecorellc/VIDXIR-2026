@@ -1228,6 +1228,79 @@ export const captions = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Manual editing
+// ---------------------------------------------------------------------------
+
+/**
+ * The user's cut, as a track/clip document.
+ *
+ * One row per project, holding the whole edit as `jsonb` rather than a table of
+ * clips. The reasons for a document over rows:
+ *
+ *  - **Autosave is one write.** The editor saves on every meaningful change; a
+ *    normalised model would make each save a diff across two tables inside a
+ *    transaction, and a partially-applied save is a corrupted cut.
+ *  - **Undo/redo lives in the browser** and only the accepted state is persisted.
+ *    Rows would tempt a server-side history that the client already has.
+ *  - **The compiler is pure.** `compileEditDocument` takes this document and
+ *    returns a `TimelineDocument` with no I/O, which is what lets the preview and
+ *    the export share one code path.
+ *
+ * The trade-off accepted knowingly: Postgres cannot enforce the document's shape.
+ * `EditDocumentSchema` is what does, on the way in, the same way
+ * `brand_kits.caption_style` is validated by `pickStyle` on the way out.
+ *
+ * `scenes` remains the source of truth for the *narrative*; this is the source of
+ * truth for the *cut*. A project with no row here has not been edited, and its
+ * render is still assembled from the scene rows exactly as before.
+ */
+export const projectEdits = pgTable(
+  "project_edits",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Optimistic-concurrency counter, incremented on every accepted save.
+     *
+     * Not a history: two tabs autosaving the same project would otherwise let the
+     * slower one silently overwrite the faster one's cut. A save carries the
+     * version it read and is rejected if it no longer matches.
+     */
+    version: integer("version").notNull().default(1),
+    /** Shape version of `document`, so an older deploy's write is recognisable. */
+    schemaVersion: integer("schema_version").notNull().default(1),
+    /** The edit document. Validated by `EditDocumentSchema` before it lands here. */
+    document: jsonb("document").notNull().$type<Record<string, unknown>>(),
+    /**
+     * Compiled length, denormalised for listings.
+     *
+     * Derived from the document by the compiler, never authored — it is here so a
+     * project list can show a duration without compiling every cut.
+     */
+    durationMs: integer("duration_ms"),
+    /** Set when this document was last exported, for "unsaved changes since render". */
+    lastRenderedAt: timestamp("last_rendered_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // One cut per project. A second row would be a second answer to "what is this
+    // video", and nothing in the editor needs one.
+    uniqueIndex("project_edits_project_key").on(t.projectId),
+    index("project_edits_user_id_idx").on(t.userId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Rendering & thumbnails (§15, §16)
 // ---------------------------------------------------------------------------
 
@@ -1964,6 +2037,10 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   renders: many(renders),
   jobs: many(jobs),
   events: many(projectEvents),
+  edit: one(projectEdits, {
+    fields: [projects.id],
+    references: [projectEdits.projectId],
+  }),
 }));
 
 export const scriptsRelations = relations(scripts, ({ one, many }) => ({

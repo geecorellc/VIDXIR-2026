@@ -156,8 +156,25 @@ const DEFAULT_CAPTION_STYLE: TimelineCaptionStyle = {
  *
  * A one-word narration line ("Exactly.") is under a second of audio, and a cut
  * that fast reads as a glitch rather than as pacing.
+ *
+ * Exported because the editor's seeder has to reproduce this packing exactly for a
+ * project whose timeline stage has not run yet — a document seeded with a different
+ * floor would compile to a different video than the pipeline would have built.
  */
-const MIN_SCENE_MS = 1_500;
+export const MIN_SCENE_MS = 1_500;
+
+/**
+ * Resolve the caption look from a partial override.
+ *
+ * Extracted from `buildTimeline` so the editor can store a fully-resolved style on
+ * its document and still land on the same values: the merge and the validation
+ * happen here, once, rather than in each caller.
+ */
+export function resolveCaptionStyle(
+  raw: Partial<TimelineCaptionStyle> | null | undefined,
+): TimelineCaptionStyle {
+  return { ...DEFAULT_CAPTION_STYLE, ...pickStyle(raw) };
+}
 
 /**
  * Assemble the document.
@@ -195,10 +212,7 @@ export function buildTimeline(input: BuildTimelineInput): TimelineDocument {
 
   const durationMs = cursor > 0 ? cursor + TAIL_PADDING_MS : 0;
 
-  const style: TimelineCaptionStyle = {
-    ...DEFAULT_CAPTION_STYLE,
-    ...pickStyle(input.captionStyle),
-  };
+  const style = resolveCaptionStyle(input.captionStyle);
 
   return {
     width: frame.width,
