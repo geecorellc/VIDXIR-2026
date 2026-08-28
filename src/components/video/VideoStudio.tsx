@@ -30,6 +30,7 @@ import {
   Mic,
   Music2,
   RefreshCw,
+  Scissors,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Btn } from "@/components/ui/Btn";
@@ -361,9 +362,26 @@ export function VideoStudio({
           {!building && !done && <ChevronRight size={15} />}
         </Btn>
         {done && (
-          <Btn variant="ghost" onClick={() => router.push("/dashboard/thumbnail")}>
-            Continue to thumbnail <ChevronRight size={15} />
-          </Btn>
+          <>
+            {/*
+              Editing opens the generated scenes, voiceover, music and captions as an
+              editable cut. Gated on `done` rather than on the project status: before a
+              render exists there is nothing to preview against, and the assets the editor
+              needs may still be generating.
+            */}
+            <Btn
+              variant="ghost"
+              icon={<Scissors size={15} />}
+              onClick={() =>
+                router.push(`/dashboard/video/edit?project=${encodeURIComponent(projectId)}`)
+              }
+            >
+              Edit video
+            </Btn>
+            <Btn variant="ghost" onClick={() => router.push("/dashboard/thumbnail")}>
+              Continue to thumbnail <ChevronRight size={15} />
+            </Btn>
+          </>
         )}
       </div>
 

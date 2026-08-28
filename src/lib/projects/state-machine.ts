@@ -39,6 +39,11 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
  *  - FAILED goes back to the *generating* states, because retry re-runs the stage
  *    that failed rather than resuming mid-stage.
  *  - READY_TO_PUBLISH ↔ SCHEDULED both ways: a user may unschedule.
+ *  - READY_TO_PUBLISH → RENDERING, like VIDEO_READY → RENDERING: re-exporting an edited
+ *    cut. A finished video is exactly what a user edits, and generating a thumbnail moves
+ *    it to READY_TO_PUBLISH — so without this edge, deciding to trim a shot after seeing
+ *    the thumbnail was unexportable. Not added for SCHEDULED or PUBLISHING: an export
+ *    there would race a publish that is already committed to a file.
  *  - PUBLISHING → READY_TO_PUBLISH is absent by design. A failed upload goes to
  *    FAILED so the failure is visible and explicitly retried; it must never
  *    silently reappear as "ready" as though nothing happened.
@@ -63,6 +68,7 @@ const TRANSITIONS: Record<ProjectStatus, readonly ProjectStatus[]> = {
     "SCHEDULED",
     "PUBLISHING",
     "THUMBNAIL_GENERATING",
+    "RENDERING",
     "FAILED",
   ],
   SCHEDULED: ["PUBLISHING", "READY_TO_PUBLISH", "FAILED"],

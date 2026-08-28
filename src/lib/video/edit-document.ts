@@ -415,9 +415,11 @@ export type EditDocument = z.infer<typeof EditDocumentSchema>;
 /**
  * Parse an untrusted document.
  *
- * Throws `ZodError`, which the API's `handle()` already renders as a 400. Separate
- * from `EditDocumentSchema.parse` only so callers have one import and one place that
- * says out loud that this input came from a browser.
+ * Throws `ZodError`. Note that a `ZodError` is *not* an `AppError`, so a route letting
+ * one escape renders a 500 rather than a 400 — a request carrying an untrusted document
+ * should go through `edit-service`'s `parseIncomingDocument`, which translates it into a
+ * `ValidationError`. This entry point is for documents that are already ours: a stored
+ * row on the way out, or a seed the compiler produced.
  */
 export function parseEditDocument(value: unknown): EditDocument {
   return EditDocumentSchema.parse(value);

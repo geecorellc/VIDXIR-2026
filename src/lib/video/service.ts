@@ -45,6 +45,7 @@ import {
   ConflictError,
   NotFoundError,
   RenderError,
+  ValidationError,
   errorCodeOf,
   isAppError,
   userMessageOf,
@@ -255,6 +256,127 @@ export async function startVideoBuild(
         code: "internal_error",
         message: "Could not reach the job queue. Please try again.",
         stage: "SCENE_PLAN",
+      },
+    });
+    throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Export the editor's cut (Phase C)
+// ---------------------------------------------------------------------------
+
+export interface StartEditExportResult {
+  jobId: string;
+  /** The cut's compiled length, so the UI can show what it is about to render. */
+  durationMs: number;
+  sceneCount: number;
+}
+
+/**
+ * Re-render a project from its saved cut.
+ *
+ * The editor's Export button. It queues the *existing* `RENDER_JOB` and nothing else,
+ * which is the whole point: `executeRender` already reads the saved cut through
+ * `compileProjectEdit` and already prefers it over the scene rows, so exporting an edit
+ * needs no second render path, no second provider call and no new stage. Assets are not
+ * regenerated — there is no voiceover, visuals or captions work here, so an export
+ * spends render time and no generation credit.
+ *
+ * Refused when the project has no saved cut: there is nothing to export that the normal
+ * build would not produce, and silently falling back to a scene-row render would tell the
+ * user their edit had been exported when it had not.
+ */
+export async function startEditExport(input: {
+  userId: string;
+  projectId: string;
+  tier: PlanTier;
+  traceId?: string | null;
+}): Promise<StartEditExportResult> {
+  const project = await getProject(input.userId, input.projectId);
+
+  if (project.status === "PUBLISHED") {
+    throw new ConflictError(
+      "This video has already been published. Start a new video to publish another cut.",
+    );
+  }
+
+  const edit = await compileProjectEdit(input.userId, input.projectId);
+  if (!edit) {
+    throw new ConflictError(
+      "This video has no saved edit yet. Open it in the editor first.",
+    );
+  }
+
+  if (edit.timeline.scenes.length === 0) {
+    // Caught here rather than in the worker so the user is told now, while they are
+    // looking at the timeline they emptied.
+    throw new ValidationError(
+      "This cut has no visible clips to render. Add a clip or unhide a track first.",
+    );
+  }
+
+  // Same guard `startVideoBuild` uses, and scoped the same way: one render per project
+  // at a time, because a second would spend a second render to produce a duplicate.
+  const scope = project.channelId ? undefined : project.id;
+  for (const name of [
+    SCENE_PLAN_JOB,
+    VOICEOVER_JOB,
+    VISUALS_JOB,
+    MUSIC_JOB,
+    CAPTIONS_JOB,
+    TIMELINE_JOB,
+    RENDER_JOB,
+  ]) {
+    if (
+      await hasActiveJob(input.userId, project.channelId ?? null, name, scope)
+    ) {
+      throw new ConflictError(
+        "This video is already being built or exported. Wait for it to finish.",
+      );
+    }
+  }
+
+  await transition(input.userId, project.id, "RENDERING", {
+    stage: "RENDER",
+    message: "Exporting your edit",
+    progress: deriveProgress(COMPLETED_AFTER[TIMELINE_JOB] ?? []),
+    incrementRetry: project.status === "FAILED",
+  });
+
+  try {
+    const job = await enqueue({
+      queue: "pipeline",
+      name: RENDER_JOB,
+      userId: input.userId,
+      channelId: project.channelId,
+      projectId: project.id,
+      stage: "RENDER",
+      payload: { projectId: project.id, tier: input.tier },
+      priority: queuePriorityFor(input.tier),
+      traceId: input.traceId ?? project.traceId,
+      statusMessage: "Queued",
+    });
+
+    log.info("queued an edit export", {
+      userId: input.userId,
+      projectId: project.id,
+      durationMs: edit.durationMs,
+      scenes: edit.timeline.scenes.length,
+    });
+
+    return {
+      jobId: job.id,
+      durationMs: edit.durationMs,
+      sceneCount: edit.timeline.scenes.length,
+    };
+  } catch (error) {
+    await transition(input.userId, project.id, "FAILED", {
+      stage: "RENDER",
+      error: {
+        code: "internal_error",
+        message: "Could not reach the job queue. Please try again.",
+        stage: "RENDER",
       },
     });
     throw error;

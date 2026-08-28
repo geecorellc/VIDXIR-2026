@@ -461,6 +461,40 @@ suite("edit document persistence", () => {
       expect(await compileProjectEdit(intruder.id, owner.project.id)).toBeNull();
     });
 
+    /**
+     * Opening someone else's project is a `ForbiddenError`, and so is opening one that
+     * does not exist — the same error, with the same message.
+     *
+     * Asserted on the error *class* rather than with `rejects.toThrow()`, which is what
+     * let this through before: the seeder's queries all filter on `user_id`, so a foreign
+     * project found no scenes and the refusal arrived as `AssetMissingError` — a 409
+     * saying "this video has no scene plan" about a video that is not yours. Nothing
+     * leaked, and nothing was written, but the two ids were distinguishable from the
+     * outside, and the service was relying on its caller having run
+     * `requireProjectAccess` first rather than refusing on its own.
+     */
+    it("refuses a foreign and a nonexistent project identically", async () => {
+      const { getOrSeedEditDocument } = await import("@/lib/video/edit-service");
+      const { ForbiddenError } = await import("@/lib/errors");
+
+      const owner = await builtProject("iso3-owner@tally.test");
+      const intruder = await createUser({ email: "iso3-intruder@tally.test" });
+
+      const foreign = await getOrSeedEditDocument(
+        intruder.id,
+        owner.project.id,
+      ).catch((error: unknown) => error);
+      const missing = await getOrSeedEditDocument(
+        intruder.id,
+        "11111111-2222-3333-4444-555555555555",
+      ).catch((error: unknown) => error);
+
+      expect(foreign).toBeInstanceOf(ForbiddenError);
+      expect(missing).toBeInstanceOf(ForbiddenError);
+      // Identical, so the response cannot be used to probe which projects exist.
+      expect((foreign as Error).message).toBe((missing as Error).message);
+    });
+
     it("does not let another user seed or overwrite a cut", async () => {
       const { db } = await import("@/lib/db");
       const { projectEdits } = await import("@/lib/db/schema");
@@ -487,10 +521,13 @@ suite("edit document persistence", () => {
       ).rejects.toThrow();
 
       // Opening as the intruder must not create a second row for the same project
-      // either — the unique index is on `project_id` alone.
+      // either — the unique index is on `project_id` alone. On the class, not just
+      // "throws": any error would satisfy `toThrow()`, including one that says the
+      // project has no scene plan, which is a different and worse answer.
+      const { ForbiddenError } = await import("@/lib/errors");
       await expect(
         getOrSeedEditDocument(intruder.id, owner.project.id),
-      ).rejects.toThrow();
+      ).rejects.toBeInstanceOf(ForbiddenError);
 
       const rows = await db
         .select({ userId: projectEdits.userId })

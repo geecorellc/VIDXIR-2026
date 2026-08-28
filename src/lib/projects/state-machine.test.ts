@@ -128,6 +128,48 @@ describe("scheduling", () => {
   });
 });
 
+describe("re-rendering an edited cut", () => {
+  /**
+   * The two states a finished, unpublished video can be sitting in, and the editor's
+   * Export button has to work from both. `VIDEO_READY` always did; `READY_TO_PUBLISH` did
+   * not, which meant generating a thumbnail — the normal next step — silently made the
+   * video unexportable, because `startEditExport` transitions to `RENDERING`.
+   */
+  it("lets a finished video be re-rendered from either ready state", () => {
+    expect(canTransition("VIDEO_READY", "RENDERING")).toBe(true);
+    expect(canTransition("READY_TO_PUBLISH", "RENDERING")).toBe(true);
+  });
+
+  it("does not let a committed publish be re-rendered underneath itself", () => {
+    // A scheduled or in-flight publish has already picked a file. Re-rendering there
+    // would either race the upload or change what was promised, so the user has to
+    // unschedule first — which `SCHEDULED → READY_TO_PUBLISH` allows.
+    expect(canTransition("SCHEDULED", "RENDERING")).toBe(false);
+    expect(canTransition("PUBLISHING", "RENDERING")).toBe(false);
+    expect(canTransition("PUBLISHED", "RENDERING")).toBe(false);
+  });
+
+  it("does not widen READY_TO_PUBLISH beyond the one new edge", () => {
+    // Pinned as a set: the edge above was added by hand, and this is what stops a later
+    // edit quietly adding a second one — particularly a jump straight to PUBLISHED.
+    expect([...allowedTransitions("READY_TO_PUBLISH")].sort()).toEqual([
+      "FAILED",
+      "PUBLISHING",
+      "RENDERING",
+      "SCHEDULED",
+      "THUMBNAIL_GENERATING",
+    ]);
+  });
+
+  it("still requires a render to finish before anything else", () => {
+    // RENDERING itself is unchanged: the export lands in VIDEO_READY, and the user
+    // re-generates a thumbnail from there. It must not shortcut back to publishable.
+    expect(allowedTransitions("RENDERING")).toEqual(["VIDEO_READY", "FAILED"]);
+    expect(canTransition("RENDERING", "READY_TO_PUBLISH")).toBe(false);
+    expect(canTransition("RENDERING", "PUBLISHED")).toBe(false);
+  });
+});
+
 describe("status classification", () => {
   it("labels every status", () => {
     for (const status of PROJECT_STATUSES) {

@@ -43,6 +43,7 @@ import {
   compileEditDocument,
   parseEditDocument,
   seedEditDocument,
+  EditDocumentSchema,
   EDIT_DOCUMENT_VERSION,
   type ClipVisualKind,
   type CompiledEdit,
@@ -82,6 +83,15 @@ export async function getOrSeedEditDocument(
   userId: string,
   projectId: string,
 ): Promise<StoredEdit> {
+  // Ownership first, like `saveEditDocument`. No data could leak without it — every
+  // query below filters on `userId`, so another tenant's project simply finds no scenes
+  // — but the *refusal* would be an `AssetMissingError` from the seeder rather than a
+  // `ForbiddenError`, telling a caller "this video has no scene plan" about a video that
+  // is not theirs. This function is also not required to be reached through
+  // `requireProjectAccess`, and a service that only refuses correctly when its caller
+  // remembers to check is one refactor away from not refusing at all.
+  await getProject(userId, projectId);
+
   const existing = await loadEdit(userId, projectId);
   if (existing) return existing;
 
@@ -150,7 +160,7 @@ export async function saveEditDocument(
   // that is not this user's, so the update below cannot be used to probe for one.
   await getProject(userId, projectId);
 
-  const parsed = parseEditDocument(input.document);
+  const parsed = parseIncomingDocument(input.document);
   // Shape is not ownership: the schema proves `assetId` is a uuid and `storageKey` is a
   // bounded string, and neither says the bytes are this tenant's. Resolved before the
   // write so a rejected document is never persisted.
@@ -325,6 +335,34 @@ async function resolveClipSources(
       }),
     })),
   };
+}
+
+/**
+ * Parse a document that came from a browser.
+ *
+ * `parseEditDocument` throws a `ZodError`, which is not an `AppError` — so `handle()`
+ * would render an autosave of a malformed cut as a 500 "Something went wrong. The error
+ * has been logged." That reads as a Tally fault for something the client got wrong, and
+ * it tells the editor to keep retrying a body that will never be accepted. Translated
+ * here, at the one boundary where the value is untrusted client input, so the route stays
+ * free of a second schema.
+ *
+ * The issue paths are echoed in the same `fields` shape `parseJson` uses. They name
+ * positions in a document the client already has, so nothing is disclosed by them.
+ *
+ * Deliberately not applied to `loadEdit`: a stored document failing the schema is our
+ * bug or a bad migration, not a bad request, and a 500 is the honest answer there.
+ */
+function parseIncomingDocument(value: unknown): EditDocument {
+  const result = EditDocumentSchema.safeParse(value);
+  if (result.success) return result.data;
+
+  throw new ValidationError("This cut could not be saved — it is not a valid edit.", {
+    fields: result.error.issues.slice(0, 12).map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+    })),
+  });
 }
 
 async function loadEdit(
