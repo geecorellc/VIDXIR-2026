@@ -1068,6 +1068,36 @@ export const scenes = pgTable(
     transition: varchar("transition", { length: 32 }),
     /** Chosen visual for this scene. */
     visualAssetId: uuid("visual_asset_id"),
+    /**
+     * Continuity commitments for this scene — `SceneState` from
+     * `lib/continuity/scene-state`.
+     *
+     * On the scene row rather than in a table of its own: a scene state is
+     * one-to-one with a scene, keyed by the same `(project, index)` the planner,
+     * timeline and `EditClip.sceneIndex` already agree on. A parallel table would
+     * be a second scene ordering to keep in step. Null for every project built
+     * before the continuity layer, and for every project it does not apply to.
+     */
+    continuityState: jsonb("continuity_state"),
+    /**
+     * The continuity block appended to this scene's prompt, as sent.
+     *
+     * Stored because the validator checks the prompt that was *used*, and because
+     * a regeneration has to reproduce the same constraints. Recomputing it would
+     * check the current bible against itself rather than against what the
+     * provider received.
+     */
+    continuityPrompt: text("continuity_prompt"),
+    /**
+     * How many times continuity has regenerated this scene.
+     *
+     * The stop condition. A scene that fails, is regenerated and fails again is
+     * not going to be fixed by a third paid attempt, so the count is a ceiling
+     * rather than a statistic.
+     */
+    continuityRegenerations: integer("continuity_regenerations")
+      .notNull()
+      .default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1078,6 +1108,48 @@ export const scenes = pgTable(
   (t) => [
     uniqueIndex("scenes_project_index_key").on(t.projectId, t.index),
     index("scenes_user_id_idx").on(t.userId),
+  ],
+);
+
+/**
+ * Story bible — the continuity contract for one project.
+ *
+ * One row per project, like `project_edits` and for the same reason: there is one
+ * answer, and a unique index on `project_id` makes a second one impossible rather
+ * than merely unlikely. The document is `StoryBible` from `lib/continuity/bible`,
+ * validated on the way in and out; `level` is the resolved `ContinuityLevel`,
+ * denormalised onto the row so the studio screen can say what a project is holding
+ * without parsing the blob.
+ *
+ * `editedByUser` follows the `video_metadata` precedent — once a human has touched
+ * the bible, a rebuild must not silently overwrite their casting.
+ */
+export const storyBibles = pgTable(
+  "story_bibles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    schemaVersion: integer("schema_version").notNull().default(1),
+    /** Resolved `ContinuityLevel`: off | style | world | character | episodic. */
+    level: varchar("level", { length: 16 }).notNull().default("off"),
+    document: jsonb("document").notNull(),
+    generatedBy: varchar("generated_by", { length: 48 }),
+    editedByUser: boolean("edited_by_user").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("story_bibles_project_key").on(t.projectId),
+    index("story_bibles_user_id_idx").on(t.userId),
   ],
 );
 

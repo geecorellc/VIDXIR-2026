@@ -51,6 +51,20 @@ import {
   userMessageOf,
 } from "@/lib/errors";
 import { logger } from "@/lib/logger";
+import {
+  checkContinuity,
+  continuityContextFor,
+  loadContext as loadContinuityContext,
+  persistSceneStates,
+  planContinuity,
+  recordScenePrompt,
+  regenerationPromptFor,
+  scenesToRegenerate,
+} from "@/lib/continuity/service";
+import {
+  countRegeneration,
+  latestContinuityCheck,
+} from "@/lib/continuity/store";
 import { assertCanStartVideo, queuePriorityFor } from "@/lib/plans/enforce";
 import { acquireMusic, isMusicConfigured } from "@/lib/providers/music";
 import {
@@ -73,6 +87,7 @@ import {
 } from "@/lib/providers/visuals";
 import {
   generateClip,
+  isGenerationMode,
   isVideoGenConfigured,
   type GenerationMode,
 } from "@/lib/providers/video-gen";
@@ -84,7 +99,12 @@ import {
   transition,
   type ProjectRecord,
 } from "@/lib/projects/service";
-import { enqueue, hasActiveJob, reportProgress } from "@/lib/queue/jobs";
+import {
+  enqueue,
+  hasActiveJob,
+  hasActiveSceneJob,
+  reportProgress,
+} from "@/lib/queue/jobs";
 import type { ScriptDraft } from "@/lib/scripts/prompt";
 import {
   getObjectBuffer,
@@ -114,6 +134,25 @@ export const MUSIC_JOB = "video-music";
 export const CAPTIONS_JOB = "video-captions";
 export const TIMELINE_JOB = "video-timeline";
 export const RENDER_JOB = "video-render";
+/**
+ * Continuity QC. Fills the `QUALITY_CHECK` stage, which has been declared in
+ * `stages.ts` and in the `pipeline_stage` enum since Phase 2 with no executor.
+ *
+ * Enqueued by the render stage rather than chained the way the earlier stages are,
+ * and it is deliberately *not* on the critical path: the video is already
+ * `VIDEO_READY` before this runs. A continuity check that could hold up a finished
+ * render would be a quality feature blocking delivery.
+ */
+export const CONTINUITY_JOB = "video-continuity-check";
+/**
+ * Regenerating one scene's visual. One job per scene, not one job per batch.
+ *
+ * Per scene because that is what makes retries honest: a provider that fails on
+ * scene 12 retries scene 12, rather than re-billing the three scenes that already
+ * succeeded. It reuses `enqueue`, the `pipeline` queue, the `jobs` row and
+ * `hasActiveJob` — there is no second queue and no second worker.
+ */
+export const SCENE_REGEN_JOB = "video-scene-regenerate";
 
 /** Stages completed by the time each job finishes, for the progress derivation. */
 const COMPLETED_AFTER: Record<string, PipelineStage[]> = {
@@ -419,6 +458,41 @@ export async function executeScenePlan(input: StageInput): Promise<{
       );
     }
 
+    /**
+     * The continuity layer sits here: after segmentation, before direction.
+     *
+     * That is the only point in the pipeline where the narration exists and the
+     * visual prompts do not, which is exactly what a continuity supervisor needs —
+     * it decides what must stay the same, and the director then directs into those
+     * decisions rather than inventing a subject per scene and being corrected
+     * afterwards.
+     *
+     * `planContinuity` never throws and returns an inert context when the flag is
+     * off, the project is stock, the plan does not allow it, or planning failed.
+     * In every one of those cases `plannerContext` is "" and the `directScenes`
+     * call below is byte-identical to the pre-continuity one.
+     */
+    const project = await getProject(input.userId, input.projectId);
+    const continuity = await planContinuity({
+      userId: input.userId,
+      project: {
+        projectId: input.projectId,
+        channelId: project.channelId,
+        generationMode: isGenerationMode(project.generationMode)
+          ? project.generationMode
+          : null,
+        tier: input.tier,
+      },
+      scenes: planned.map((scene) => ({
+        index: scene.index,
+        label: scene.label,
+        narration: scene.narration,
+      })),
+      title: script.draft.title,
+      niche: settings.niche,
+      usage: { jobId: input.jobId, traceId: input.traceId ?? null },
+    });
+
     await reportProgress(input.jobId, 30, `Directing ${planned.length} scenes`);
 
     const directed = await directScenes({
@@ -426,6 +500,7 @@ export async function executeScenePlan(input: StageInput): Promise<{
       title: script.draft.title,
       niche: settings.niche,
       videoStyle: settings.videoStyle,
+      continuity: continuity.plannerContext,
       usage: {
         userId: input.userId,
         projectId: input.projectId,
@@ -465,6 +540,15 @@ export async function executeScenePlan(input: StageInput): Promise<{
           durationMs: null,
         })),
       );
+    });
+
+    // After the scene rows exist, not before: the states are keyed by scene index
+    // and are written onto those rows, so writing them earlier would update nothing.
+    // A no-op when continuity is inert.
+    await persistSceneStates({
+      userId: input.userId,
+      projectId: input.projectId,
+      context: continuity.context,
     });
 
     // The mood rides on the music row rather than a project column, because it is
@@ -641,6 +725,26 @@ export async function executeVisuals(input: StageInput): Promise<{
     const project = await getProject(input.userId, input.projectId);
     const plan = generationPlanFor(project);
 
+    /**
+     * Continuity, also resolved once.
+     *
+     * The bible and every scene state are read here rather than per scene: the loop
+     * below runs up to 120 times and none of this data can change mid-stage, so a
+     * query inside the loop would be 120 round trips for the same answer.
+     *
+     * Inert unless the flag is on, the project generates AI video and a bible was
+     * planned — in which case `continuityContextFor` returns the prompt unchanged
+     * and this stage behaves exactly as it did before the layer existed.
+     */
+    const continuity = await loadContinuityContext(input.userId, {
+      projectId: input.projectId,
+      channelId: project.channelId,
+      generationMode: isGenerationMode(project.generationMode)
+        ? project.generationMode
+        : null,
+      tier: input.tier,
+    });
+
     const used = new Set<string>();
     let acquired = 0;
 
@@ -661,12 +765,26 @@ export async function executeVisuals(input: StageInput): Promise<{
         traceId: input.traceId ?? null,
       };
 
+      /**
+       * The continuity block for this scene, and the prompt it produces.
+       *
+       * Computed for every scene, including in stock mode, because the function is
+       * pure and returns the prompt unchanged when the context is inert — a branch
+       * here would be a second place for the two modes to diverge.
+       */
+      const sceneContinuity = continuityContextFor({
+        context: continuity,
+        sceneIndex: scene.index,
+        visualPrompt: basePromptFor(scene),
+      });
+
       const visual =
         plan.mode === "AI_VIDEO" && plan.model
           ? await generateSceneClip({
               plan,
               modelId: plan.model.id,
               scene,
+              prompt: sceneContinuity.prompt,
               durationMs,
               usage,
             })
@@ -715,6 +833,19 @@ export async function executeVisuals(input: StageInput): Promise<{
           ),
         );
 
+      // What this scene was *actually* generated with, so the check validates the
+      // request that was sent rather than recomputing one from the current bible.
+      if (continuity.active) {
+        await recordScenePrompt({
+          userId: input.userId,
+          projectId: input.projectId,
+          sceneIndex: scene.index,
+          state:
+            continuity.states.find((s) => s.sceneIndex === scene.index) ?? null,
+          block: sceneContinuity.block,
+        });
+      }
+
       acquired += 1;
     }
 
@@ -722,6 +853,26 @@ export async function executeVisuals(input: StageInput): Promise<{
 
     return { acquired };
   });
+}
+
+/**
+ * A scene's visual direction, before any continuity constraints.
+ *
+ * Lifted out of `generateSceneClip` so the continuity block can be attached to the
+ * same string the adapter would have built, and so there is exactly one definition
+ * of the fallback for an undirected scene. Previously inline; behaviour unchanged.
+ */
+function basePromptFor(scene: {
+  visualPrompt: string | null;
+  searchTerms: string[];
+}): string {
+  return (
+    scene.visualPrompt?.trim() ||
+    scene.searchTerms.filter(Boolean).join(", ") ||
+    // Nothing to go on. Better than an empty prompt, and the scene director
+    // producing no direction at all is itself a defect worth seeing in the output.
+    "A clean, well-lit establishing shot relevant to the narration"
+  );
 }
 
 /**
@@ -737,8 +888,9 @@ export async function executeVisuals(input: StageInput): Promise<{
  *  - **The prompt is the scene's visual direction, not its narration.** The scene
  *    director already writes `visualPrompt` as a description of a shot; handing a
  *    model the spoken words instead would produce footage of someone talking. The
- *    search terms are appended as a fallback for a scene whose direction is empty,
- *    since a model given nothing generates nothing useful.
+ *    prompt arrives ready-made from the caller — `basePromptFor` with any continuity
+ *    constraints already attached — because deciding what a scene must look like is
+ *    not an adapter's job.
  *  - **`kind` follows the bytes, not the intent.** A provider that returned a still
  *    is recorded as `generated_image`, so the timeline holds it for its slot rather
  *    than expecting motion. Recording it as `generated_video` because AI mode was
@@ -747,7 +899,9 @@ export async function executeVisuals(input: StageInput): Promise<{
 async function generateSceneClip(args: {
   plan: GenerationPlan;
   modelId: string;
-  scene: { index: number; visualPrompt: string | null; searchTerms: string[] };
+  scene: { index: number };
+  /** The full prompt, continuity constraints included. */
+  prompt: string;
   durationMs: number;
   usage: {
     userId: string;
@@ -756,14 +910,7 @@ async function generateSceneClip(args: {
     traceId: string | null;
   };
 }): Promise<AcquiredVisual> {
-  const { plan, modelId, scene, durationMs, usage } = args;
-
-  const prompt =
-    scene.visualPrompt?.trim() ||
-    scene.searchTerms.filter(Boolean).join(", ") ||
-    // Nothing to go on. Better than an empty prompt, and the scene director
-    // producing no direction at all is itself a defect worth seeing in the output.
-    "A clean, well-lit establishing shot relevant to the narration";
+  const { plan, modelId, scene, prompt, durationMs, usage } = args;
 
   const clip = await generateClip(
     {
@@ -1288,6 +1435,22 @@ export async function executeRender(input: StageInput): Promise<{
         durationMs: output.durationMs ?? timeline.durationMs,
       });
 
+      /**
+       * Queue the continuity check, after the video is ready and outside the render's
+       * own success path.
+       *
+       * `.catch` rather than `await` bare: the render has succeeded, the project is
+       * `VIDEO_READY`, and failing to enqueue a quality check must not turn that into
+       * a failed render (§22). A missing check is visible in the studio screen as no
+       * continuity score, which is honest.
+       */
+      await enqueueContinuityCheck(input).catch((error: unknown) => {
+        log.warn("could not queue the continuity check", {
+          projectId: input.projectId,
+          error,
+        });
+      });
+
       return {
         renderId: renderRow.id,
         assetId: asset.id,
@@ -1312,6 +1475,421 @@ export async function executeRender(input: StageInput): Promise<{
       throw error;
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Stage 8 — continuity check (§10, §11, §12, §13)
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate the video's continuity, and regenerate the scenes that failed.
+ *
+ * This is the `QUALITY_CHECK` stage. It has existed in `PIPELINE_STAGES` and in the
+ * `pipeline_stage` enum since Phase 2 with nothing behind it; the continuity layer
+ * is its first occupant. The findings go into the existing `quality_checks` table
+ * with the existing `pass|warn|fail` verdict, so the studio screen reads them
+ * through the query it already has.
+ *
+ * Three things this stage deliberately does not do:
+ *
+ *  - **It does not fail the project.** By the time it runs the video is
+ *    `VIDEO_READY` and the render is paid for. A continuity problem is recorded and
+ *    shown, and the state machine is left alone. §22.
+ *  - **It does not block publishing.** `publishReadiness` is unchanged. A video with
+ *    a warn verdict is still a video, and the operator decides.
+ *  - **It does not re-render.** Regenerating a scene replaces that scene's asset;
+ *    the user re-exports from the editor when they want the change in an MP4. Kicking
+ *    off a second render automatically would double the cost of every failed check.
+ */
+export async function executeContinuityCheck(input: StageInput): Promise<{
+  checked: boolean;
+  score: number | null;
+  status: string | null;
+  regenerating: number;
+}> {
+  return runStage(input, "QUALITY_CHECK", async () => {
+    const project = await getProject(input.userId, input.projectId);
+    const sceneRows = await loadScenes(input.userId, input.projectId);
+
+    const continuityProject = {
+      projectId: input.projectId,
+      channelId: project.channelId,
+      generationMode: isGenerationMode(project.generationMode)
+        ? project.generationMode
+        : null,
+      tier: input.tier,
+    };
+
+    await reportProgress(input.jobId, 30, "Checking continuity");
+
+    /**
+     * The prompt each scene was generated with, reassembled.
+     *
+     * `continuityPrompt` is the block as *sent*, so this is the request the provider
+     * saw rather than one recomputed from the current bible. That distinction is the
+     * whole value of the check: recomputing would validate the bible against itself
+     * and pass even if the visuals stage had dropped the block entirely.
+     */
+    const promptRows = await loadScenePrompts(input.userId, input.projectId);
+
+    const { report, context } = await checkContinuity({
+      userId: input.userId,
+      project: continuityProject,
+      visuals: sceneRows.map((scene) => {
+        const block = promptRows.get(scene.index) ?? null;
+        const base = basePromptFor(scene);
+        return {
+          sceneIndex: scene.index,
+          visualPrompt: block ? `${base}\n\n${block}` : base,
+          searchTerms: scene.searchTerms,
+          /**
+           * The shot alone, for repetition detection.
+           *
+           * Both halves are passed because the two checks need different things: the
+           * constraint checks read the full prompt to confirm the block survived into
+           * the request, while repetition must compare only the direction — the block
+           * is identical by design on every scene sharing a cast, and comparing it
+           * would make two unrelated shots of one character read as a duplicate.
+           */
+          shotPrompt: base,
+        };
+      }),
+    });
+
+    if (!report) {
+      // Continuity did not apply, or could not be evaluated. Not a failure: this is
+      // every project built before the layer existed, and every stock video.
+      await setProgress(
+        input.userId,
+        input.projectId,
+        deriveProgress([
+          ...(COMPLETED_AFTER[TIMELINE_JOB] ?? []),
+          "RENDER",
+          "QUALITY_CHECK",
+        ]),
+      );
+      return { checked: false, score: null, status: null, regenerating: 0 };
+    }
+
+    await reportProgress(input.jobId, 70, `Continuity score ${report.score}`);
+
+    const toRegenerate = await scenesToRegenerate({
+      userId: input.userId,
+      projectId: input.projectId,
+      context,
+      report,
+    });
+
+    for (const sceneIndex of toRegenerate) {
+      await enqueueSceneRegeneration(input, sceneIndex);
+    }
+
+    await setProgress(
+      input.userId,
+      input.projectId,
+      deriveProgress([
+        ...(COMPLETED_AFTER[TIMELINE_JOB] ?? []),
+        "RENDER",
+        "QUALITY_CHECK",
+      ]),
+    );
+
+    log.info("continuity check complete", {
+      userId: input.userId,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      stage: "QUALITY_CHECK",
+      score: report.score,
+      verdict: report.status,
+      regenerating: toRegenerate.length,
+    });
+
+    return {
+      checked: true,
+      score: report.score,
+      status: report.status,
+      regenerating: toRegenerate.length,
+    };
+  });
+}
+
+/**
+ * Regenerate one scene's visual with the continuity failures in the prompt (§13).
+ *
+ * Reuses the visuals stage's machinery exactly: `generateSceneClip` → `storeAsset` →
+ * `UPDATE scenes SET visual_asset_id`. The only difference is the prompt, which
+ * carries what was wrong with the previous attempt — a model told "the coat was blue
+ * and must be brown" can act on that, while one told "try again" produces another
+ * draw from the same distribution at the same price.
+ *
+ * The old asset row is left in place rather than deleted. It is provenance: the
+ * regeneration is recorded in `scenes.continuity_regenerations`, and an asset that
+ * no scene points at is already how the editor's replaced clips behave.
+ */
+export async function executeSceneRegeneration(
+  input: StageInput & { sceneIndex: number },
+): Promise<{ regenerated: boolean; attempt: number }> {
+  return runStage(input, "QUALITY_CHECK", async () => {
+    const project = await getProject(input.userId, input.projectId);
+    const plan = generationPlanFor(project);
+
+    if (plan.mode !== "AI_VIDEO" || !plan.model) {
+      // Continuity only regenerates generated scenes. A stock clip is not wrong
+      // because it differs from the last one — it is a different clip by nature.
+      return { regenerated: false, attempt: 0 };
+    }
+
+    const continuityProject = {
+      projectId: input.projectId,
+      channelId: project.channelId,
+      generationMode: isGenerationMode(project.generationMode)
+        ? project.generationMode
+        : null,
+      tier: input.tier,
+    };
+
+    const context = await loadContinuityContext(input.userId, continuityProject);
+    if (!context.active) return { regenerated: false, attempt: 0 };
+
+    const sceneRows = await loadScenes(input.userId, input.projectId);
+    const scene = sceneRows.find((row) => row.index === input.sceneIndex);
+    if (!scene) {
+      throw new NotFoundError(
+        `Scene ${input.sceneIndex} is not in this project's plan.`,
+      );
+    }
+
+    const check = await latestContinuityCheck(input.userId, input.projectId);
+    const issues = (check?.findings ?? [])
+      .filter(
+        (finding) =>
+          finding.severity === "fail" &&
+          (finding.detail ?? "").includes(`scene ${input.sceneIndex}`),
+      )
+      .map((finding) => finding.message);
+
+    /**
+     * Counted before the provider call, not after.
+     *
+     * The count is a spend ceiling, so it has to be incremented by the attempt
+     * rather than by the success. A generation that fails halfway through still cost
+     * money, and a scene that could fail forever without ever incrementing would
+     * defeat the cap.
+     */
+    const attempt = await countRegeneration({
+      userId: input.userId,
+      projectId: input.projectId,
+      sceneIndex: input.sceneIndex,
+    });
+
+    if (attempt > context.thresholds.maxRegenerations) {
+      log.info("scene has reached its regeneration ceiling", {
+        projectId: input.projectId,
+        sceneIndex: input.sceneIndex,
+        attempt,
+      });
+      return { regenerated: false, attempt };
+    }
+
+    const narration = await loadNarrationDurations(input.userId, input.projectId);
+    const durationMs = narration.get(scene.index) ?? 6_000;
+
+    const usage = {
+      userId: input.userId,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      traceId: input.traceId ?? null,
+    };
+
+    await reportProgress(
+      input.jobId,
+      20,
+      `Regenerating scene ${input.sceneIndex + 1} for continuity`,
+    );
+
+    const prompt = regenerationPromptFor({
+      context,
+      report: {
+        // Only `issues` is read by `regenerationPromptFor`, via `issuesForScene`.
+        // Reconstructed from the stored findings so the prompt carries the failures
+        // this job was queued for rather than a fresh, possibly different, opinion.
+        score: 0,
+        status: "fail",
+        components: {
+          characterConsistency: 0,
+          environmentConsistency: 0,
+          propContinuity: 0,
+          storyContinuity: 0,
+          styleConsistency: 0,
+          duplicateRisk: 0,
+        },
+        issues: issues.map((message) => ({
+          code: "continuity.regenerate",
+          severity: "fail" as const,
+          message,
+          sceneIndex: input.sceneIndex,
+          entityId: null,
+        })),
+        affectedScenes: [input.sceneIndex],
+        affectedEntities: [],
+        repetitions: [],
+      },
+      sceneIndex: input.sceneIndex,
+      visualPrompt: basePromptFor(scene),
+    });
+
+    const visual = await generateSceneClip({
+      plan,
+      modelId: plan.model.id,
+      scene: { index: scene.index },
+      prompt,
+      durationMs,
+      usage,
+    });
+
+    const asset = await storeAsset({
+      userId: input.userId,
+      projectId: input.projectId,
+      folder: "visual",
+      kind: visual.kind,
+      bytes: visual.bytes,
+      mimeType: visual.mimeType,
+      extension: visual.extension,
+      width: visual.width,
+      height: visual.height,
+      durationMs: visual.durationMs,
+      provider: visual.provider,
+      providerAssetId: visual.providerAssetId,
+      sourceUrl: visual.sourceUrl,
+      license: visual.license,
+      attribution: visual.attribution,
+      authorName: visual.authorName,
+      meta: {
+        sceneIndex: scene.index,
+        matchedOn: visual.matchedOn,
+        // Provenance: this asset exists because continuity rejected the last one.
+        continuityRegeneration: attempt,
+      },
+    });
+
+    await db
+      .update(scenesTable)
+      .set({ visualAssetId: asset.id, updatedAt: new Date() })
+      .where(
+        and(
+          eq(scenesTable.projectId, input.projectId),
+          eq(scenesTable.userId, input.userId),
+          eq(scenesTable.index, scene.index),
+        ),
+      );
+
+    log.info("scene regenerated for continuity", {
+      userId: input.userId,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      sceneIndex: scene.index,
+      attempt,
+    });
+
+    return { regenerated: true, attempt };
+  });
+}
+
+/**
+ * Queue the continuity check for a project.
+ *
+ * Guarded by `hasActiveJob` the same way `startVideoBuild` guards its seven jobs: a
+ * render retried after a transient failure must not leave two checks queued, both
+ * writing a `quality_checks` row for the same video.
+ */
+async function enqueueContinuityCheck(input: StageInput): Promise<void> {
+  const project = await getProject(input.userId, input.projectId);
+  const scope = project.channelId ? undefined : project.id;
+
+  if (
+    await hasActiveJob(
+      input.userId,
+      project.channelId ?? null,
+      CONTINUITY_JOB,
+      scope,
+    )
+  ) {
+    return;
+  }
+
+  await enqueue({
+    queue: "pipeline",
+    name: CONTINUITY_JOB,
+    userId: input.userId,
+    channelId: project.channelId,
+    projectId: input.projectId,
+    stage: "QUALITY_CHECK",
+    payload: { projectId: input.projectId, tier: input.tier },
+    priority: queuePriorityFor(input.tier),
+    traceId: input.traceId ?? project.traceId,
+    statusMessage: "Queued",
+  });
+}
+
+/**
+ * Queue one scene's regeneration.
+ *
+ * The idempotency key is the scene, not the project: two scenes regenerating
+ * concurrently is correct, the same scene twice is not. `hasActiveJob` locks the
+ * whole project, so this uses `hasActiveSceneJob`, which adds the scene index from
+ * the payload to the same predicate.
+ */
+async function enqueueSceneRegeneration(
+  input: StageInput,
+  sceneIndex: number,
+): Promise<void> {
+  const project = await getProject(input.userId, input.projectId);
+
+  if (
+    await hasActiveSceneJob(
+      input.userId,
+      input.projectId,
+      SCENE_REGEN_JOB,
+      sceneIndex,
+    )
+  ) {
+    return;
+  }
+
+  await enqueue({
+    queue: "pipeline",
+    name: SCENE_REGEN_JOB,
+    userId: input.userId,
+    channelId: project.channelId,
+    projectId: input.projectId,
+    stage: "QUALITY_CHECK",
+    payload: { projectId: input.projectId, tier: input.tier, sceneIndex },
+    priority: queuePriorityFor(input.tier),
+    traceId: input.traceId ?? project.traceId,
+    statusMessage: `Queued — scene ${sceneIndex + 1}`,
+  });
+}
+
+/** The continuity block each scene was generated with, by scene index. */
+async function loadScenePrompts(
+  userId: string,
+  projectId: string,
+): Promise<Map<number, string>> {
+  const rows = await db
+    .select({
+      index: scenesTable.index,
+      prompt: scenesTable.continuityPrompt,
+    })
+    .from(scenesTable)
+    .where(
+      and(eq(scenesTable.projectId, projectId), eq(scenesTable.userId, userId)),
+    );
+
+  const out = new Map<number, string>();
+  for (const row of rows) {
+    if (row.prompt) out.set(row.index, row.prompt);
+  }
+  return out;
 }
 
 /**

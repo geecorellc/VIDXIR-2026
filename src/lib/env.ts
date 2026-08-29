@@ -46,6 +46,15 @@ const schema = z.object({
 
   TALLY_USE_MOCK_PROVIDERS: bool.default("false"),
   TALLY_BLOCK_REAL_PUBLISH: bool.default("false"),
+  /**
+   * The continuity layer (story bible, continuity-aware prompts, continuity QC).
+   *
+   * Off by default, and off means *inert*: no bible is planned, no prompt is
+   * modified, no continuity check is written, and every project generates exactly
+   * what it generated before the layer existed. Unlike the two flags above this one
+   * is allowed in production — it gates a feature rather than a test double.
+   */
+  TALLY_CONTINUITY_ENGINE_ENABLED: bool.default("false"),
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
@@ -399,6 +408,17 @@ export function bedrockRegion(): string | undefined {
 export function usingMockProviders(): boolean {
   const e = env();
   return e.NODE_ENV !== "production" && e.TALLY_USE_MOCK_PROVIDERS;
+}
+
+/**
+ * True when the continuity layer is active.
+ *
+ * No `NODE_ENV` condition, unlike the mock and publish-block flags: those exist to
+ * make development safe and would be a lie in production, while this one is a
+ * product feature an operator may legitimately want on.
+ */
+export function continuityEnabled(): boolean {
+  return env().TALLY_CONTINUITY_ENGINE_ENABLED;
 }
 
 /** True when any real YouTube publish/upload call must be refused (§40). */
