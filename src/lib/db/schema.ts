@@ -1537,9 +1537,27 @@ export const voiceovers = pgTable(
     speed: real("speed"),
     style: varchar("style", { length: 64 }),
     durationMs: integer("duration_ms"),
-    /** Per-scene audio offsets, so the timeline can align narration. */
+    /**
+     * Per-scene audio offsets, so the timeline can align narration.
+     *
+     * `voiceId` and `characterId` are optional and additive: they record the voice
+     * each scene was *actually* narrated in, which is what lets the continuity check
+     * compare produced audio against the story bible instead of comparing the bible
+     * with itself. Absent on every row written before character voices existed, and
+     * on every project that does not use them — the row-level `voice_id` above is the
+     * whole answer for those.
+     *
+     * A widening of the jsonb `$type` only. No column changes, so no migration: the
+     * offsets every existing consumer reads are untouched.
+     */
     segments: jsonb("segments").$type<
-      Array<{ sceneIndex: number; startMs: number; durationMs: number }>
+      Array<{
+        sceneIndex: number;
+        startMs: number;
+        durationMs: number;
+        voiceId?: string | null;
+        characterId?: string | null;
+      }>
     >(),
     charactersBilled: integer("characters_billed"),
     createdAt: timestamp("created_at", { withTimezone: true })

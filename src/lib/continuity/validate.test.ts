@@ -165,6 +165,9 @@ function input(overrides: Partial<ValidateInput> = {}): ValidateInput {
     capabilities,
     thresholds: overrides.thresholds ?? DEFAULT_THRESHOLDS,
     visuals: overrides.visuals ?? realVisuals(states, capabilities, bible),
+    // Forwarded rather than defaulted: absent is the ordinary case, and a default
+    // here would make every case in this file assert something about audio.
+    ...(overrides.voices ? { voices: overrides.voices } : {}),
   };
 }
 
@@ -843,5 +846,396 @@ describe("toQualityFindings", () => {
     expect(JSON.stringify(toQualityFindings(report))).toBe(
       JSON.stringify(toQualityFindings(report)),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Voice continuity
+// ---------------------------------------------------------------------------
+
+/**
+ * A bible where Mara is voiced, plus optional extra characters.
+ *
+ * Built from `BIBLE` so the visual half of every case below still passes: a fixture
+ * that lost Mara's appearance facts would fail the character check as well, and the
+ * scores under test would move for two reasons at once.
+ */
+function voicedBible(voiceId: string | null, extra: unknown[] = []) {
+  return parseStoryBible({
+    characters: [
+      {
+        ...BIBLE.characters[0],
+        ...(voiceId === null
+          ? {}
+          : { voice: { providerVoiceId: voiceId, name: "Mara's voice" } }),
+      },
+      ...extra,
+    ],
+    environments: BIBLE.environments,
+    props: BIBLE.props,
+    style: BIBLE.style,
+  });
+}
+
+/** Mara leads every scene. */
+function voicedStates(count: number): IndexedSceneState[] {
+  return Array.from({ length: count }, (_, i) => ({
+    sceneIndex: i,
+    state: parseSceneState({ characters: ["mara"], environment: "workshop" }),
+  }));
+}
+
+const CANONICAL = "voice-unit-placeholder-canonical";
+const OTHER = "voice-unit-placeholder-other";
+const BEN = "voice-unit-placeholder-ben";
+
+/** A record per scene, all the same voice unless overridden. */
+function voiceRecords(
+  count: number,
+  overrides: Record<number, string | null> = {},
+) {
+  return Array.from({ length: count }, (_, i) => ({
+    sceneIndex: i,
+    providerVoiceId: i in overrides ? overrides[i]! : CANONICAL,
+    characterId: "mara",
+    provider: "mock",
+    source: "character" as const,
+  }));
+}
+
+describe("voice continuity", () => {
+  it("scores a project whose scenes used the canonical voice at 100", () => {
+    // The closed loop, as for prompts: the assignment the resolver produces satisfies
+    // the validator. A drift between the two halves fails here first.
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(3),
+        voices: voiceRecords(3),
+      }),
+    );
+
+    expect(report.score).toBe(100);
+    expect(
+      report.issues.filter((i) => i.code.startsWith("continuity.voice.")),
+    ).toEqual([]);
+  });
+
+  it("scores a project with no character voices exactly as it did before", () => {
+    /**
+     * §25's guarantee, asserted as an equality rather than as a range.
+     *
+     * The same states and prompts, with and without a voice on Mara and with no voice
+     * records either way. If the voice check ever contributed to the tally for an
+     * unvoiced project these two numbers would diverge, and every existing project's
+     * score would have silently moved.
+     */
+    const states = voicedStates(3);
+    const withoutVoices = validateContinuity(
+      input({ bible: voicedBible(null), states }),
+    );
+    const withVoicesButNoRecords = validateContinuity(
+      input({ bible: voicedBible(CANONICAL), states }),
+    );
+
+    expect(withoutVoices.score).toBe(withVoicesButNoRecords.score);
+    expect(
+      withoutVoices.issues.some((i) => i.code.startsWith("continuity.voice.")),
+    ).toBe(false);
+  });
+
+  it("reports a mismatch when a scene was narrated in another voice", () => {
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(3),
+        voices: voiceRecords(3, { 1: OTHER }),
+      }),
+    );
+
+    const issue = report.issues.find(
+      (i) => i.code === "continuity.voice.assignment_mismatch",
+    );
+
+    expect(issue?.severity).toBe("fail");
+    expect(issue?.sceneIndex).toBe(1);
+    expect(issue?.entityId).toBe("mara");
+    expect(report.score).toBeLessThan(100);
+    // The provider voice id is never in the message: it is meaningless to an operator
+    // and it is the vendor's token, not Tally's.
+    expect(issue?.message).not.toContain(OTHER);
+    expect(issue?.message).not.toContain(CANONICAL);
+  });
+
+  it("reports drift when one character is heard as two voices", () => {
+    // Scenes 0 and 1 in the canonical voice, scene 2 in another: the character audibly
+    // changes mid-video, which is the failure the feature exists to prevent.
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(3),
+        voices: voiceRecords(3, { 2: OTHER }),
+      }),
+    );
+
+    const drift = report.issues.find((i) => i.code === "continuity.voice.drift");
+    expect(drift?.severity).toBe("fail");
+    expect(drift?.sceneIndex).toBe(2);
+    expect(drift?.entityId).toBe("mara");
+    // Names both scenes, so an operator knows which two to compare.
+    expect(drift?.message).toContain("scene 2");
+    expect(drift?.message).toContain("scene 0");
+    expect(report.score).toBeLessThan(100);
+  });
+
+  it("distinguishes disobeying the bible from changing mid-video", () => {
+    /**
+     * Why `mismatch` and `drift` are separate codes rather than one.
+     *
+     * Every scene voiced with the same wrong id is internally consistent audio that
+     * disobeys the bible: a mismatch on each scene and drift on none. The earlier
+     * shape of this check returned after the first mismatch, which made drift
+     * unreachable whenever the bible was also disobeyed — that is, nearly always.
+     */
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(3),
+        voices: voiceRecords(3, { 0: OTHER, 1: OTHER, 2: OTHER }),
+      }),
+    );
+
+    const codes = report.issues.map((i) => i.code);
+    expect(codes.filter((c) => c === "continuity.voice.assignment_mismatch")).toHaveLength(
+      3,
+    );
+    expect(codes).not.toContain("continuity.voice.drift");
+  });
+
+  it("counts a scene that is both a mismatch and a drift as one wrong voice", () => {
+    /**
+     * Two descriptions of one wrong voice are not two wrong voices.
+     *
+     * The comparison is built to hold the denominator fixed: both videos have three
+     * scenes, each with a voice contract, and exactly one scene narrated in the wrong
+     * voice. The only difference is that Mara's wrong scene is also a drift — she is
+     * heard correctly first — while Ben's cannot be, because he leads one scene and has
+     * nothing to have drifted from. Same misses over same expected, so the same score;
+     * one extra finding describing the same fault.
+     */
+    const cast = [
+      { id: "ben", name: "Ben", appearance: ["ginger hair"], voice: { providerVoiceId: BEN } },
+    ];
+    const threeStates: IndexedSceneState[] = [
+      { sceneIndex: 0, state: parseSceneState({ characters: ["mara"] }) },
+      { sceneIndex: 1, state: parseSceneState({ characters: ["ben"] }) },
+      { sceneIndex: 2, state: parseSceneState({ characters: ["mara"] }) },
+    ];
+
+    // Ben's one scene narrated in the wrong voice: a mismatch, and no drift possible.
+    const mismatchOnly = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL, cast),
+        states: threeStates,
+        voices: [
+          { sceneIndex: 0, providerVoiceId: CANONICAL, characterId: "mara", provider: "mock", source: "character" as const },
+          { sceneIndex: 1, providerVoiceId: OTHER, characterId: "ben", provider: "mock", source: "character" as const },
+          { sceneIndex: 2, providerVoiceId: CANONICAL, characterId: "mara", provider: "mock", source: "character" as const },
+        ],
+      }),
+    );
+
+    // Mara's second scene narrated in the wrong voice: a mismatch *and* a drift.
+    const both = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL, cast),
+        states: threeStates,
+        voices: [
+          { sceneIndex: 0, providerVoiceId: CANONICAL, characterId: "mara", provider: "mock", source: "character" as const },
+          { sceneIndex: 1, providerVoiceId: BEN, characterId: "ben", provider: "mock", source: "character" as const },
+          { sceneIndex: 2, providerVoiceId: OTHER, characterId: "mara", provider: "mock", source: "character" as const },
+        ],
+      }),
+    );
+
+    const codesOf = (r: typeof both) =>
+      r.issues.filter((i) => i.code.startsWith("continuity.voice.")).map((i) => i.code);
+
+    expect(codesOf(mismatchOnly)).toEqual(["continuity.voice.assignment_mismatch"]);
+    expect(codesOf(both)).toEqual([
+      "continuity.voice.assignment_mismatch",
+      "continuity.voice.drift",
+    ]);
+    // One extra finding, identical deduction.
+    expect(both.score).toBe(mismatchOnly.score);
+  });
+
+  it("warns rather than fails for a character with no canonical voice", () => {
+    // A gap, not a break: the project voice narrated the scene, which is what Tally
+    // has always done. Failing it would spend a regeneration on business as usual.
+    const states: IndexedSceneState[] = [
+      {
+        sceneIndex: 0,
+        state: parseSceneState({ characters: ["mara"], environment: "workshop" }),
+      },
+      {
+        sceneIndex: 1,
+        state: parseSceneState({ characters: ["ben"], environment: "workshop" }),
+      },
+    ];
+
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL, [
+          { id: "ben", name: "Ben", appearance: ["ginger hair"] },
+        ]),
+        states,
+        voices: voiceRecords(1),
+      }),
+    );
+
+    const issue = report.issues.find((i) => i.code === "continuity.voice.missing");
+    expect(issue?.severity).toBe("warn");
+    expect(issue?.sceneIndex).toBe(1);
+    expect(issue?.entityId).toBe("ben");
+    expect(issue?.message).toContain("Ben");
+  });
+
+  it("says nothing about a scene it has no record for", () => {
+    // A project checked before its voiceover ran. Inventing a break out of an absent
+    // measurement is exactly what an honest report must not do.
+    const report = validateContinuity(
+      input({ bible: voicedBible(CANONICAL), states: voicedStates(3), voices: [] }),
+    );
+
+    expect(report.issues.some((i) => i.code === "continuity.voice.drift")).toBe(false);
+    expect(
+      report.issues.some((i) => i.code === "continuity.voice.assignment_mismatch"),
+    ).toBe(false);
+  });
+
+  it("treats a silent scene as legitimately unvoiced", () => {
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(3),
+        voices: voiceRecords(3, { 2: null }),
+      }),
+    );
+
+    expect(report.score).toBe(100);
+  });
+
+  it("notes an assigned voice that never speaks, without moving the score", () => {
+    const clean = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(2),
+        voices: voiceRecords(2),
+      }),
+    );
+    const withUnused = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL, [
+          {
+            id: "ben",
+            name: "Ben",
+            appearance: ["ginger hair"],
+            voice: { providerVoiceId: OTHER, name: "Ben's voice" },
+          },
+        ]),
+        states: voicedStates(2),
+        voices: voiceRecords(2),
+      }),
+    );
+
+    const note = withUnused.issues.find((i) => i.code === "continuity.voice.unused");
+    expect(note?.severity).toBe("info");
+    expect(note?.sceneIndex).toBeNull();
+    expect(note?.entityId).toBe("ben");
+    // A casting decision, not a continuity break.
+    expect(withUnused.score).toBe(clean.score);
+  });
+
+  it("keeps voice failures out of the regeneration set", () => {
+    /**
+     * The cost guarantee. `scenesToRegenerate` reads `affectedScenes` and
+     * `executeSceneRegeneration` regenerates a scene's *visual* — redrawing a shot
+     * cannot change which voice narrated it, so a voice mismatch must not bill for an
+     * image generation. The finding stays `fail` and still moves the score; only the
+     * automatic re-billing is excluded.
+     */
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(3),
+        voices: voiceRecords(3, { 1: OTHER }),
+      }),
+    );
+
+    expect(
+      report.issues.some(
+        (i) =>
+          i.code === "continuity.voice.assignment_mismatch" && i.severity === "fail",
+      ),
+    ).toBe(true);
+    expect(report.affectedScenes).not.toContain(1);
+    expect(issuesForScene(report, 1)).toEqual([]);
+  });
+
+  it("says nothing at a level that does not track characters", () => {
+    const states: IndexedSceneState[] = Array.from({ length: 3 }, (_, i) => ({
+      sceneIndex: i,
+      state: parseSceneState({}),
+    }));
+
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states,
+        capabilities: capabilitiesFor("style"),
+        voices: voiceRecords(3, { 1: OTHER }),
+      }),
+    );
+
+    expect(report.issues.some((i) => i.code.startsWith("continuity.voice."))).toBe(
+      false,
+    );
+  });
+
+  it("is deterministic, records and all", () => {
+    const args = input({
+      bible: voicedBible(CANONICAL),
+      states: voicedStates(4),
+      voices: voiceRecords(4, { 2: OTHER }),
+    });
+
+    const once = JSON.stringify(validateContinuity(args));
+    expect(JSON.stringify(validateContinuity(args))).toBe(once);
+    // Record order is an artefact of how the rows came back, not a fact about the
+    // video, so it must not change the report.
+    expect(
+      JSON.stringify(
+        validateContinuity({ ...args, voices: [...(args.voices ?? [])].reverse() }),
+      ),
+    ).toBe(once);
+  });
+
+  it("carries voice findings into quality findings unchanged in shape", () => {
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(3),
+        voices: voiceRecords(3, { 1: OTHER }),
+      }),
+    );
+
+    const row = toQualityFindings(report).find(
+      (f) => f.code === "continuity.voice.assignment_mismatch",
+    );
+
+    expect(row).toBeDefined();
+    expect(row?.detail).toContain("scene 1");
+    expect(row?.detail).toContain("entity mara");
   });
 });

@@ -62,8 +62,14 @@ import {
   referenceImagePlan,
   referencesForScene,
   regenerationPromptFor,
+  sceneVoicesFor,
   scenesToRegenerate,
 } from "@/lib/continuity/service";
+import type {
+  SceneVoiceAssignment,
+  SceneVoiceRecord,
+  VoiceSource,
+} from "@/lib/continuity/voice";
 import {
   countRegeneration,
   getReferenceImages,
@@ -608,6 +614,12 @@ export async function executeScenePlan(input: StageInput): Promise<{
  * duration is read from the audio that was actually produced. The timeline then
  * accumulates them, so `scenes.start_ms` — and therefore the chapter list — is
  * correct to the millisecond at minute nine of a video, not just at minute one.
+ *
+ * The same segment-per-scene shape is what makes character voice continuity
+ * possible: a scene led by a character with a canonical voice is narrated in *that*
+ * voice, and the project's own voice narrates everything else. The identity comes
+ * from the continuity layer and the request comes from the provider adapter — this
+ * stage only carries one to the other.
  */
 export async function executeVoiceover(input: StageInput): Promise<{
   segments: number;
@@ -617,13 +629,36 @@ export async function executeVoiceover(input: StageInput): Promise<{
     const sceneRows = await loadScenes(input.userId, input.projectId);
     const settings = await loadSettings(input.userId, input.projectId);
 
+    /**
+     * The per-character voices, when this project has any.
+     *
+     * Wrapped because a continuity failure must not lose a voiceover: §22 applies to
+     * this stage as much as to the visuals stage, and the fallback is the behaviour
+     * Tally had before character voices existed — one voice for every scene. An empty
+     * map is the ordinary result and costs nothing at the provider.
+     */
+    const voices = await sceneVoiceAssignments(input, sceneRows);
+
     await reportProgress(input.jobId, 5, `Narrating ${sceneRows.length} scenes`);
 
     const result = await synthesize({
-      segments: sceneRows.map((scene) => ({
-        sceneIndex: scene.index,
-        text: scene.narration,
-      })),
+      segments: sceneRows.map((scene) => {
+        const voice = voices.get(scene.index);
+        return {
+          sceneIndex: scene.index,
+          text: scene.narration,
+          /**
+           * The character's voice, or nothing.
+           *
+           * `undefined` rather than null for an unassigned scene, so the provider's
+           * batch voice applies exactly as it did before. Never another character's
+           * voice: substituting one established voice for another is the failure this
+           * feature exists to prevent, and it would sound deliberate.
+           */
+          voiceId: voice?.providerVoiceId ?? undefined,
+          tuning: voice?.settings ?? undefined,
+        };
+      }),
       voiceId: settings.voiceId,
       style: settings.voiceStyle,
       speed: settings.voiceSpeed,
@@ -649,14 +684,28 @@ export async function executeVoiceover(input: StageInput): Promise<{
     // One asset row per segment. The timeline needs to place each scene's audio
     // independently, and a single concatenated file could not be re-cut when a
     // scene is regenerated.
-    const stored: Array<{ sceneIndex: number; assetId: string; durationMs: number }> =
-      [];
+    const stored: Array<{
+      sceneIndex: number;
+      assetId: string;
+      durationMs: number;
+      /** The voice this segment was actually requested with, or null for silence. */
+      voiceId: string | null;
+      characterId: string | null;
+    }> = [];
 
     for (const segment of result.segments) {
+      const voice = voices.get(segment.sceneIndex) ?? null;
+
       if (segment.bytes.byteLength === 0) {
         // A legitimately silent scene (a title card). No file, no asset row, and
         // the timeline treats a missing narration key as silence.
-        stored.push({ sceneIndex: segment.sceneIndex, assetId: "", durationMs: 0 });
+        stored.push({
+          sceneIndex: segment.sceneIndex,
+          assetId: "",
+          durationMs: 0,
+          voiceId: null,
+          characterId: null,
+        });
         continue;
       }
 
@@ -677,6 +726,15 @@ export async function executeVoiceover(input: StageInput): Promise<{
         sceneIndex: segment.sceneIndex,
         assetId: asset.id,
         durationMs: segment.durationMs,
+        /**
+         * The voice the provider reported, not the one this stage asked for.
+         *
+         * The distinction is the whole point of recording it: a check that read back
+         * the request would confirm the request, whereas this records what the adapter
+         * actually used — including its own fallback to the batch voice.
+         */
+        voiceId: segment.voiceId,
+        characterId: voice?.characterId ?? null,
       });
     }
 
@@ -688,6 +746,12 @@ export async function executeVoiceover(input: StageInput): Promise<{
         sceneIndex: segment.sceneIndex,
         startMs: cursor,
         durationMs: segment.durationMs,
+        // Additive, and only when there is something to say: a project without
+        // character voices writes the same three keys it always wrote.
+        ...(segment.voiceId !== null ? { voiceId: segment.voiceId } : {}),
+        ...(segment.characterId !== null
+          ? { characterId: segment.characterId }
+          : {}),
       };
       cursor += segment.durationMs;
       return entry;
@@ -1910,9 +1974,20 @@ export async function executeContinuityCheck(input: StageInput): Promise<{
      */
     const promptRows = await loadScenePrompts(input.userId, input.projectId);
 
+    /**
+     * The voice each scene was narrated in, for the same reason.
+     *
+     * Read from `voiceovers.segments` — what the provider was asked for — so a scene
+     * whose audio used the wrong voice is caught. An empty list (a legacy project, an
+     * unreadable row, a project with no character voices) means the voice checks find
+     * nothing to say, which is the correct silence rather than a manufactured warning.
+     */
+    const voiceRows = await loadSceneVoices(input.userId, input.projectId);
+
     const { report, context } = await checkContinuity({
       userId: input.userId,
       project: continuityProject,
+      voices: voiceRows,
       visuals: sceneRows.map((scene) => {
         const block = promptRows.get(scene.index) ?? null;
         const base = basePromptFor(scene);
@@ -3164,6 +3239,122 @@ async function loadSettings(
       language: null,
     }
   );
+}
+
+// ---------------------------------------------------------------------------
+// Character voice identity
+// ---------------------------------------------------------------------------
+
+/**
+ * The canonical voice for each scene, or an empty map.
+ *
+ * The seam between the continuity layer and the voice provider, and it is
+ * deliberately thin: the layer decides *which* voice, the adapter decides *how* to
+ * ask for it, and this function only resolves a context and hands the answer over.
+ *
+ * **Never throws.** Every failure path returns an empty map, which the caller treats
+ * as "no character voices" — the behaviour every Tally voiceover had before this
+ * existed. §22 is the reason: a voiceover is paid work, and losing one because a
+ * bible could not be read would make voice continuity a liability rather than a
+ * quality feature. The distinction §8 asks for is kept here: this function answers
+ * "is a voice identity available", and it never touches whether synthesis succeeded.
+ */
+async function sceneVoiceAssignments(
+  input: StageInput,
+  sceneRows: readonly SceneRow[],
+): Promise<Map<number, SceneVoiceAssignment>> {
+  try {
+    const project = await getProject(input.userId, input.projectId);
+
+    const context = await loadContinuityContext(input.userId, {
+      projectId: input.projectId,
+      channelId: project.channelId,
+      generationMode: isGenerationMode(project.generationMode)
+        ? project.generationMode
+        : null,
+      tier: input.tier,
+    });
+
+    const voices = sceneVoicesFor({
+      context,
+      sceneIndices: sceneRows.map((scene) => scene.index),
+    });
+
+    if (voices.size > 0) {
+      log.info("narrating with character voices", {
+        userId: input.userId,
+        projectId: input.projectId,
+        jobId: input.jobId,
+        stage: "VOICEOVER",
+        scenes: voices.size,
+        // Distinct characters, not distinct voices: two characters legitimately share
+        // a voice if the operator assigned the same one to both.
+        characters: new Set([...voices.values()].map((v) => v.characterId)).size,
+      });
+    }
+
+    return voices;
+  } catch (error) {
+    log.warn("could not resolve character voices; narrating with one voice", {
+      userId: input.userId,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      stage: "VOICEOVER",
+      error,
+    });
+    return new Map();
+  }
+}
+
+/**
+ * The voice each scene was narrated in, from `voiceovers.segments`.
+ *
+ * Read back rather than recomputed, which is the same choice `loadScenePrompts`
+ * makes for prompts and for the same reason: the check has to compare what the
+ * provider was actually asked for against what the bible says, and a recomputed
+ * value would compare the bible with itself and pass even if this stage had ignored
+ * it entirely.
+ *
+ * Never throws. An unreadable row means the voice check evaluates the contract in
+ * the bible without claiming anything about audio, which is the honest degradation.
+ */
+async function loadSceneVoices(
+  userId: string,
+  projectId: string,
+): Promise<SceneVoiceRecord[]> {
+  try {
+    const rows = await db
+      .select({ provider: voiceovers.provider, segments: voiceovers.segments })
+      .from(voiceovers)
+      .where(
+        and(eq(voiceovers.projectId, projectId), eq(voiceovers.userId, userId)),
+      )
+      .limit(1);
+
+    const row = rows[0];
+    if (!row?.segments) return [];
+
+    return row.segments
+      // A segment written before character voices existed carries no voice id, and
+      // there is nothing to report about it.
+      .filter((segment) => typeof segment.voiceId === "string")
+      .map((segment) => ({
+        sceneIndex: segment.sceneIndex,
+        providerVoiceId: segment.voiceId ?? null,
+        characterId: segment.characterId ?? null,
+        provider: row.provider,
+        // Derived, not stored: a segment carrying a character id was voiced by that
+        // character's canonical voice, and one without it took the project's.
+        source: (segment.characterId ? "character" : "project") as VoiceSource,
+      }));
+  } catch (error) {
+    log.warn("could not read the voices scenes were narrated in", {
+      userId,
+      projectId,
+      error,
+    });
+    return [];
+  }
 }
 
 interface StoredAudio {

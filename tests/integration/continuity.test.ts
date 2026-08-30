@@ -2121,4 +2121,563 @@ suite("continuity layer (integration)", () => {
       });
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Character voices — the cases that need real rows
+  // -------------------------------------------------------------------------
+
+  /**
+   * Voice continuity end to end, against Postgres.
+   *
+   * `src/lib/continuity/voice.test.ts` covers the resolver, which is pure. What it
+   * cannot cover is everything that only exists once there are rows: that a canonical
+   * voice survives a round trip through `story_bibles.document` intact, that the read
+   * is owner-scoped, that two of one owner's projects do not share a cast, and that a
+   * project with no bible at all still reaches the single-voice path it has always
+   * used.
+   *
+   * No provider is reached anywhere in this block, and that is a property rather than
+   * a promise: an identity is resolved from stored data, so there is no catalogue
+   * lookup and no validation probe to make. The last case here asserts it.
+   */
+  describe("character voices", () => {
+    /**
+     * Two distinct placeholder voice ids.
+     *
+     * Distinct so an assertion that one appeared where the other belonged says
+     * something, and obviously placeholders so neither resembles a real catalogue
+     * entry. Neither is ever sent anywhere.
+     */
+    const MARA_VOICE = "voice-integration-placeholder-mara";
+    const BEN_VOICE = "voice-integration-placeholder-ben";
+
+    /**
+     * `bible()`'s cast, voiced, plus a second character.
+     *
+     * Mara always has a canonical voice; Ben only when asked for one. The asymmetry
+     * is the point: a fixture where everybody is voiced cannot catch a fallback that
+     * reaches for the nearest available id, which is the most tempting wrong
+     * implementation of this feature.
+     */
+    function voicedBible(args: { ben?: string | null } = {}): StoryBible {
+      const base = bible("Mara");
+
+      return parseStoryBible({
+        ...base,
+        characters: [
+          {
+            ...base.characters[0],
+            voice: {
+              provider: "integration-voice-backend",
+              providerVoiceId: MARA_VOICE,
+              name: "Mara's voice",
+              language: "en-GB",
+              accent: "west country",
+              characteristics: ["gravelly"],
+              speakingStyle: "measured and dry",
+              settings: { stability: 0.8, similarity: 0.9 },
+            },
+          },
+          {
+            id: "ben",
+            name: "Ben",
+            role: "the apprentice",
+            appearance: ["ginger hair"],
+            wardrobe: ["blue overalls"],
+            ...(args.ben
+              ? { voice: { providerVoiceId: args.ben, name: "Ben's voice" } }
+              : {}),
+          },
+        ],
+      });
+    }
+
+    /**
+     * A project with a voiced bible, scene rows, and one lead per scene.
+     *
+     * Written through `saveUserBible` rather than `saveBible`, because a canonical
+     * voice is an operator decision: it arrives through the continuity route, and
+     * that route writes this way. Same path as production, so these cases exercise
+     * how a voice actually gets stored rather than a shortcut around it.
+     */
+    async function voicedProject(
+      email: string,
+      args: { ben?: string | null; leads?: readonly string[] } = {},
+    ) {
+      const { saveSceneContinuity, saveUserBible } = await import(
+        "@/lib/continuity/store"
+      );
+      const owner = await project(email);
+      const leads = args.leads ?? ["mara", "ben", "mara"];
+
+      await saveUserBible({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        bible: voicedBible({ ben: args.ben ?? null }),
+        level: "character",
+      });
+      await insertScenes(owner.user.id, owner.projectId, leads.length);
+
+      for (const [sceneIndex, lead] of leads.entries()) {
+        await saveSceneContinuity({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          sceneIndex,
+          // No props: a scene led by the apprentice does not need the lamp, and the
+          // prop check is not what any of these cases are about.
+          state: sceneState({ characters: [lead], props: [] }),
+          continuityPrompt: null,
+        });
+      }
+
+      return owner;
+    }
+
+    async function voiceContext(owner: {
+      user: TestUser;
+      channelId: string;
+      projectId: string;
+    }) {
+      const { loadContext } = await import("@/lib/continuity/service");
+      return loadContext(
+        owner.user.id,
+        continuityProject(owner.projectId, owner.channelId),
+      );
+    }
+
+    /**
+     * The prompts the pipeline would actually have sent, from the real builder.
+     *
+     * Hand-written prompts would make the visual half of the score depend on guesses
+     * about which constraints the validator looks for. Built this way, the visual
+     * components are satisfied and any score movement below belongs to the voice
+     * check — which is what the score cases are measuring.
+     */
+    async function visualsFor(
+      context: Awaited<ReturnType<typeof voiceContext>>,
+      count: number,
+    ) {
+      const { continuityContextFor } = await import("@/lib/continuity/service");
+
+      return Array.from({ length: count }, (_, sceneIndex) => {
+        const shot = SHOTS[sceneIndex] ?? `An unrelated subject, take ${sceneIndex}`;
+        return {
+          sceneIndex,
+          visualPrompt: continuityContextFor({ context, sceneIndex, visualPrompt: shot })
+            .prompt,
+          searchTerms: [] as string[],
+          // The direction alone, for repetition detection: the continuity block is
+          // the same on every scene sharing a cast, by design.
+          shotPrompt: shot,
+        };
+      });
+    }
+
+    /** What the voiceover stage records for a scene it narrated. */
+    function record(sceneIndex: number, providerVoiceId: string) {
+      return {
+        sceneIndex,
+        providerVoiceId,
+        characterId: "mara",
+        provider: "mock",
+        source: "character" as const,
+      };
+    }
+
+    it("stores a whole canonical voice in the bible document and reads it back", async () => {
+      // Every field an identity carries survives a real round trip through jsonb. A
+      // schema that dropped `accent` or `settings` on the way to the column would
+      // leave the identity half-specified in production while every in-memory test
+      // still passed.
+      const { getBible } = await import("@/lib/continuity/store");
+      const owner = await voicedProject("voice-persist@tally.test");
+
+      const stored = await getBible(owner.user.id, owner.projectId);
+      const voice = stored?.bible.characters.find((c) => c.id === "mara")?.voice;
+
+      expect(voice?.providerVoiceId).toBe(MARA_VOICE);
+      expect(voice?.provider).toBe("integration-voice-backend");
+      expect(voice?.name).toBe("Mara's voice");
+      expect(voice?.language).toBe("en-GB");
+      expect(voice?.accent).toBe("west country");
+      expect(voice?.characteristics).toEqual(["gravelly"]);
+      expect(voice?.speakingStyle).toBe("measured and dry");
+      expect(voice?.settings.stability).toBe(0.8);
+      expect(voice?.settings.similarity).toBe(0.9);
+      // No migration was needed and none was written: this is a document column, and
+      // the schema version is unchanged, so every bible already stored still parses.
+      expect(stored?.bible.schemaVersion).toBe(1);
+    });
+
+    it("uses the same voice for the same character in every scene they lead", async () => {
+      const { sceneVoicesFor } = await import("@/lib/continuity/service");
+      const owner = await voicedProject("voice-same@tally.test");
+
+      await withFlag(true, async () => {
+        const voices = sceneVoicesFor({
+          context: await voiceContext(owner),
+          sceneIndices: [0, 1, 2],
+        });
+
+        expect(voices.get(0)?.providerVoiceId).toBe(MARA_VOICE);
+        expect(voices.get(2)?.providerVoiceId).toBe(MARA_VOICE);
+        expect(voices.get(0)?.characterId).toBe("mara");
+        // Ben has no canonical voice here, so no constraint is produced for his scene
+        // and the project's voice narrates it — the behaviour this project had before.
+        expect(voices.has(1)).toBe(false);
+      });
+    });
+
+    it("gives different characters their own voices", async () => {
+      const { sceneVoicesFor } = await import("@/lib/continuity/service");
+      const owner = await voicedProject("voice-different@tally.test", {
+        ben: BEN_VOICE,
+      });
+
+      await withFlag(true, async () => {
+        const voices = sceneVoicesFor({
+          context: await voiceContext(owner),
+          sceneIndices: [0, 1, 2],
+        });
+
+        expect(voices.get(0)?.providerVoiceId).toBe(MARA_VOICE);
+        expect(voices.get(1)?.providerVoiceId).toBe(BEN_VOICE);
+        // The failure worth catching is not "wrong" but "somebody else's".
+        expect(voices.get(1)?.providerVoiceId).not.toBe(
+          voices.get(0)?.providerVoiceId,
+        );
+      });
+    });
+
+    it("resolves a regenerated scene to the voice its earlier scenes used", async () => {
+      /**
+       * The mandate's scene-3 case, against real rows.
+       *
+       * `countRegeneration` writes the row a regeneration actually writes, and the
+       * assignment is then resolved again from a freshly loaded context. It matches
+       * because the assignment is a pure function of the stored bible: nothing is
+       * cached, so there is nothing to go stale, and no code had to remember to
+       * preserve anything.
+       */
+      const { countRegeneration } = await import("@/lib/continuity/store");
+      const { sceneVoicesFor } = await import("@/lib/continuity/service");
+      const owner = await voicedProject("voice-regenerate@tally.test");
+
+      await withFlag(true, async () => {
+        const before = sceneVoicesFor({
+          context: await voiceContext(owner),
+          sceneIndices: [0, 2],
+        });
+
+        expect(
+          await countRegeneration({
+            userId: owner.user.id,
+            projectId: owner.projectId,
+            sceneIndex: 2,
+          }),
+        ).toBe(1);
+
+        const after = sceneVoicesFor({
+          context: await voiceContext(owner),
+          sceneIndices: [2],
+        });
+
+        expect(after.get(2)?.providerVoiceId).toBe(MARA_VOICE);
+        expect(after.get(2)?.providerVoiceId).toBe(before.get(0)?.providerVoiceId);
+      });
+    });
+
+    it("keeps the established voice for a character who returns after another scene", async () => {
+      // Scene-state inheritance: Mara is established in scene 0 and returns in 2 and
+      // 3, with Ben's scene in between. The graph decides which scene a *visual*
+      // reference comes from; the voice comes from the bible, so it is the same in all
+      // three without anything being threaded from one scene to the next.
+      const { sceneVoicesFor } = await import("@/lib/continuity/service");
+      const owner = await voicedProject("voice-inherit@tally.test", {
+        leads: ["mara", "ben", "mara", "mara"],
+      });
+
+      await withFlag(true, async () => {
+        const context = await voiceContext(owner);
+        const voices = sceneVoicesFor({ context, sceneIndices: [0, 1, 2, 3] });
+
+        expect(context.graph.establishedBy.get("character:mara")).toBe(0);
+        expect(voices.get(2)?.providerVoiceId).toBe(MARA_VOICE);
+        expect(voices.get(3)?.providerVoiceId).toBe(MARA_VOICE);
+      });
+    });
+
+    it("produces no voice constraint for a project whose cast has no voices", async () => {
+      // §25: the ordinary project, and the one that must be left alone. `bible()` has
+      // a cast and no voices, which is every bible written before this existed.
+      const { saveUserBible } = await import("@/lib/continuity/store");
+      const { sceneVoicesFor } = await import("@/lib/continuity/service");
+      const owner = await project("voice-legacy@tally.test");
+
+      await saveUserBible({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        bible: bible("Mara"),
+        level: "character",
+      });
+      await insertScenes(owner.user.id, owner.projectId, 2);
+
+      await withFlag(true, async () => {
+        const context = await voiceContext(owner);
+        // Active, and still silent about voices: the layer is doing its other work.
+        expect(context.active).toBe(true);
+        expect(sceneVoicesFor({ context, sceneIndices: [0, 1] }).size).toBe(0);
+      });
+    });
+
+    it("produces no voice constraint for a project with no bible at all", async () => {
+      // §25's harder case: a project that never had a continuity document. The
+      // voiceover stage must reach its single-voice path rather than throwing.
+      const { sceneVoicesFor } = await import("@/lib/continuity/service");
+      const owner = await project("voice-no-bible@tally.test");
+      await insertScenes(owner.user.id, owner.projectId, 2);
+
+      await withFlag(true, async () => {
+        const context = await voiceContext(owner);
+        expect(context.active).toBe(false);
+        expect(sceneVoicesFor({ context, sceneIndices: [0, 1] }).size).toBe(0);
+      });
+    });
+
+    it("produces no voice constraint while the layer is switched off", async () => {
+      const { sceneVoicesFor } = await import("@/lib/continuity/service");
+      const owner = await voicedProject("voice-inert@tally.test");
+
+      await withFlag(false, async () => {
+        const context = await voiceContext(owner);
+        expect(context.active).toBe(false);
+        // The bible still holds the voice; the layer simply asserts nothing while off,
+        // so the pipeline narrates exactly as it did before this existed.
+        expect(sceneVoicesFor({ context, sceneIndices: [0, 1, 2] }).size).toBe(0);
+      });
+    });
+
+    it("does not resolve one tenant's character voices for another", async () => {
+      /**
+       * §20 for the voice half.
+       *
+       * Tenant isolation is a property of a SQL predicate, and a missing `userId`
+       * type-checks perfectly. A canonical voice rides inside the bible document, so
+       * it comes back through the same owner-scoped read — which is exactly why that
+       * read has to be confirmed for a new field rather than assumed.
+       */
+      const { getBible } = await import("@/lib/continuity/store");
+      const { loadContext, sceneVoicesFor } = await import(
+        "@/lib/continuity/service"
+      );
+      const owner = await voicedProject("voice-owner@tally.test");
+      const other = await createUser({ email: "voice-other@tally.test" });
+
+      expect(await getBible(other.id, owner.projectId)).toBeNull();
+
+      await withFlag(true, async () => {
+        // The intruder holds a valid project id and asks with their own user id.
+        const stolen = await loadContext(
+          other.id,
+          continuityProject(owner.projectId, owner.channelId),
+        );
+
+        const voices = sceneVoicesFor({ context: stolen, sceneIndices: [0, 1, 2] });
+        expect(voices.size).toBe(0);
+        expect(JSON.stringify([...voices.values()])).not.toContain(MARA_VOICE);
+      });
+    });
+
+    it("keeps two of one owner's projects on their own voices", async () => {
+      // Project isolation, not only tenant isolation: one owner with two projects must
+      // not have the first project's casting decisions voicing the second's scenes.
+      const { saveSceneContinuity, saveUserBible } = await import(
+        "@/lib/continuity/store"
+      );
+      const { sceneVoicesFor } = await import("@/lib/continuity/service");
+      const { createProject } = await import("@/lib/projects/service");
+      const { db } = await import("@/lib/db");
+      const { projects } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const owner = await voicedProject("voice-two-projects@tally.test");
+
+      const second = await createProject({
+        userId: owner.user.id,
+        channelId: owner.channelId,
+        title: "A second project",
+        maxVideosPerMonth: null,
+      });
+      await db
+        .update(projects)
+        .set({ generationMode: "AI_VIDEO" })
+        .where(eq(projects.id, second.id));
+
+      // The same cast ids, and a voice on the character who leads this project's
+      // first scene. Sharing a document would show up as Mara's voice below.
+      await saveUserBible({
+        userId: owner.user.id,
+        projectId: second.id,
+        bible: voicedBible({ ben: BEN_VOICE }),
+        level: "character",
+      });
+      await insertScenes(owner.user.id, second.id, 1);
+      await saveSceneContinuity({
+        userId: owner.user.id,
+        projectId: second.id,
+        sceneIndex: 0,
+        state: sceneState({ characters: ["ben"], props: [] }),
+        continuityPrompt: null,
+      });
+
+      await withFlag(true, async () => {
+        const first = sceneVoicesFor({
+          context: await voiceContext(owner),
+          sceneIndices: [0],
+        });
+        const other = sceneVoicesFor({
+          context: await voiceContext({ ...owner, projectId: second.id }),
+          sceneIndices: [0],
+        });
+
+        expect(first.get(0)?.providerVoiceId).toBe(MARA_VOICE);
+        expect(other.get(0)?.providerVoiceId).toBe(BEN_VOICE);
+      });
+    });
+
+    it("records a wrong voice as a structured finding without billing a regeneration", async () => {
+      /**
+       * The check end to end, and the cost guarantee inside it.
+       *
+       * A recorded voice that disagrees with the bible produces `fail` findings in the
+       * *existing* `quality_checks` row — no second table and no second scoring
+       * system. And the scene stays out of the regeneration set:
+       * `executeSceneRegeneration` regenerates a scene's **visual**, and redrawing a
+       * shot cannot change which voice narrated it, so an automatic regeneration here
+       * would bill for work that cannot possibly help.
+       */
+      const { checkContinuity, scenesToRegenerate } = await import(
+        "@/lib/continuity/service"
+      );
+      const { latestContinuityCheck } = await import("@/lib/continuity/store");
+      const owner = await voicedProject("voice-finding@tally.test", {
+        leads: ["mara", "mara", "mara"],
+      });
+
+      await withFlag(true, async () => {
+        const context = await voiceContext(owner);
+
+        const { report } = await checkContinuity({
+          userId: owner.user.id,
+          project: continuityProject(owner.projectId, owner.channelId),
+          visuals: await visualsFor(context, 3),
+          voices: [
+            record(0, MARA_VOICE),
+            record(1, MARA_VOICE),
+            // The wrong voice, recorded as the one actually used. This is the whole
+            // reason the check reads back what was sent instead of recomputing it:
+            // recomputing would compare the bible with itself and always pass.
+            record(2, BEN_VOICE),
+          ],
+        });
+
+        const codes = (report?.issues ?? []).map((issue) => issue.code);
+        expect(codes).toContain("continuity.voice.assignment_mismatch");
+        expect(codes).toContain("continuity.voice.drift");
+        // Nothing an operator reads contains a voice id: the findings name the scene
+        // and the character, not an opaque vendor token.
+        expect(JSON.stringify(report?.issues ?? [])).not.toContain(BEN_VOICE);
+
+        // Recorded through the existing table in the existing shape, so the studio
+        // screen and the read model surface it with no change.
+        const stored = await latestContinuityCheck(owner.user.id, owner.projectId);
+        expect(
+          stored?.findings.some(
+            (finding) => finding.code === "continuity.voice.assignment_mismatch",
+          ),
+        ).toBe(true);
+
+        expect(report?.affectedScenes ?? []).not.toContain(2);
+        expect(
+          await scenesToRegenerate({
+            userId: owner.user.id,
+            projectId: owner.projectId,
+            context,
+            report,
+          }),
+        ).toEqual([]);
+      });
+    });
+
+    it("scores a correctly voiced project exactly what the same project scores unvoiced", async () => {
+      // §25 as an equality against real rows: assigning canonical voices and narrating
+      // every scene in them must not cost a project a single point. The same visuals
+      // are checked twice, so the only difference between the two runs is the voices.
+      const { checkContinuity } = await import("@/lib/continuity/service");
+      const { saveUserBible } = await import("@/lib/continuity/store");
+      const owner = await voicedProject("voice-score@tally.test", {
+        leads: ["mara", "mara"],
+      });
+
+      await withFlag(true, async () => {
+        const visuals = await visualsFor(await voiceContext(owner), 2);
+
+        const voiced = await checkContinuity({
+          userId: owner.user.id,
+          project: continuityProject(owner.projectId, owner.channelId),
+          visuals,
+          voices: [record(0, MARA_VOICE), record(1, MARA_VOICE)],
+        });
+
+        // The same project with the voices taken back out of the bible.
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+        const unvoiced = await checkContinuity({
+          userId: owner.user.id,
+          project: continuityProject(owner.projectId, owner.channelId),
+          visuals,
+        });
+
+        expect(voiced.report?.score).toBe(unvoiced.report?.score);
+        expect(voiced.report?.components.characterConsistency).toBe(
+          unvoiced.report?.components.characterConsistency,
+        );
+      });
+    });
+
+    it("resolves every scene's voice without touching a provider", async () => {
+      /**
+       * §10's cost rule, asserted rather than asserted-about.
+       *
+       * `synthesize` is the only function in the voice adapter that reaches a
+       * provider, and it is spied on for the duration. Resolving an identity is a
+       * lookup over stored data — no catalogue call, no existence probe — so the spy
+       * must never be reached, and a later change that helpfully "checks the voice is
+       * still valid" fails here rather than on somebody's provider bill.
+       */
+      const voiceProvider = await import("@/lib/providers/voice");
+      const spy = vi.spyOn(voiceProvider, "synthesize");
+      const { sceneVoicesFor } = await import("@/lib/continuity/service");
+      const owner = await voicedProject("voice-no-calls@tally.test", {
+        ben: BEN_VOICE,
+      });
+
+      try {
+        await withFlag(true, async () => {
+          const voices = sceneVoicesFor({
+            context: await voiceContext(owner),
+            sceneIndices: [0, 1, 2],
+          });
+          expect(voices.size).toBe(3);
+        });
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
 });

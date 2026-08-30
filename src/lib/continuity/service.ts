@@ -65,6 +65,12 @@ import {
   validateContinuity,
   type ContinuityReport,
 } from "@/lib/continuity/validate";
+import {
+  assignSceneVoice,
+  usesCharacterVoices,
+  type SceneVoiceAssignment,
+  type SceneVoiceRecord,
+} from "@/lib/continuity/voice";
 import { continuityEnabled } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { hasFeature } from "@/lib/plans/enforce";
@@ -550,6 +556,60 @@ export function continuityContextFor(args: {
   return { block, prompt: withContinuity(args.visualPrompt, block) };
 }
 
+// ---------------------------------------------------------------------------
+// Per-scene voice identity
+// ---------------------------------------------------------------------------
+
+/**
+ * The voice each scene's narration must be spoken in.
+ *
+ * The audio counterpart of `continuityContextFor`, and shaped the same way for the
+ * same three reasons:
+ *
+ *  - **Pure and synchronous given the context.** The voiceover stage loads the
+ *    context once and resolves every scene from it, so a project's voices cost no
+ *    queries beyond the ones `loadContext` already made.
+ *  - **Deterministic.** The same bible and the same scene states produce the same
+ *    assignment on every run. That is what makes regeneration safe: re-running the
+ *    voiceover stage after a scene was regenerated reproduces the identical voice for
+ *    every scene, because the function is the guarantee rather than a cache.
+ *  - **Safe to call unconditionally.** An inert context returns an empty map, and the
+ *    caller's existing single-voice path is untouched. No branch at the call site.
+ *
+ * Returns a map rather than an array so the caller can index by scene index without
+ * assuming the scenes and the states cover the same set — a partially-planned project
+ * legitimately has states for some scenes and not others.
+ */
+export function sceneVoicesFor(args: {
+  context: ContinuityContext;
+  sceneIndices: readonly number[];
+}): Map<number, SceneVoiceAssignment> {
+  const out = new Map<number, SceneVoiceAssignment>();
+  if (!args.context.active) return out;
+
+  // Nothing to assert, and the cheap exit: a bible whose cast carries no canonical
+  // voices is every project built before this existed (§25).
+  if (!usesCharacterVoices(args.context.bible)) return out;
+
+  const input = {
+    bible: args.context.bible,
+    states: args.context.states,
+    capabilities: args.context.plan.capabilities,
+  };
+
+  for (const sceneIndex of args.sceneIndices) {
+    const assignment = assignSceneVoice(input, sceneIndex);
+    // Only assignments that actually name a voice are returned. A scene the layer has
+    // no opinion about must reach the provider through the caller's own fallback, not
+    // through an entry that says "no voice" and invites a caller to treat it as one.
+    if (assignment.source === "character" && assignment.providerVoiceId !== null) {
+      out.set(sceneIndex, assignment);
+    }
+  }
+
+  return out;
+}
+
 /** The prompt for a scene being regenerated, carrying the failures that caused it. */
 export function regenerationPromptFor(args: {
   context: ContinuityContext;
@@ -615,6 +675,14 @@ export interface CheckContinuityInput {
      */
     shotPrompt?: string | null;
   }[];
+  /**
+   * The voice each scene was actually narrated in, when that is known.
+   *
+   * Optional: a project with no character voices has none to record, and one checked
+   * before its voiceover ran has nothing to report. Absent means the voice check
+   * evaluates the contract in the bible without claiming anything about audio.
+   */
+  voices?: readonly SceneVoiceRecord[];
 }
 
 export interface CheckContinuityResult {
@@ -652,6 +720,7 @@ export async function checkContinuity(
         searchTerms: visual.searchTerms,
         shotPrompt: visual.shotPrompt ?? null,
       })),
+      voices: input.voices,
     });
 
     await recordContinuityCheck({

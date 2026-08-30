@@ -26,6 +26,7 @@ import {
   findCharacter,
   findEnvironment,
   findProp,
+  hasCanonicalVoice,
   hasStyle,
   type StoryBible,
 } from "@/lib/continuity/bible";
@@ -41,6 +42,14 @@ import {
   type IndexedSceneState,
   type SceneStateGraph,
 } from "@/lib/continuity/scene-state";
+import {
+  assignSceneVoice,
+  leadCharacterFor,
+  sameVoice,
+  usesCharacterVoices,
+  wasVoiced,
+  type SceneVoiceRecord,
+} from "@/lib/continuity/voice";
 
 /**
  * Severity, matching `quality_checks.findings` exactly.
@@ -124,6 +133,21 @@ export interface ValidateInput {
    * make the check pass for a bug that dropped it.
    */
   visuals: readonly SceneVisual[];
+  /**
+   * The voice each scene's narration was actually synthesised in.
+   *
+   * Optional, and absent is the ordinary case: a project whose cast carries no
+   * canonical voices has no voice contract, and every project built before voice
+   * continuity existed has no record to read. When omitted, the voice check still
+   * reports a character who *should* have a voice and does not — that is a property
+   * of the bible — but cannot report drift, because drift is a claim about audio
+   * that was produced.
+   *
+   * The voice as *used*, for the same reason `visuals` is the prompt as sent:
+   * recomputing the assignment from the current bible would compare the bible with
+   * itself and pass even if the voiceover stage had ignored it entirely.
+   */
+  voices?: readonly SceneVoiceRecord[];
 }
 
 /**
@@ -137,7 +161,26 @@ export function validateContinuity(input: ValidateInput): ContinuityReport {
   const issues: ContinuityIssue[] = [];
   const visualBy = new Map(input.visuals.map((v) => [v.sceneIndex, v]));
 
-  const character = checkCharacters(input, visualBy, issues);
+  /**
+   * Appearance and voice are one component, not two.
+   *
+   * Both are answers to "is this the same character as last time", and §12 fixes the
+   * six components and their weights. A seventh would force every existing weight to
+   * be re-decided, and would score a video with no character voices out of a
+   * denominator it cannot contribute to. Combining the tallies instead means a
+   * project without voices deducts exactly what it deducted before, and a project
+   * with them treats a wrong voice as the same order of break as a wrong coat —
+   * which, to a viewer, it is.
+   */
+  const appearance = checkCharacters(input, visualBy, issues);
+  const voice = checkVoices(input, issues);
+  const character = penalise(
+    100,
+    appearance.misses + voice.misses,
+    appearance.expected + voice.expected,
+    100,
+  );
+
   const environment = checkEnvironments(input, visualBy, issues);
   const props = checkProps(input, visualBy, issues);
   const story = checkStory(input, issues);
@@ -186,10 +229,29 @@ export function validateContinuity(input: ValidateInput): ContinuityReport {
   const score = combine(components, input.capabilities);
   const status = statusFor(score, input.thresholds);
 
+  /**
+   * The regeneration candidates — failed scenes a regeneration could actually fix.
+   *
+   * Voice failures are excluded, and this is the one place it matters that they are.
+   * `scenesToRegenerate` reads this list and `executeSceneRegeneration` regenerates a
+   * scene's **visual**; re-drawing a shot cannot change which voice narrated it, so a
+   * voice mismatch here would spend a paid image generation on a problem it has no
+   * bearing on. §22's spirit: continuity is a quality feature, and one that quietly
+   * bills for work that cannot help is worse than one that reports and waits.
+   *
+   * The findings themselves are untouched and still `fail`, so the panel, the verdict
+   * and the score all treat a wrong voice as the break it is. What changes is only
+   * what gets automatically re-billed: the operator re-runs the voiceover stage.
+   */
   const affectedScenes = [
     ...new Set(
       issues
-        .filter((issue) => issue.severity === "fail" && issue.sceneIndex !== null)
+        .filter(
+          (issue) =>
+            issue.severity === "fail" &&
+            issue.sceneIndex !== null &&
+            !isVoiceCode(issue.code),
+        )
         .map((issue) => issue.sceneIndex as number),
     ),
   ].sort((a, b) => a - b);
@@ -220,6 +282,31 @@ export function validateContinuity(input: ValidateInput): ContinuityReport {
 type VisualIndex = ReadonlyMap<number, SceneVisual>;
 
 /**
+ * Codes a *visual* regeneration cannot fix.
+ *
+ * A prefix test rather than a list of three, so a voice finding added later is
+ * excluded from the regeneration set by default rather than by remembering to.
+ */
+const VOICE_CODE_PREFIX = "continuity.voice.";
+
+function isVoiceCode(code: string): boolean {
+  return code.startsWith(VOICE_CODE_PREFIX);
+}
+
+/**
+ * A check's raw tally, before it becomes a score.
+ *
+ * Returned instead of a component value by the two checks that share one component,
+ * so the deduction is computed once over both tallies rather than by averaging two
+ * scores — which would let a video with one voiced scene and eighty broken ones
+ * score the same as the reverse.
+ */
+interface Tally {
+  expected: number;
+  misses: number;
+}
+
+/**
  * Does each scene's prompt carry the appearance facts its character needs?
  *
  * The check that catches the failure mode this layer exists for: a scene state
@@ -235,8 +322,8 @@ function checkCharacters(
   input: ValidateInput,
   visuals: VisualIndex,
   issues: ContinuityIssue[],
-): number {
-  if (!input.capabilities.characters) return 100;
+): Tally {
+  if (!input.capabilities.characters) return { expected: 0, misses: 0 };
 
   let expected = 0;
   let missing = 0;
@@ -286,7 +373,228 @@ function checkCharacters(
     }
   }
 
-  return penalise(100, missing, expected, 100);
+  return { expected, misses: missing };
+}
+
+/**
+ * Is each scene spoken in the voice its character is established with?
+ *
+ * The audio half of character consistency, and the same kind of claim as the visual
+ * half — a comparison of opaque ids, not an opinion about audio. What it can and
+ * cannot see is worth stating as plainly as the module docblock does for frames:
+ *
+ *  - It **can** check that a scene led by a character with a canonical voice was
+ *    synthesised with *that* voice id, that a scene's voice did not change between
+ *    the assignment and the request, and that the same character was not voiced two
+ *    different ways across a video. All three are string comparisons over recorded
+ *    facts.
+ *  - It **cannot** hear the audio. A provider that returned the wrong voice for a
+ *    correct id is invisible here, and no finding claims otherwise.
+ *
+ * Three findings, per the mandate's vocabulary:
+ *
+ *  - `continuity.voice.missing` — a character with no canonical voice in a project
+ *    that uses them. A `warn`: the project voice narrated the scene, which is what
+ *    Tally has always done, so it is a gap rather than a break.
+ *  - `continuity.voice.drift` — one character voiced two different ways across the
+ *    video. A `fail`: this is the failure the feature exists to prevent.
+ *  - `continuity.voice.assignment_mismatch` — the voice used is not the voice the
+ *    bible names. A `fail`: something between the bible and the provider changed the
+ *    decision.
+ *
+ * A `fail` here is deliberately **not** a regeneration trigger the way a visual
+ * failure is: `executeSceneRegeneration` regenerates a scene's *visual* and never
+ * re-synthesises audio, so the honest outcome is a recorded finding the operator
+ * acts on by re-running the voiceover stage. See `scenesToRegenerate`, which filters
+ * on the scenes a visual regeneration can fix.
+ */
+function checkVoices(input: ValidateInput, issues: ContinuityIssue[]): Tally {
+  if (!input.capabilities.characters) return { expected: 0, misses: 0 };
+
+  /**
+   * A project whose cast carries no canonical voices is not checked at all.
+   *
+   * §25's requirement in one line: every project built before voice continuity
+   * existed, and every project whose owner has not assigned a voice, scores exactly
+   * what it scored before — an empty tally deducts nothing.
+   */
+  if (!usesCharacterVoices(input.bible)) return { expected: 0, misses: 0 };
+
+  const recorded = new Map(
+    (input.voices ?? []).map((record) => [record.sceneIndex, record]),
+  );
+
+  let expected = 0;
+  let misses = 0;
+
+  /**
+   * The voice each character was first heard in, and where.
+   *
+   * The audio counterpart of `graph.establishedBy`: the first scene to voice a
+   * character defines what the rest of the video has to match, so a later scene that
+   * differs is the one at fault. Built from the records rather than the bible, so
+   * this catches a video whose scenes disagree with each other even when every one
+   * of them disagrees with the bible in the same way.
+   */
+  const heardAs = new Map<string, { voiceId: string; sceneIndex: number }>();
+
+  for (const entry of ordered(input.states)) {
+    const leadId = leadCharacterFor(entry.state);
+    if (!leadId) continue;
+
+    const assignment = assignSceneVoice(
+      {
+        bible: input.bible,
+        states: input.states,
+        capabilities: input.capabilities,
+      },
+      entry.sceneIndex,
+    );
+
+    if (assignment.source === "project" && assignment.characterName !== null) {
+      /**
+       * A named character in the bible with no voice of their own.
+       *
+       * Counted once per scene they lead, because that is how many scenes are
+       * narrated by a voice nobody chose for them — and reported per scene so the
+       * panel can say which. `warn`, not `fail`: nothing is broken, and the
+       * fallback is the behaviour this project had yesterday.
+       */
+      expected += 1;
+      misses += 1;
+      issues.push({
+        code: "continuity.voice.missing",
+        severity: "warn",
+        message:
+          `Scene ${entry.sceneIndex} is led by ${assignment.characterName}, who has no ` +
+          "canonical voice, so the project's voice narrated it.",
+        detail:
+          "Other characters in this story bible have canonical voices, so this one " +
+          "will not sound consistent with them.",
+        sceneIndex: entry.sceneIndex,
+        entityId: assignment.characterId,
+      });
+      continue;
+    }
+
+    if (assignment.source !== "character" || assignment.providerVoiceId === null) {
+      // No voice contract for this scene — an unknown character id, or a level that
+      // does not track them. Reported elsewhere, or not a finding at all.
+      continue;
+    }
+
+    expected += 1;
+
+    const record = recorded.get(entry.sceneIndex);
+    if (!record) {
+      /**
+       * No record of what this scene was voiced with.
+       *
+       * Not a finding. A project checked before its voiceover ran, or one built
+       * before voice records were kept, has nothing to compare — and inventing a
+       * break out of an absent measurement is exactly what §42 forbids. The scene
+       * still counts towards `expected`, so a video with a full contract and no
+       * records at all does not read as perfectly consistent.
+       */
+      continue;
+    }
+
+    if (!wasVoiced(record) || record.providerVoiceId === null) {
+      // A silent scene — a title card. Legitimately has no voice.
+      continue;
+    }
+
+    const usedVoiceId = record.providerVoiceId;
+
+    /**
+     * Two independent questions about the same scene, asked in this order.
+     *
+     * `mismatch` compares the audio with the *contract* — the bible. `drift` compares
+     * it with the rest of the *video* — what this character was first heard as. They
+     * are not the same question, and neither subsumes the other:
+     *
+     *  - Every scene voiced with the wrong id, consistently, is a mismatch on each and
+     *    a drift on none. The video is internally consistent and disobeys the bible.
+     *  - A voiceover run half-way through a bible edit is a mismatch on the old scenes
+     *    and a drift on the boundary. The character audibly changes mid-video.
+     *
+     * So the earlier version's `continue` after a mismatch was wrong: it made drift
+     * unreachable whenever the bible was also disobeyed, which is most of the time.
+     * Both findings are emitted, and the scene is counted as **one** miss regardless —
+     * two descriptions of one wrong voice are not two wrong voices.
+     */
+    const mismatch = !sameVoice(usedVoiceId, assignment.providerVoiceId);
+    const established = heardAs.get(leadId);
+    const drift =
+      established !== undefined && !sameVoice(established.voiceId, usedVoiceId);
+
+    if (established === undefined) {
+      // The first scene to voice this character defines what the rest must match, so
+      // it is recorded whether or not it matched the bible.
+      heardAs.set(leadId, { voiceId: usedVoiceId, sceneIndex: entry.sceneIndex });
+    }
+
+    if (mismatch || drift) misses += 1;
+
+    if (mismatch) {
+      issues.push({
+        code: "continuity.voice.assignment_mismatch",
+        severity: "fail",
+        message:
+          `Scene ${entry.sceneIndex} was narrated in a different voice from the one ` +
+          `the story bible assigns to ${assignment.characterName}.`,
+        detail:
+          "Re-run the voiceover stage to narrate this scene in the character's " +
+          "canonical voice.",
+        sceneIndex: entry.sceneIndex,
+        entityId: assignment.characterId,
+      });
+    }
+
+    if (drift && established !== undefined) {
+      issues.push({
+        code: "continuity.voice.drift",
+        severity: "fail",
+        message:
+          `${assignment.characterName} is narrated in a different voice in scene ` +
+          `${entry.sceneIndex} than in scene ${established.sceneIndex}.`,
+        detail:
+          "The same character sounds like two different people in one video. Re-run " +
+          "the voiceover stage to narrate every scene in one voice.",
+        sceneIndex: entry.sceneIndex,
+        entityId: assignment.characterId,
+      });
+    }
+  }
+
+  /**
+   * A character with a canonical voice who never leads a scene.
+   *
+   * Whole-video rather than per-scene, and `info` rather than a deduction: an
+   * assigned voice that is never used is a casting decision the operator may want to
+   * know about, not a continuity break. It contributes nothing to the tally, so it
+   * cannot move the score.
+   */
+  const leads = new Set(
+    input.states
+      .map((entry) => leadCharacterFor(entry.state))
+      .filter((id): id is string => id !== null),
+  );
+
+  for (const character of input.bible.characters) {
+    if (!hasCanonicalVoice(character.voice)) continue;
+    if (leads.has(character.id)) continue;
+
+    issues.push({
+      code: "continuity.voice.unused",
+      severity: "info",
+      message: `${character.name} has a canonical voice but never leads a scene.`,
+      sceneIndex: null,
+      entityId: character.id,
+    });
+  }
+
+  return { expected, misses };
 }
 
 /** The same check for places. */
@@ -631,7 +939,14 @@ export function issuesForScene(
 ): string[] {
   return report.issues
     .filter(
-      (issue) => issue.sceneIndex === sceneIndex && issue.severity === "fail",
+      (issue) =>
+        issue.sceneIndex === sceneIndex &&
+        issue.severity === "fail" &&
+        // These become a *visual* regeneration prompt. "Narrated in a different
+        // voice" is a true finding and a useless instruction to an image model, and
+        // a scene with both a wrong coat and a wrong voice must not have the second
+        // one steering the redraw.
+        !isVoiceCode(issue.code),
     )
     .map((issue) => (issue.detail ? `${issue.message} ${issue.detail}` : issue.message));
 }

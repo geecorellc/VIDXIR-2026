@@ -16,9 +16,10 @@
  * nothing to poll (the check runs once, after the render), and keeping it on the server
  * means the bible never has to cross into a client bundle.
  */
-import { AlertTriangle, Check, Info, Users } from "lucide-react";
+import { AlertTriangle, Check, Info, Mic, Users } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { color, font, radius } from "@/lib/design/tokens";
+import { hasCanonicalVoice, type Character } from "@/lib/continuity/bible";
 import type { ContinuityView } from "@/lib/continuity/read";
 
 export interface ContinuityPanelProps {
@@ -112,7 +113,7 @@ export function ContinuityPanel({ view }: ContinuityPanelProps) {
           }}
         >
           {view.bible.characters.map((character) => (
-            <Chip key={character.id} label={character.name} sub="cast" />
+            <CastChip key={character.id} character={character} />
           ))}
           {view.bible.environments.map((environment) => (
             <Chip key={environment.id} label={environment.name} sub="place" />
@@ -240,6 +241,62 @@ function Chip({ label, sub }: { label: string; sub: string }) {
     >
       {label}
       <span style={{ fontSize: 10.5, color: color.textFaint }}>{sub}</span>
+    </span>
+  );
+}
+
+/**
+ * A cast chip, marked when the character has a canonical voice.
+ *
+ * The whole of voice continuity's UI, and deliberately that small. Appearance already
+ * appears here as the character's presence in the cast row; a voice is the same kind
+ * of fact about the same character, so it belongs on the same chip rather than in a
+ * section of its own. A character with no canonical voice renders exactly the chip
+ * this panel rendered before — no empty slot, no "voice: none", because most projects
+ * legitimately have none and an absence shown as a gap reads as a defect.
+ *
+ * The mark asserts only what is stored: that a voice id is assigned. It does not claim
+ * the audio was produced in that voice — the findings list says that, from the check,
+ * which is the only thing that measured it.
+ */
+function CastChip({ character }: { character: Character }) {
+  if (!hasCanonicalVoice(character.voice)) {
+    return <Chip label={character.name} sub="cast" />;
+  }
+
+  // The operator's label if the bible carries one, otherwise the bare word: the
+  // provider voice id is not shown, being meaningless to a human and provider detail.
+  const voice = character.voice?.name?.trim() || "voice";
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        background: color.inputBg,
+        border: `1px solid ${color.border}`,
+        borderRadius: radius.sm,
+        padding: "4px 8px",
+        fontSize: 12,
+        color: color.textBright,
+      }}
+    >
+      {character.name}
+      <span style={{ fontSize: 10.5, color: color.textFaint }}>cast</span>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 3,
+          fontSize: 10.5,
+          color: color.accent,
+        }}
+        title={`Always voiced as ${voice}`}
+      >
+        <Mic size={10} aria-hidden="true" />
+        {voice}
+      </span>
     </span>
   );
 }
