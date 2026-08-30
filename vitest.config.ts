@@ -64,6 +64,16 @@ export default defineConfig({
       },
     },
     exclude: ["node_modules/**", ".next/**"],
+    /**
+     * Whole-run teardown for the integration namespace.
+     *
+     * Registered unconditionally because this config is evaluated before the runner
+     * knows what it will run; the hook itself returns immediately unless
+     * `TEST_DATABASE_URL` is set, so a plain `npm test` pays a no-op function call and
+     * nothing else. See `tests/integration/global-setup.ts` for why the sweep is
+     * once-per-run rather than once-per-file.
+     */
+    globalSetup: ["./tests/integration/global-setup.ts"],
     // Integration tests touch a shared database; running files sequentially
     // avoids cross-file interference on the same schema.
     fileParallelism: !process.env["TEST_DATABASE_URL"],

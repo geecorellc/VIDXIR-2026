@@ -21,6 +21,7 @@
  *     module-scope assignment below and the dynamic imports in the tests.
  */
 import { afterAll, beforeAll } from "vitest";
+import { applyTestNamespaceEnv } from "./cleanup";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
@@ -32,36 +33,16 @@ if (TEST_DATABASE_URL) {
   // here, and it has to be set before the runner loads anything anyway.
   process.env["DATABASE_URL"] = TEST_DATABASE_URL;
   process.env["APP_URL"] ??= "http://localhost:3000";
-  process.env["REDIS_URL"] ??= "redis://127.0.0.1:6379";
   /**
-   * A Redis namespace of their own.
+   * Redis, queue prefix and bucket come from the cleanup module (§teardown).
    *
-   * `QUEUE_PREFIX` defaults to `tally`, which is also what a developer's worker
-   * consumes, so without this an integration run enqueues real BullMQ messages
-   * into the development queue and then TRUNCATEs the `jobs` rows they point at.
-   * A running worker then picks up hundreds of jobs it can never complete. That
-   * happened: the first successful worker boot drained a 1099-message backlog,
-   * every one failing `Job row <id> not found.`
-   *
-   * The tests do not need a worker — they call the stage functions directly — so
-   * this is purely about not leaving live messages behind for one.
+   * Defined there rather than here so that the code which *deletes* the namespace and the
+   * code which *creates* it cannot disagree about what it is called. A duplicated
+   * `"tally-test"` on both sides would be one careless edit away from a harness that
+   * writes to one namespace and a teardown that sweeps another — leaving the leak in
+   * place while reporting a clean sweep.
    */
-  process.env["QUEUE_PREFIX"] ??= "tally-test";
-  process.env["S3_ENDPOINT"] ??= "http://127.0.0.1:9000";
-  process.env["S3_BUCKET"] ??= "tally-test";
-  /**
-   * The credentials `docker-compose.yml` gives MinIO.
-   *
-   * These were previously placeholders, which was invisible for a long time: no
-   * suite actually uploaded anything, so nothing ever authenticated. The moment
-   * the video pipeline stored its first asset every upload failed with Access
-   * Denied. A test bucket that cannot be written to is worse than no test bucket,
-   * because the failure surfaces as a `StorageError` from application code and
-   * reads like a bug in the pipeline.
-   */
-  process.env["S3_ACCESS_KEY_ID"] ??= "tallyminio";
-  process.env["S3_SECRET_ACCESS_KEY"] ??= "tallyminio";
-  process.env["S3_FORCE_PATH_STYLE"] ??= "true";
+  applyTestNamespaceEnv();
   process.env["ENCRYPTION_KEY"] ??= "a".repeat(64);
   process.env["SESSION_SECRET"] ??= "b".repeat(64);
   // Console email is a real delivery channel in tests: assertions read the
