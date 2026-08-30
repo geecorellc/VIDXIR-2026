@@ -277,12 +277,33 @@ describe("getBillingProvider", () => {
      * A structural assertion, deliberately. §24's rule is enforced by the shape of
      * the interface: if a future provider gains an `activate`/`setTier` method, the
      * webhook stops being the only writer and this test is where that shows up.
+     *
+     * `startCreditCheckout` (§11) is on this list because it passed that test rather
+     * than because it was added to it: it opens a `mode: "payment"` session and
+     * returns a URL, exactly as `startCheckout` opens a subscription one. Neither
+     * grants anything — credits are added by `completeCreditPurchase`, which only the
+     * webhook reaches.
      */
     expect(Object.keys(provider).sort()).toEqual([
       "createPortalSession",
       "name",
       "startCheckout",
+      "startCreditCheckout",
     ]);
+
+    /**
+     * And the property the list is a proxy for, asserted directly so it survives the
+     * list growing again: no method on the provider can move a tier or a balance.
+     */
+    for (const forbidden of [
+      "activate",
+      "setTier",
+      "grantTier",
+      "addCredits",
+      "creditAccount",
+    ]) {
+      expect(provider).not.toHaveProperty(forbidden);
+    }
   });
 });
 

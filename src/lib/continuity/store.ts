@@ -15,7 +15,12 @@
 
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { qualityChecks, scenes as scenesTable, storyBibles } from "@/lib/db/schema";
+import {
+  assets,
+  qualityChecks,
+  scenes as scenesTable,
+  storyBibles,
+} from "@/lib/db/schema";
 import {
   safeParseStoryBible,
   STORY_BIBLE_VERSION,
@@ -25,6 +30,7 @@ import {
   isContinuityLevel,
   type ContinuityLevel,
 } from "@/lib/continuity/config";
+import type { ReferenceKind } from "@/lib/continuity/prompt";
 import {
   safeParseSceneState,
   type IndexedSceneState,
@@ -375,4 +381,172 @@ export async function latestContinuityCheck(
     .limit(1);
 
   return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Reference stills — the existing assets table (§5, §6)
+// ---------------------------------------------------------------------------
+
+/**
+ * The `assets.meta` key that marks a still as a continuity reference.
+ *
+ * A flag on the existing table rather than a `continuity_references` table, for the
+ * same reason continuity checks live in `quality_checks`: a reference still is an
+ * asset in every respect the schema cares about — it has bytes in object storage, a
+ * checksum, a provider, a licence and a project — and a parallel table would repeat
+ * all of that, then need its own tenant scoping, its own cascade and its own reader.
+ *
+ * The flag is a *string* comparison at the query level (`meta->>'…' = 'true'`), so it
+ * is written as a boolean and read as text. That asymmetry is deliberate: `->>`
+ * always yields text, and hiding it behind a helper would make the two halves easy to
+ * change independently.
+ */
+const REFERENCE_FLAG = "continuityReference";
+
+/** What a stored reference still carries, beyond the ordinary asset columns. */
+export interface ReferenceAssetMeta extends Record<string, unknown> {
+  [REFERENCE_FLAG]: true;
+  referenceKind: ReferenceKind;
+  /** The bible entity's slug. What the reference is found again by. */
+  entityId: string;
+  /** Display name at the time it was generated, for a caption. */
+  entityName: string;
+  /** The prompt that produced it, so a wrong reference can be diagnosed. */
+  prompt: string;
+  /** The branded model that made it, e.g. `tal/3.0`. Internal (§3). */
+  modelId: string;
+}
+
+/**
+ * Build the `meta` for a reference asset row.
+ *
+ * Exported so the pipeline stage that actually generates the image writes the same
+ * keys this module reads. The vocabulary lives next to its reader on purpose — a
+ * writer in `video/service.ts` and a reader here, agreeing by convention, is how a
+ * stored reference becomes unfindable two refactors later.
+ */
+export function referenceAssetMeta(args: {
+  kind: ReferenceKind;
+  entityId: string;
+  entityName: string;
+  prompt: string;
+  modelId: string;
+}): ReferenceAssetMeta {
+  return {
+    [REFERENCE_FLAG]: true,
+    referenceKind: args.kind,
+    entityId: args.entityId,
+    entityName: args.entityName,
+    prompt: args.prompt,
+    modelId: args.modelId,
+  };
+}
+
+export interface StoredReference {
+  assetId: string;
+  kind: ReferenceKind;
+  entityId: string;
+  entityName: string;
+  storageKey: string;
+  mimeType: string | null;
+  width: number | null;
+  height: number | null;
+  prompt: string;
+  modelId: string;
+  createdAt: Date;
+}
+
+/**
+ * Every continuity reference still stored for a project, newest first per entity.
+ *
+ * One row per entity, not every attempt. A regenerated reference supersedes the one
+ * before it — the older row is left in place as provenance, exactly as a replaced
+ * scene visual is — and a caller that received both would have to decide which is
+ * current, which is a decision with one right answer and therefore does not belong
+ * in a caller.
+ *
+ * Owner-scoped in the WHERE clause like everything else here. Rows whose `meta` no
+ * longer carries a recognisable kind or entity are skipped rather than coerced: a
+ * reference that cannot say what it is a reference *for* is not usable, and guessing
+ * would attach a picture to the wrong character.
+ */
+export async function getReferenceImages(
+  userId: string,
+  projectId: string,
+): Promise<StoredReference[]> {
+  const rows = await db
+    .select({
+      id: assets.id,
+      storageKey: assets.storageKey,
+      mimeType: assets.mimeType,
+      width: assets.width,
+      height: assets.height,
+      meta: assets.meta,
+      createdAt: assets.createdAt,
+    })
+    .from(assets)
+    .where(
+      and(
+        eq(assets.projectId, projectId),
+        eq(assets.userId, userId),
+        eq(assets.kind, "generated_image"),
+        sql`${assets.meta} ->> ${REFERENCE_FLAG} = 'true'`,
+      ),
+    )
+    .orderBy(desc(assets.createdAt));
+
+  const out: StoredReference[] = [];
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    if (!row.storageKey) continue;
+
+    const meta = row.meta ?? {};
+    const kind = meta["referenceKind"];
+    const entityId = meta["entityId"];
+    if (!isReferenceKind(kind) || typeof entityId !== "string" || !entityId) {
+      continue;
+    }
+
+    // Newest first from the query, so the first sighting of an entity is current.
+    const key = `${kind}:${entityId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    out.push({
+      assetId: row.id,
+      kind,
+      entityId,
+      entityName:
+        typeof meta["entityName"] === "string" ? meta["entityName"] : entityId,
+      storageKey: row.storageKey,
+      mimeType: row.mimeType,
+      width: row.width,
+      height: row.height,
+      prompt: typeof meta["prompt"] === "string" ? meta["prompt"] : "",
+      modelId: typeof meta["modelId"] === "string" ? meta["modelId"] : "",
+      createdAt: row.createdAt,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Which entities already have a reference still.
+ *
+ * The cost control on the reference stage: a second run must generate the entities
+ * that are missing and nothing else. Keyed `kind:entityId` because a character and a
+ * prop may legitimately share a slug within one bible.
+ */
+export async function referencedEntityKeys(
+  userId: string,
+  projectId: string,
+): Promise<Set<string>> {
+  const stored = await getReferenceImages(userId, projectId);
+  return new Set(stored.map((reference) => `${reference.kind}:${reference.entityId}`));
+}
+
+function isReferenceKind(value: unknown): value is ReferenceKind {
+  return value === "character" || value === "environment" || value === "prop";
 }

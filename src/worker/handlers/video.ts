@@ -20,6 +20,7 @@ import {
   CAPTIONS_JOB,
   CONTINUITY_JOB,
   MUSIC_JOB,
+  REFERENCE_IMAGES_JOB,
   RENDER_JOB,
   SCENE_PLAN_JOB,
   SCENE_REGEN_JOB,
@@ -29,6 +30,7 @@ import {
   executeCaptions,
   executeContinuityCheck,
   executeMusic,
+  executeReferenceImages,
   executeRender,
   executeSceneRegeneration,
   executeScenePlan,
@@ -174,5 +176,17 @@ export const videoHandlers: Record<string, JobHandler> = {
   })),
   [SCENE_REGEN_JOB]: sceneStageHandler(async (input) => ({
     ...(await executeSceneRegeneration(input)),
+  })),
+  /**
+   * The bible's reference stills. Off the critical path, like the two above.
+   *
+   * Registered with the ordinary `stageHandler` because the payload is the ordinary
+   * one — a project and a tier. Which entities need drawing is read from the bible and
+   * the stored assets inside the stage, never taken from the payload: a job message is
+   * data, and an entity list arriving over Redis would be a way to bill a tenant for
+   * generations they never asked for.
+   */
+  [REFERENCE_IMAGES_JOB]: stageHandler(async (input) => ({
+    ...(await executeReferenceImages(input)),
   })),
 };

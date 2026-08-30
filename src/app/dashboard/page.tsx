@@ -39,7 +39,10 @@ export default async function OverviewPage() {
         sub={
           data.hasChannel
             ? "Here's what your studio did while you were away."
-            : "Connect a YouTube channel and Tally can start researching your niche."
+            : // Two of the three entry paths need no channel (Phase 11 §4; §1C), so
+              // the empty state points at what already works rather than implying a
+              // connection is required to start.
+              "Connect a YouTube channel to research your niche — or paste a link or describe an idea and start without one."
         }
       />
 

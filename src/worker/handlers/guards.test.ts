@@ -65,6 +65,7 @@ vi.mock("@/lib/video/service", () => ({
   VISUALS_JOB: "video-visuals",
   CONTINUITY_JOB: "video-continuity-check",
   SCENE_REGEN_JOB: "video-scene-regenerate",
+  REFERENCE_IMAGES_JOB: "video-reference-images",
   MUSIC_JOB: "video-music",
   CAPTIONS_JOB: "video-captions",
   TIMELINE_JOB: "video-timeline",
@@ -73,6 +74,7 @@ vi.mock("@/lib/video/service", () => ({
   executeVoiceover: vi.fn(),
   executeVisuals: vi.fn(),
   executeContinuityCheck: vi.fn(),
+  executeReferenceImages: vi.fn(),
   executeSceneRegeneration: (...a: unknown[]) => executeSceneRegeneration(...a),
   executeMusic: vi.fn(),
   executeCaptions: vi.fn(),
@@ -166,6 +168,23 @@ describe.each([
     // would rebuild the wrong scene at full price.
     badPayload: () =>
       stage("video-scene-regenerate")(ctx({ projectId: PROJECT_ID, tier: "studio" })),
+    mismatched: { userId: USER_ID, projectId: CHANNEL_ID },
+  },
+  {
+    /**
+     * Reference stills spend one paid generation per bible entity, so a guard that
+     * failed open here would bill a tenant for illustrating somebody else's cast —
+     * and store the results against their project.
+     *
+     * The ordinary payload and therefore the shared guard path: which entities get
+     * drawn is read from the stored bible inside the stage, never taken from the job
+     * message.
+     */
+    label: "reference stills",
+    run: () =>
+      stage("video-reference-images")(ctx({ projectId: PROJECT_ID, tier: "studio" })),
+    row: { userId: USER_ID, projectId: PROJECT_ID },
+    badPayload: () => stage("video-reference-images")(ctx({})),
     mismatched: { userId: USER_ID, projectId: CHANNEL_ID },
   },
   {

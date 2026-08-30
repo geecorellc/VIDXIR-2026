@@ -23,6 +23,7 @@ import {
   Image as ImageIcon,
   LayoutDashboard,
   LogOut,
+  PenLine,
   Radio,
   Search,
   Send,
@@ -47,6 +48,7 @@ const ICONS: Record<string, LucideIcon> = {
   Settings,
   CreditCard,
   Youtube,
+  PenLine,
 };
 
 export interface SidebarProps {
@@ -77,9 +79,9 @@ export function Sidebar({
    * state, which is more useful than a dead button.
    */
   function isPending(item: NavItem): boolean {
-    // A channel-less stage is never waiting on a channel (Phase 11 §2): link mode
-    // is the one content stage that works before anything is connected, so muting
-    // it would advertise the opposite of what it does.
+    // A channel-less stage is never waiting on a channel (Phase 11 §2; §1C): the link
+    // and description entries are the content stages that work before anything is
+    // connected, so muting them would advertise the opposite of what they do.
     if (!hasChannel && !item.channelless) {
       return item.segment !== "channels" && item.segment !== "";
     }

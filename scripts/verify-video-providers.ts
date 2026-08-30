@@ -16,50 +16,58 @@
  * these fail a unit test that mocks the environment; all of them are visible to a
  * process that reads the real one.
  *
- * The thirteen invariants, in execution order. Steps 1-9 run with mock providers
+ * The fifteen invariants, in execution order. Steps 1-10 run with mock providers
  * *off*, which is the honest reading of a production deployment that has
- * configured nothing; steps 10-11 turn them on, because that is the only way to
+ * configured nothing; steps 11-13 turn them on, because that is the only way to
  * exercise the generation path without billing anyone:
  *
  *    1. stock is selectable on every plan, with no AI provider configured
  *    2. unconfigured providers report NOT_CONFIGURED and cannot be reached
  *    3. unknown providers, invented model ids and invented modes are refused
- *    4. every fal.ai model is a distinct, selectable entry on one credential
- *    5. each fal.ai model has its own endpoint slug, none hardcoded with a key
- *    6. plan entitlements gate AI video and the premium models
- *    7. no secret is reachable from anything the client is sent
- *    8. no provider module performs I/O at import, and the plan layer is
+ *    4. the four branded Tally models exist, each on one vendor and one credential
+ *    5. no vendor name reaches a customer-facing label, and no client string
+ *       reaches a vendor URL
+ *    6. the capability matrix is declared rather than assumed, and an unsupported
+ *       resolution is refused
+ *    7. plan entitlements gate AI video and the premium models
+ *    8. no secret is reachable from anything the client is sent
+ *    9. no provider module performs I/O at import, and the plan layer is
  *       vendor-agnostic
- *    9. the mock provider is unreachable in a production configuration
- *   10. AI selection resolves mode/model/format, and an impossible pairing is
+ *   10. the mock provider is unreachable in a production configuration
+ *   11. AI selection resolves mode/model/format, and an impossible pairing is
  *       refused
- *   11. a generated clip carries its model, licence, prompt and geometry (§22, §29)
- *   12. the §20 provider audit table, from the real environment
- *   13. no destructive or billable external action — asserted about this script
+ *   12. a generated clip carries its model, licence, prompt and geometry (§22, §29)
+ *   13. a generated image carries the same provenance, for continuity references
+ *   14. the §20 provider audit table, from the real environment
+ *   15. no destructive or billable external action — asserted about this script
  *
- * Steps 4 and 5 are the fal.ai catalogue's own invariants, and they are the ones
- * that cannot be checked any other way. Whether Kling actually renders is fal.ai's
- * business; whether *selecting* Kling reaches Kling's endpoint rather than
- * Seedance's is Tally's, and a mistake there generates successfully, bills
- * correctly and produces the wrong model's output with nothing to indicate it.
+ * Steps 4-6 are the branded model layer's own invariants (Phase 12 §2, §3, §4,
+ * §16), and they are the ones that cannot be checked any other way. Whether the
+ * cinematic model actually renders is the vendor's business; whether *selecting*
+ * Tal 3.0 reaches that vendor rather than another is Tally's, and a mistake there
+ * generates successfully, bills correctly and produces the wrong model's output
+ * with nothing to indicate it. §3's rule is checked in the same place because it
+ * has the same shape: a leak is invisible in review and obvious to a scan.
  *
  * ## What this script does NOT do
  *
- * §24's prohibitions, held to literally. It makes **no** call to fal.ai, Google
- * AI, Runway or any other generation API; **no** YouTube read, upload or
- * publication; **no** Stripe charge, checkout, subscription or portal session. It
- * writes nothing to Postgres, enqueues nothing, and touches no production data —
+ * §24's prohibitions, held to literally. It makes **no** call to any generation
+ * API — not the four vendors behind the branded models, not Runway; **no** YouTube
+ * read, upload or publication; **no** Stripe charge, checkout, subscription or
+ * portal session. It writes nothing to Postgres, enqueues nothing, and touches no
+ * production data —
  * every check below is a pure function of the environment and the module graph.
  * It prints no credential value: §20 asks for CONFIGURED / NOT_CONFIGURED and the
  * variable *names*, and that is the most it knows how to say.
  *
- * The one clip it generates comes from the `mock` provider, which synthesises a
- * PNG in-process and has no `requiredEnvVars` — it exists so invariants 8 and 9
- * are proven against a real `generateClip` call rather than around it.
+ * The one clip and the one image it generates come from the `mock` provider, which
+ * synthesises a PNG in-process and has no `requiredEnvVars` — they exist so
+ * invariants 12 and 13 are proven against real `generateClip` and `generateImage`
+ * calls rather than around them.
  *
  * `resetEnvCache()` between the two halves is what makes each answer about the
  * configuration it claims to be about: without it, step 1's "nothing configured"
- * claim and step 8's "a provider is ready" claim would be read from the same
+ * claim and step 11's "a provider is ready" claim would be read from the same
  * cached environment, and one of them would be false.
  *
  *   npx tsx scripts/verify-video-providers.ts
@@ -72,7 +80,7 @@ import "@/lib/load-env";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const TOTAL_STEPS = 13;
+const TOTAL_STEPS = 15;
 let step = 0;
 
 function ok(message: string): void {
@@ -333,110 +341,380 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // 4. the fal.ai catalogue routes each model to its own endpoint
+  // 4. the four branded models exist, each on one vendor and one credential
   // -----------------------------------------------------------------------
   /**
-   * §14, and the reason it is checked statically rather than by generating: the
-   * catalogue is the only thing standing between "the user picked Kling" and a URL,
-   * so a duplicated or malformed endpoint would silently bill one vendor's model
-   * for another's. None of that is visible without a paid generation — but all of
-   * it is visible in the table itself.
+   * §2, checked against the registry rather than against the UI, because the UI is
+   * where the names are *shown* and the registry is where they are *decided*. The
+   * failure this exists for is a rename that reaches the picker and not the router:
+   * a model labelled "Tal 3.0" that resolves to a different vendor's endpoint
+   * generates successfully, bills correctly, and produces the wrong output with
+   * nothing to indicate it.
    *
-   * Read from `allVideoGenStatuses()`, so this holds whether or not `FAL_KEY` is
-   * set: an operator with nothing configured still gets the invariant checked.
+   * Read from `allVideoGenStatuses()`, so the invariant holds whether or not a
+   * credential is set: an operator with nothing configured still gets it checked.
    */
   {
     const { allVideoGenStatuses } = await import("@/lib/providers/video-gen");
     const { videoFormats } = await import("@/lib/video/format");
 
-    const fal = allVideoGenStatuses().find((s) => s.provider === "fal");
-    if (!fal) fail("the fal.ai provider is missing from the registry.");
-    must(
-      fal.models.length > 1,
-      `fal.ai lists ${fal.models.length} model(s); it is a catalogue provider and the ` +
-        `whole point of it is that a user can choose between models.`,
-    );
-    must(
-      fal.requiredEnvVars.length === 1 && fal.requiredEnvVars[0] === "FAL_KEY",
-      `fal.ai requires ${fal.requiredEnvVars.join(", ") || "nothing"}; the catalogue is ` +
-        `reached with one credential, so anything else here means a model has been ` +
-        `given its own configuration and can no longer be added without an env change.`,
-    );
+    /** §2's table, verbatim: the customer-facing name and the variable that buys it. */
+    const BRANDED: ReadonlyArray<{
+      id: string;
+      label: string;
+      envVar: string;
+      premium: boolean;
+    }> = [
+      { id: "tal/1.0", label: "Tal 1.0 — Fast Model", envVar: "DASHSCOPE_API_KEY", premium: false },
+      { id: "tal/2.0", label: "Tal 2.0 — Creators Model", envVar: "MINIMAX_API_KEY", premium: false },
+      { id: "tal/3.0", label: "Tal 3.0 — Cinematic Model", envVar: "SEEDANCE_API_KEY", premium: false },
+      { id: "tal/3.1", label: "Tal 3.1 — Ultra Model", envVar: "GEMINI_API_KEY", premium: true },
+    ];
 
+    const statuses = allVideoGenStatuses();
     const known = new Set(videoFormats().map((s) => s.format));
-    const ids = new Set<string>();
-    for (const model of fal.models) {
+    const usedProviders = new Set<string>();
+
+    for (const branded of BRANDED) {
+      const owners = statuses.filter((s) => s.models.some((m) => m.id === branded.id));
       must(
-        model.id.startsWith("fal/") && /^fal\/[a-z0-9][a-z0-9-]*$/.test(model.id),
-        `"${model.id}" is not a fal catalogue id; ids are namespaced and lowercase so ` +
-          `nothing in one can be read as a path segment of a vendor URL.`,
+        owners.length === 1,
+        `${branded.id} is declared by ${owners.length} providers; each branded model ` +
+          `belongs to exactly one vendor, or the picker would list it twice and the ` +
+          `router would have to guess which one to submit to.`,
       );
-      must(!ids.has(model.id), `${model.id} appears twice in the catalogue.`);
-      ids.add(model.id);
+      const owner = owners[0];
+      if (!owner) fail(`${branded.id} is missing from the registry; §2 requires all four.`);
+
+      const model = owner.models.find((m) => m.id === branded.id);
+      if (!model) fail(`${branded.id} vanished between the filter and the lookup.`);
+
       must(
-        model.label.trim().length > 0 && model.description.trim().length > 0,
-        `${model.id} has no label or description; the picker would render a blank row.`,
+        model.label === branded.label,
+        `${branded.id} is labelled "${model.label}"; §2 names it "${branded.label}", and ` +
+          `the label is what a customer reads.`,
+      );
+      must(
+        model.premium === branded.premium,
+        `${branded.id} reports premium=${model.premium}; §3 makes only the Ultra model ` +
+          `premium, and this decides which plan may select it.`,
+      );
+      must(
+        owner.requiredEnvVars.length === 1 && owner.requiredEnvVars[0] === branded.envVar,
+        `${branded.id}'s provider requires [${owner.requiredEnvVars.join(", ")}]; §2 maps ` +
+          `it to ${branded.envVar} alone. More than one credential means the model cannot ` +
+          `be enabled without an unrelated environment change.`,
+      );
+      must(
+        !usedProviders.has(owner.provider),
+        `${branded.id} shares a provider with an earlier branded model; the four tiers are ` +
+          `four distinct backends, and collapsing two would make one silently unreachable.`,
+      );
+      usedProviders.add(owner.provider);
+
+      must(
+        model.description.trim().length > 0 && model.bestFor.trim().length > 0,
+        `${branded.id} has no description or "best for" line; §3 specifies both, and the ` +
+          `picker would render a blank row.`,
       );
       must(
         model.formats.length > 0 && model.formats.every((f) => known.has(f)),
-        `${model.id} declares formats [${model.formats.join(", ")}], which is empty or ` +
+        `${branded.id} declares formats [${model.formats.join(", ")}], which is empty or ` +
           `names a frame format.ts does not define.`,
       );
     }
 
-    ok("every fal.ai model is a distinct, selectable catalogue entry on one credential");
+    // Nothing else may be offered. A leftover aggregator entry is exactly what §14
+    // forbids — "do not leave dead model options in the UI".
+    const unexpected = statuses
+      .flatMap((s) => s.models.filter((m) => !m.legacy))
+      .map((m) => m.id)
+      .filter((id) => !BRANDED.some((b) => b.id === id) && id !== "mock/placeholder");
+    must(
+      unexpected.length === 0,
+      `the registry offers [${unexpected.join(", ")}] alongside the branded models. §14 ` +
+        `requires the retired catalogue to be unselectable, not merely deprioritised.`,
+    );
+
+    ok("the four branded models exist, each on one vendor and one credential");
     detail(
-      `${fal.models.length} models — ${fal.models.map((m) => m.label).join(", ")} — ` +
-        `all behind FAL_KEY alone`,
+      `${BRANDED.map((b) => b.label).join(", ")} — four distinct backends, one variable ` +
+        `each; no other selectable model in the registry`,
     );
   }
 
   // -----------------------------------------------------------------------
-  // 5. one endpoint per model, and no credential in the catalogue
+  // 5. no vendor name reaches a label, and no client string reaches a URL
   // -----------------------------------------------------------------------
   /**
-   * The half of the above that the public status type deliberately does not carry:
-   * an endpoint slug is an implementation detail and is not sent to a client, so it
-   * is checked against the source instead. Two models sharing a slug is the bug
-   * this exists for — it produces a picker where selecting Kling generates
-   * Seedance, bills correctly, and looks entirely successful.
+   * §3 and §14's rule, and §10's, in one place because they are the same static
+   * question asked of two things: what the customer is *told*, and what the vendor
+   * is *sent*.
+   *
+   * The name half is checked against the payload a client receives rather than
+   * against the module source, because the source has to name the vendors — every
+   * adapter documents the API it submits to, and a scan of the module would either
+   * fail on its own docblock or be relaxed until it tested nothing. The URL half is
+   * checked against the source, because an assembled URL is never returned to
+   * anyone and so cannot be inspected any other way.
+   *
+   * The patterns are word-anchored on purpose. "fal" is a substring of ordinary
+   * English — "fall", "default", "final" — and an unanchored scan would flag
+   * innocent copy, which is how an assertion like this ends up deleted.
    */
   {
+    const { generationOptions } = await import("@/lib/video/generation-plan");
+    const { publicModels } = await import("@/lib/providers/video-gen");
     const source = sourceOf("lib/providers/video-gen.ts");
 
-    const endpoints = [...source.matchAll(/endpoint:\s*"([^"]+)"/g)].flatMap((m) =>
-      m[1] ? [m[1]] : [],
-    );
-    must(
-      endpoints.length > 1,
-      "no fal.ai endpoints were found in video-gen.ts; the catalogue check below " +
-        "would pass vacuously.",
-    );
-    must(
-      new Set(endpoints).size === endpoints.length,
-      `two fal.ai models share an endpoint: [${endpoints.join(", ")}]. Selecting one ` +
-        `model would generate on another.`,
-    );
-    for (const endpoint of endpoints) {
+    const VENDORS: ReadonlyArray<RegExp> = [
+      /\bfal\b/i,
+      /fal\.ai/i,
+      /\bseedance\b/i,
+      /\bminimax\b/i,
+      /\bhailuo\b/i,
+      /\bkling\b/i,
+      /\bwan\b/i,
+      /\bveo\b/i,
+      /\bgemini\b/i,
+      /\bimagen\b/i,
+      /\bdashscope\b/i,
+      /\balibaba\b/i,
+      /\bbytedance\b/i,
+      /\bvolcengine\b/i,
+      /\bark\b/i,
+      /\bqwen\b/i,
+    ];
+
+    for (const [label, payload] of [
+      ["generationOptions(scale)", generationOptions("scale")],
+      ["generationOptions(studio)", generationOptions("studio")],
+      ["generationOptions(starter)", generationOptions("starter")],
+      ["publicModels()", publicModels()],
+    ] as const) {
+      const serialised = JSON.stringify(payload) ?? "";
+      for (const vendor of VENDORS) {
+        must(
+          !vendor.test(serialised),
+          `${label} matches ${String(vendor)}. §3 forbids the underlying provider name in ` +
+            `a customer-facing payload; the operator surfaces carry it instead.`,
+        );
+      }
+    }
+
+    // The field itself, not just its value: a type that cannot hold the vendor is
+    // the enforceable version of "do not expose it".
+    for (const model of publicModels()) {
       must(
-        /^[a-z0-9][a-z0-9./-]*$/.test(endpoint) && !endpoint.includes(".."),
-        `"${endpoint}" is not a plain fal.ai model slug.`,
+        !Object.hasOwn(model, "provider"),
+        `${model.id} carries a "provider" field in the public payload. §3 is enforced by ` +
+          `absence — a UI cannot render what it was never sent.`,
       );
+    }
+
+    /**
+     * Every URL the adapters build. The `${...}` segments are the interesting part:
+     * a client-supplied string interpolated into a vendor path is §10's whole
+     * concern, and the only interpolations that may appear are a configured base
+     * URL, an env-selected model name, or a task id the vendor itself just issued —
+     * encoded.
+     */
+    const urls = [...source.matchAll(/url:\s*(?:`([^`]+)`|"([^"]+)")/g)].flatMap((m) =>
+      [m[1] ?? m[2]].filter((value): value is string => typeof value === "string"),
+    );
+    must(
+      urls.length >= 8,
+      `only ${urls.length} request URLs were found in video-gen.ts; five adapters each ` +
+        `submit and poll, so a much smaller number means this scan is reading the wrong ` +
+        `thing and passing vacuously.`,
+    );
+    for (const url of urls) {
+      must(!url.includes(".."), `"${url}" contains a path traversal segment.`);
+      const interpolations = [...url.matchAll(/\$\{([^}]+)\}/g)].flatMap((m) =>
+        m[1] ? [m[1].trim()] : [],
+      );
+      for (const expression of interpolations) {
+        must(
+          expression === "base" ||
+            expression === "operationName" ||
+            /^[A-Z_]+_API$/.test(expression) ||
+            /^env\(\)\.[A-Z0-9_]+$/.test(expression) ||
+            expression.startsWith("encodeURIComponent("),
+          `"${url}" interpolates \`${expression}\`, which is neither a configured base, an ` +
+            `env-selected model, a vendor-issued operation name, nor URI-encoded. A client ` +
+            `string must not become a path segment.`,
+        );
+      }
     }
 
     // A key belongs in `env()`, read at call time. A literal here would be
     // committed, and rotating it would mean a deploy.
     must(
-      !/\b(?:fal|key)[-_]?[a-f0-9]{16,}/i.test(source),
+      !/\b(?:sk|key|token)[-_]?[a-zA-Z0-9]{24,}/.test(source),
       "video-gen.ts contains something shaped like a hardcoded credential.",
     );
+    // The retired route, asserted gone rather than assumed (§14).
+    for (const dead of ["queue.fal.run", "fal.media", "FAL_KEY", "fal-ai/"]) {
+      must(
+        !source.includes(dead),
+        `video-gen.ts still references "${dead}"; §14 removes the aggregator video route, ` +
+          `and a reachable remnant is one careless edit from being selectable again.`,
+      );
+    }
 
-    ok("each fal.ai model has its own endpoint slug, and none is hardcoded with a key");
-    detail(`${endpoints.length} distinct endpoints; no credential literal in the module`);
+    ok("no vendor name reaches a customer-facing label, and no client string reaches a URL");
+    detail(
+      `${VENDORS.length} vendor patterns absent from 4 client-bound payloads; ` +
+        `${urls.length} request URLs interpolate only configured or encoded values; the ` +
+        `retired aggregator route is gone from the module`,
+    );
   }
 
   // -----------------------------------------------------------------------
-  // 6. plan entitlements gate AI video and the premium models
+  // 6. capabilities are declared, and an unsupported resolution is refused
+  // -----------------------------------------------------------------------
+  /**
+   * §4, §5 and §16. The rule §4 states — "do not show an option that the underlying
+   * model does not actually support" — is only half a guarantee if the UI is the
+   * thing enforcing it, so what is checked here is the other half: the resolver
+   * refuses what the matrix does not declare, and the matrix does not declare
+   * anything the adapter cannot do.
+   *
+   * `imageGeneration` is the sharpest case (§5, §18.5). A model that claimed it and
+   * had no image method would fail at the vendor after a credit was reserved, which
+   * is why the registry asserts the pairing at import; this step reads the matrix
+   * back out, so the assertion is proven load-bearing rather than assumed.
+   */
+  {
+    const {
+      allVideoGenStatuses,
+      assertImageQuality,
+      assertQuality,
+      imageModels,
+      publicModels,
+    } = await import("@/lib/providers/video-gen");
+    const { VIDEO_QUALITIES } = await import("@/lib/video/quality");
+    const { videoFormats } = await import("@/lib/video/format");
+
+    const every = allVideoGenStatuses().flatMap((s) => s.models);
+    const known = new Set(videoFormats().map((f) => f.format));
+    let refused = 0;
+
+    for (const model of every) {
+      const caps = model.capabilities;
+
+      must(
+        caps.qualities.length > 0,
+        `${model.id} declares no resolutions, so nothing could ever be generated with it.`,
+      );
+      must(
+        caps.durations.length > 0 && caps.durations.every((d) => d > 0),
+        `${model.id} declares durations [${caps.durations.join(", ")}]; a clip length of ` +
+          `zero or less is not a length.`,
+      );
+      must(
+        Math.max(...caps.durations) === model.maxClipSeconds,
+        `${model.id} advertises maxClipSeconds=${model.maxClipSeconds} but its longest ` +
+          `declared duration is ${Math.max(...caps.durations)}. §4 shows the duration to ` +
+          `the user and §9 prices from it, so the two must be one number.`,
+      );
+      must(
+        model.formats.every((f) => known.has(f)),
+        `${model.id} declares a frame format.ts does not define.`,
+      );
+      must(
+        caps.textToVideo || caps.imageGeneration,
+        `${model.id} generates neither video from text nor images, so it cannot be ` +
+          `selected for anything.`,
+      );
+      // §5's resolver requirement, read off the matrix: the two describe one
+      // capability, and disagreeing means one of them is fabricated (§19).
+      must(
+        caps.imageGeneration === caps.imageQualities.length > 0,
+        `${model.id} says imageGeneration=${caps.imageGeneration} with ` +
+          `${caps.imageQualities.length} image resolutions.`,
+      );
+
+      /**
+       * Every quality Tally knows, asked of every model. A declared one resolves to
+       * itself; an undeclared one is refused rather than snapped to the nearest,
+       * because §12 quotes a credit price from the resolution and snapping is only
+       * ever correct for an *absent* choice.
+       */
+      for (const quality of VIDEO_QUALITIES) {
+        if (caps.qualities.includes(quality)) {
+          must(
+            assertQuality(model, quality) === quality,
+            `${model.id} declares ${quality} but assertQuality returned something else.`,
+          );
+        } else {
+          refusal(
+            () => assertQuality(model, quality),
+            `${quality} on ${model.id}, which does not declare it`,
+          );
+          refused += 1;
+        }
+      }
+      must(
+        caps.qualities.includes(assertQuality(model, null)),
+        `${model.id}'s default resolution is not one it declares, so an absent choice ` +
+          `resolves to something it cannot generate.`,
+      );
+
+      for (const quality of VIDEO_QUALITIES) {
+        if (caps.imageQualities.includes(quality)) continue;
+        refusal(
+          () => assertImageQuality(model, quality),
+          `image quality ${quality} on ${model.id}`,
+        );
+        refused += 1;
+      }
+    }
+
+    // §5: image generation is a capability every branded model has, not a separate
+    // system bolted beside them, so the same registry has to answer both questions
+    // and has to answer yes for all of them.
+    const imaging = imageModels();
+    for (const model of imaging) {
+      must(
+        model.capabilities.imageGeneration,
+        `${model.id} appears in imageModels() without declaring imageGeneration.`,
+      );
+      must(
+        publicModels().some((p) => p.id === model.id),
+        `${model.id} offers image generation but is absent from the public catalogue.`,
+      );
+    }
+
+    /**
+     * Every offered model, not a subset.
+     *
+     * §5 calls image generation first-class across the branded models, and the
+     * failure this guards is specific: if one model cannot make a still, a project
+     * on it either gets no continuity references or gets them from a *different*
+     * model, whose look then disagrees with every scene the project actually
+     * renders. Scoped to the offered catalogue so a deployment that enables one
+     * provider still passes, and so the retired Runway model — which correctly
+     * generates no stills — is not counted against it.
+     */
+    for (const model of publicModels()) {
+      must(
+        model.capabilities.imageGeneration,
+        `${model.id} is offered for AI video but generates no stills, so a project ` +
+          `on it must borrow continuity references from another model (§5).`,
+      );
+    }
+
+    ok("capabilities are declared per model, and an undeclared resolution is refused");
+    detail(
+      `${every.length} models checked; ${refused} undeclared resolution requests refused; ` +
+        `imageGeneration and imageQualities agree on every model; ${imaging.length} ` +
+        `model(s) offer image generation on this configuration`,
+    );
+  }
+
+  // -----------------------------------------------------------------------
+  // 7. plan entitlements gate AI video and the premium models
   // -----------------------------------------------------------------------
   /**
    * §19, verified against the real plan matrix rather than a fixture. The
@@ -498,7 +776,7 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // 7. no secret is reachable from anything the client is sent
+  // 8. no secret is reachable from anything the client is sent
   // -----------------------------------------------------------------------
   /**
    * §10, §20 and §21 converge here: never send a provider API key to the browser.
@@ -603,7 +881,7 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // 8. no provider module performs I/O at import time
+  // 9. no provider module performs I/O at import time
   // -----------------------------------------------------------------------
   /**
    * Why this is checked statically rather than by observing a process: an import
@@ -657,7 +935,7 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // 9. the mock provider is unreachable in a production configuration
+  // 10. the mock provider is unreachable in a production configuration
   // -----------------------------------------------------------------------
   /**
    * The quiet failure this prevents: a deployment that silently serves
@@ -689,16 +967,23 @@ async function main(): Promise<void> {
       `mock/placeholder was refused with ${error.status}; expected 400 (not available here).`,
     );
 
-    // The allow-list is the server's, and an unknown id in it is dropped rather
-    // than trusted — an operator typo must not create a provider. `seedance` is
-    // the exception and is not a typo: it is the pre-catalogue name for fal.ai,
-    // kept working so an existing deployment's environment still resolves.
-    //
-    // Restored afterwards rather than deleted: step 12 prints the audit table for
-    // *this* deployment, and a step that left the variable unset would make that
-    // table describe a configuration the operator does not have.
+    /**
+     * The allow-list is the server's, and an unknown id in it is dropped rather
+     * than trusted — an operator typo must not create a provider.
+     *
+     * `ark` and `dashscope` are not typos: they are the vendors' own names for two
+     * of the backends, kept as aliases so an operator who writes what the vendor
+     * console calls it gets the provider they meant. `fal` is the interesting entry
+     * — §14 retires that route, so the id must resolve to *nothing* rather than to
+     * a surviving provider, and this is where "do not leave the old route
+     * accidentally selectable" stops being a claim.
+     *
+     * Restored afterwards rather than deleted: step 14 prints the audit table for
+     * *this* deployment, and a step that left the variable unset would make that
+     * table describe a configuration the operator does not have.
+     */
     const operatorList = process.env["VIDEO_GEN_PROVIDERS"];
-    process.env["VIDEO_GEN_PROVIDERS"] = "seedance,fal,mock,nonexistent-vendor";
+    process.env["VIDEO_GEN_PROVIDERS"] = "ark,dashscope,fal,mock,nonexistent-vendor";
     resetEnvCache();
     const forced = (await import("@/lib/providers/video-gen")).videoGenProviderIds();
     must(
@@ -706,14 +991,18 @@ async function main(): Promise<void> {
       "`mock` in VIDEO_GEN_PROVIDERS enabled it with mock mode off; the mock must be " +
         "reachable only through TALLY_USE_MOCK_PROVIDERS.",
     );
+    for (const dropped of ["nonexistent-vendor", "fal"]) {
+      must(
+        !(forced as string[]).includes(dropped),
+        `"${dropped}" in VIDEO_GEN_PROVIDERS was accepted as a provider id.`,
+      );
+    }
     must(
-      !(forced as string[]).includes("nonexistent-vendor"),
-      "an unknown provider id in VIDEO_GEN_PROVIDERS was accepted.",
-    );
-    must(
-      forced.length === 1 && forced[0] === "fal",
-      `"seedance,fal" resolved to [${forced.join(", ")}]; the old and new spellings are ` +
-        `one provider, and counting them twice would list every model twice in the picker.`,
+      forced.length === 2 &&
+        forced.includes("seedance") &&
+        forced.includes("qwen"),
+      `"ark,dashscope,fal" resolved to [${forced.join(", ")}]; the two vendor spellings are ` +
+        `aliases of two branded backends, and the retired aggregator id resolves to none.`,
     );
     if (operatorList === undefined) delete process.env["VIDEO_GEN_PROVIDERS"];
     else process.env["VIDEO_GEN_PROVIDERS"] = operatorList;
@@ -722,12 +1011,13 @@ async function main(): Promise<void> {
     ok("the mock provider cannot be selected in a production configuration");
     detail(
       "`mock` listed in VIDEO_GEN_PROVIDERS is still refused; an unknown vendor id is " +
-        "dropped; the legacy `seedance` spelling resolves to fal.ai exactly once",
+        "dropped; a vendor's own spelling resolves to its branded backend; the retired " +
+        "aggregator id enables nothing (§14)",
     );
   }
 
   // -----------------------------------------------------------------------
-  // 10, 11. AI selection, format propagation, and clip provenance
+  // 11, 12, 13. AI selection, clip provenance and image provenance
   // -----------------------------------------------------------------------
   /**
    * From here on, mock providers are on.
@@ -765,7 +1055,7 @@ async function main(): Promise<void> {
       "a model is unlocked on the starter plan, which does not include AI video.",
     );
 
-    // ---- 8. every model resolves, and only for the formats it supports -----
+    // ---- 11. every model resolves, and only for the formats it supports ----
     let pairsChecked = 0;
     for (const model of models) {
       const resolved = resolveModel(model.id);
@@ -830,7 +1120,7 @@ async function main(): Promise<void> {
         `unsupported pairings and a missing model both refused with 400`,
     );
 
-    // ---- 9. provenance and licence on a generated clip ---------------------
+    // ---- 12. provenance and licence on a generated clip --------------------
     const { generateClip } = await import("@/lib/providers/video-gen");
     const target = models[0];
     if (!target) fail("no model to generate with.");
@@ -840,6 +1130,7 @@ async function main(): Promise<void> {
         prompt: "A verification placeholder frame",
         modelId: target.id,
         format: "portrait",
+        quality: null,
         durationMs: 4_000,
         sceneIndex: 0,
       },
@@ -882,6 +1173,72 @@ async function main(): Promise<void> {
         `licence: "${clip.license}"`,
     );
 
+    // ---- 13. the same provenance on a generated image ----------------------
+    /**
+     * §5, exercised rather than merely declared. Continuity references are the
+     * reason image generation exists (§6), and a reference image with no record of
+     * which model made it is unusable for exactly that purpose: the continuity
+     * checker has to know whether two frames came from the same model before it can
+     * read a difference between them as a continuity error.
+     *
+     * `purpose` is carried through and asserted because it is what distinguishes a
+     * character reference from a thumbnail in storage, and §5 lists both.
+     */
+    const { generateImage, imageModels } = await import("@/lib/providers/video-gen");
+    const imageTarget = imageModels()[0];
+    if (!imageTarget) {
+      fail(
+        "no model offers image generation with mock providers on; §5 requires the " +
+          "capability to exist somewhere in the registry.",
+      );
+    }
+
+    const image = await generateImage(
+      {
+        prompt: "A verification placeholder character reference",
+        modelId: imageTarget.id,
+        format: "portrait",
+        quality: null,
+        purpose: "character",
+        index: 0,
+      },
+      { usage: { traceId: "verify-video-providers" } },
+    );
+
+    must(image.bytes.length > 0, "the generated image is empty.");
+    must(
+      image.modelId === imageTarget.id,
+      "the image does not record which model produced it, so a continuity reference " +
+        "cannot be compared against the frames it was meant to constrain.",
+    );
+    must(
+      image.purpose === "character",
+      `the image reports purpose "${image.purpose}"; the requested purpose decides where ` +
+        `it is stored and what it may be reused for (§5).`,
+    );
+    must(
+      image.mimeType.startsWith("image/"),
+      `the image reports mime type "${image.mimeType}", which is not an image.`,
+    );
+    must(image.license.length > 0, "the image carries no licence statement (§29).");
+    must(
+      image.matchedOn.length > 0,
+      "the image does not record the prompt that produced it, so provenance is lost.",
+    );
+    if (image.width !== null && image.height !== null) {
+      must(
+        image.height > image.width,
+        `a portrait image request produced ${image.width}x${image.height}.`,
+      );
+    }
+
+    ok("a generated image carries its model, purpose, licence and prompt");
+    detail(
+      `${image.provider}/${image.modelId} produced ${image.bytes.length} bytes ` +
+        `(${image.mimeType}, ${image.width ?? "?"}x${image.height ?? "?"}) for the ` +
+        `"${image.purpose}" purpose; licence: "${image.license}"`,
+    );
+
     // Mock mode is the only reason a provider is ready in this step; say so, so a
     // reader does not take it as evidence about a real credential.
     const mocked = videoGenStatuses().filter((s) => s.state === "mock");
@@ -898,7 +1255,7 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // 12. the §20 provider audit table, from the real environment
+  // 14. the §20 provider audit table, from the real environment
   // -----------------------------------------------------------------------
   /**
    * Printed from the actual configuration rather than maintained by hand, so it
@@ -984,7 +1341,7 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // 13. no destructive or billable external action
+  // 15. no destructive or billable external action
   // -----------------------------------------------------------------------
   /**
    * Asserted about this script's own source, in the same spirit as
@@ -1046,11 +1403,14 @@ async function main(): Promise<void> {
     `\n${step}/${TOTAL_STEPS} checks passed — stock footage is selectable on every plan ` +
       `with nothing configured, AI selection resolves mode/model/format to a usable plan, ` +
       `unconfigured providers report NOT_CONFIGURED and cannot be reached, invented ` +
-      `provider and model names are refused with 400, plan entitlements gate AI video ` +
-      `and the premium models server-side, no provider credential appears in any ` +
-      `client-bound payload, no provider module performs I/O at import, the mock ` +
-      `provider is unreachable in a production configuration, and a generated clip ` +
-      `carries its model, licence and provenance.` +
+      `provider and model names are refused with 400, the four branded Tally models ` +
+      `each sit on one vendor and one credential with no vendor name in any ` +
+      `customer-facing payload, an undeclared resolution is refused rather than ` +
+      `snapped, plan entitlements gate AI video and the premium models server-side, ` +
+      `no provider credential appears in any client-bound payload, no provider module ` +
+      `performs I/O at import, the mock provider is unreachable in a production ` +
+      `configuration, and a generated clip and image each carry their model, licence ` +
+      `and provenance.` +
       `\nNot verified by design: whether any real generation credential works. §24 ` +
       `forbids a live video-generation request, so provider reachability is not a ` +
       `question this script can answer — only whether the layer is honest about it.\n`,

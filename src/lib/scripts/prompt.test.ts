@@ -293,6 +293,63 @@ describe("buildScriptPrompt", () => {
     expect(sparse).not.toContain("null");
     expect(sparse).toContain("(not specified)");
   });
+
+  it("omits the working title entirely when there is not one yet", () => {
+    /**
+     * The generation half of the placeholder-title bug.
+     *
+     * A project seeded from a pasted link is titled `New video from a YouTube link
+     * (<videoId>)` until research names it, and `buildScriptBrief` used to pass that
+     * straight through as `Working title` — so the model was told this video is about an
+     * eleven-character YouTube id. It now passes an empty string for that case, and the
+     * line has to disappear rather than appear blank: `- Working title:` with nothing
+     * after it is a constraint the writer is entitled to act on.
+     */
+    const untitled = buildScriptPrompt({
+      projectTitle: "",
+      channelTitle: null,
+      niche: "sourdough baking",
+      targetAudience: null,
+      contentLanguage: "en-US",
+      contentStyle: null,
+      targetDurationSeconds: 300,
+      idea: null,
+      sourceTitles: [],
+      ownTopPerformers: [],
+      brand: { brandName: null, defaultCta: null },
+      generation: null,
+    });
+
+    expect(untitled).not.toContain("Working title");
+    // What is known about the video is still there, so the brief is thinner, not broken.
+    expect(untitled).toContain("sourdough baking");
+    expect(untitled).not.toContain("undefined");
+  });
+
+  it("never carries a from-a-link placeholder into the prompt", () => {
+    /**
+     * Defence in depth against the exact string, in the one place where this bug reached
+     * a provider rather than a screen. `buildScriptBrief` is what strips it, but a future
+     * caller assembling a brief by hand would not go through that function — and the
+     * prompt is where the damage would be permanent, baked into a generated script.
+     */
+    const placeholder = buildScriptPrompt({
+      projectTitle: "New video from a YouTube link (pBt_n-tjV_Y)",
+      channelTitle: null,
+      niche: null,
+      targetAudience: null,
+      contentLanguage: "en-US",
+      contentStyle: null,
+      targetDurationSeconds: 300,
+      idea: null,
+      sourceTitles: [],
+      ownTopPerformers: [],
+      brand: { brandName: null, defaultCta: null },
+      generation: null,
+    });
+
+    expect(placeholder).not.toContain("pBt_n-tjV_Y");
+  });
 });
 
 describe("SCRIPT_SYSTEM_PROMPT", () => {

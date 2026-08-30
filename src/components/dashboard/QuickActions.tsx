@@ -1,15 +1,18 @@
 /**
  * Quick actions — ported from the prototype's four-button list.
  *
- * The prototype's `go(id)` tab switches become links. Without a connected
- * channel every content stage is a dead end, so the list collapses to the one
- * action that unblocks everything else.
+ * The prototype's `go(id)` tab switches become links. Without a connected channel the
+ * channel-scoped stages are dead ends, so the list collapses to what actually works:
+ * connecting a channel, and the two seeded entry paths that need no channel at all
+ * (Phase 11 §4; §1C). Offering only "connect a channel" would understate what a new
+ * user can do before connecting anything.
  */
 import Link from "next/link";
 import {
   ChevronRight,
   FileText,
   Image as ImageIcon,
+  PenLine,
   Search,
   Send,
   Youtube,
@@ -25,6 +28,7 @@ interface Action {
 
 const ACTIONS: Action[] = [
   { href: "/dashboard/research", label: "Find a new idea", icon: Search },
+  { href: "/dashboard/describe", label: "Describe an idea", icon: PenLine },
   { href: "/dashboard/script", label: "Write a script", icon: FileText },
   { href: "/dashboard/thumbnail", label: "Design a thumbnail", icon: ImageIcon },
   { href: "/dashboard/publish", label: "Publish a video", icon: Send },
@@ -32,6 +36,8 @@ const ACTIONS: Action[] = [
 
 const CONNECT_FIRST: Action[] = [
   { href: "/dashboard/channels", label: "Connect a YouTube channel", icon: Youtube },
+  { href: "/dashboard/youtube", label: "Create from a YouTube link", icon: Youtube },
+  { href: "/dashboard/describe", label: "Describe an idea", icon: PenLine },
 ];
 
 export function QuickActions({ hasChannel }: { hasChannel: boolean }) {
@@ -76,8 +82,8 @@ export function QuickActions({ hasChannel }: { hasChannel: boolean }) {
             color: color.textFaint,
           }}
         >
-          Tally connects through Google — it never asks for your YouTube
-          password.
+          The last two work with no channel connected. Tally connects through Google
+          — it never asks for your YouTube password.
         </p>
       )}
     </div>

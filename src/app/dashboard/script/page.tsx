@@ -17,6 +17,7 @@ import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { ideas } from "@/lib/db/schema";
 import { getStageContext } from "@/lib/dashboard/stage";
+import { displayTitle } from "@/lib/projects/display-title";
 import { capabilityStatus } from "@/lib/providers/config";
 
 export const metadata = { title: "Script — Tally" };
@@ -59,7 +60,12 @@ export default async function ScriptPage({
       <ConfigNotice status={ai} />
       <ScriptWorkspace
         projectId={project?.id ?? null}
-        projectTitle={project?.title ?? null}
+        /*
+          `displayTitle` is null for a project still carrying its from-a-link
+          placeholder, so the empty state says "this video" rather than quoting the raw
+          video id back as though it were the video's name.
+        */
+        projectTitle={displayTitle(project?.title)}
         status={project?.status ?? null}
         script={context.script}
         ideaTitle={ideaRows[0]?.title ?? null}

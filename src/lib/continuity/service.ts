@@ -1,9 +1,10 @@
 /**
  * The continuity layer's public surface.
  *
- * Four entry points, called from the existing video pipeline and from nowhere else:
+ * Five entry points, called from the existing video pipeline and from nowhere else:
  *
  *  - `planContinuity` — after the script is segmented, before scenes are directed.
+ *  - `referenceImagePlan` — which entities still need a reference still (§5, §6).
  *  - `continuityContextFor` — per scene, inside the visuals stage.
  *  - `checkContinuity` — after the visuals stage, as the QUALITY_CHECK stage.
  *  - `scenesToRegenerate` — what §13 acts on.
@@ -36,8 +37,10 @@ import { planStoryBible } from "@/lib/continuity/planner";
 import {
   buildContinuityPrompt,
   plannerContext,
+  referenceImagePrompts,
   regenerationPrompt,
   withContinuity,
+  type ReferenceImagePrompt,
 } from "@/lib/continuity/prompt";
 import {
   buildSceneStateGraph,
@@ -48,11 +51,14 @@ import {
 } from "@/lib/continuity/scene-state";
 import {
   getBible,
+  getReferenceImages,
   getSceneStates,
   recordContinuityCheck,
+  referencedEntityKeys,
   regenerationCounts,
   saveBible,
   saveSceneContinuity,
+  type StoredReference,
 } from "@/lib/continuity/store";
 import {
   issuesForScene,
@@ -349,6 +355,154 @@ export async function persistSceneStates(args: {
       });
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Reference stills (§5, §6)
+// ---------------------------------------------------------------------------
+
+export interface ReferenceImagePlan {
+  context: ContinuityContext;
+  /** Entities that need a still generated. Empty when there is nothing to make. */
+  wanted: ReferenceImagePrompt[];
+  /** References already stored, current one per entity. */
+  existing: StoredReference[];
+  /** Why `wanted` is empty, when it is. Shown verbatim, never parsed. */
+  reason: string;
+}
+
+/**
+ * Which bible entities still need a reference still.
+ *
+ * Reads, never generates. The provider call belongs in the pipeline stage for the
+ * reason stated at the top of this module — nothing here spends money — and keeping
+ * the decision separate from the spending is also what lets a route show a user what
+ * *would* be generated before anything is charged.
+ *
+ * Already-referenced entities are excluded rather than regenerated. A reference still
+ * is not improved by a second draw from the same distribution, and re-making eight of
+ * them every time a project is rebuilt would be eight paid generations to arrive back
+ * where the project already was.
+ *
+ * Never throws: a failure to read the existing set returns an empty plan, and a
+ * project with no references is the state every project was in before this existed.
+ */
+export async function referenceImagePlan(args: {
+  userId: string;
+  project: ContinuityProject;
+}): Promise<ReferenceImagePlan> {
+  const context = await loadContext(args.userId, args.project);
+  if (!context.active) {
+    return { context, wanted: [], existing: [], reason: context.plan.reason };
+  }
+
+  try {
+    const [existing, taken] = await Promise.all([
+      getReferenceImages(args.userId, args.project.projectId),
+      referencedEntityKeys(args.userId, args.project.projectId),
+    ]);
+
+    const all = referenceImagePrompts(context.bible, context.plan.capabilities);
+    const wanted = all.filter(
+      (entry) => !taken.has(`${entry.kind}:${entry.entityId}`),
+    );
+
+    return {
+      context,
+      wanted,
+      existing,
+      reason:
+        wanted.length > 0
+          ? ""
+          : all.length === 0
+            ? // The honest distinction: a bible whose entities carry no *visual* facts
+              // has nothing to draw, which is different from having drawn everything.
+              "No entity in this story bible carries visual facts to illustrate."
+            : "Every entity in this story bible already has a reference image.",
+    };
+  } catch (error) {
+    log.error("could not resolve the reference image plan", {
+      projectId: args.project.projectId,
+      error,
+    });
+    return {
+      context,
+      wanted: [],
+      existing: [],
+      reason: "Reference images could not be resolved.",
+    };
+  }
+}
+
+/**
+ * The stored references that apply to one scene, in a stable order.
+ *
+ * The reuse half of §6 — "reused by scene generation where the selected backend
+ * supports them". Pure and synchronous: the visuals stage loads the reference set once
+ * for the project and calls this per scene, the same arrangement
+ * `continuityContextFor` uses, because a query per scene would be 120 round trips for
+ * data that cannot change mid-stage.
+ *
+ * A scene gets references for the entities its own state commits to, and nothing else.
+ * Sending the whole cast with every scene would tell the model to put eight characters
+ * in a two-hander, and a backend that weights every reference it is given would then
+ * produce a crowd. The environment comes after the characters and the props last,
+ * matching the priority `buildContinuityPrompt` orders its clauses by, so a backend
+ * that caps how many it accepts drops the least important.
+ *
+ * Capability gating is *not* done here, and the omission is the §28 rule rather than
+ * an oversight. Whether the selected model can accept a reference is a fact about the
+ * provider layer, which refuses them for a model declaring none; this module does not
+ * know what a model is. Duplicating that judgement here would be a second place for it
+ * to go out of step with the capability matrix, and the wrong layer to hold it in.
+ */
+export function referencesForScene(args: {
+  context: ContinuityContext;
+  sceneIndex: number;
+  stored: readonly StoredReference[];
+}): StoredReference[] {
+  if (!args.context.active || args.stored.length === 0) return [];
+
+  const entry = args.context.states.find(
+    (s) => s.sceneIndex === args.sceneIndex,
+  );
+  if (!entry) return [];
+
+  const { capabilities } = args.context.plan;
+  const state = entry.state;
+
+  const byKey = new Map(
+    args.stored.map((reference) => [
+      `${reference.kind}:${reference.entityId}`,
+      reference,
+    ]),
+  );
+
+  const wanted: string[] = [
+    ...(capabilities.characters
+      ? state.characters.map((id) => `character:${id}`)
+      : []),
+    ...(capabilities.environments && state.environment
+      ? [`environment:${state.environment}`]
+      : []),
+    ...(capabilities.props ? state.props.map((id) => `prop:${id}`) : []),
+  ];
+
+  const out: StoredReference[] = [];
+  const seen = new Set<string>();
+
+  for (const key of wanted) {
+    // A state may legitimately name the same entity twice; a reference sent twice is
+    // a wasted upload at best and a doubled weight at worst.
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const reference = byKey.get(key);
+    // Absent is ordinary: a scene may commit to an entity nobody has drawn yet, and
+    // that scene falls back to the textual constraints like every scene does today.
+    if (reference) out.push(reference);
+  }
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------

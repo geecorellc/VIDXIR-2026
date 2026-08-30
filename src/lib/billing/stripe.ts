@@ -28,10 +28,13 @@ import { env } from "@/lib/env";
 import { NotConfiguredError, ProviderAuthError, ProviderError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { PLAN_CATALOG, type PlanTier } from "@/lib/plans";
+import { creditPack, priceIdForPack } from "@/lib/credits/packs";
 import type {
   BillingProvider,
   CheckoutRequest,
   CheckoutSession,
+  CreditCheckoutRequest,
+  CreditCheckoutSession,
   PortalRequest,
 } from "@/lib/billing";
 
@@ -253,6 +256,78 @@ export const stripeProvider: BillingProvider = {
     });
 
     return { url: session.url, providerSessionId: session.id };
+  },
+
+  async startCreditCheckout(
+    request: CreditCheckoutRequest,
+  ): Promise<CreditCheckoutSession> {
+    const stripe = stripeClient();
+    /**
+     * The pack becomes a price here and nowhere else, from the environment. The
+     * request named `credits_500`; what that costs is not up to the caller.
+     */
+    const price = priceIdForPack(request.pack);
+    const pack = creditPack(request.pack);
+    const customerId = await ensureCustomer(request.userId, request.email);
+
+    const session = await callStripe("checkout.sessions.create", () =>
+      stripe.checkout.sessions.create({
+        /**
+         * `payment`, not `subscription`. This is the field the webhook keys on to
+         * tell a top-up from a plan purchase, and getting it wrong would create a
+         * recurring charge for what the customer bought once.
+         */
+        mode: "payment",
+        customer: customerId,
+        line_items: [{ price, quantity: 1 }],
+        success_url: request.successUrl,
+        cancel_url: request.cancelUrl,
+        /**
+         * `tallyPack` is recorded for diagnostics and for the abnormal path — a
+         * session whose `credit_purchases` row is missing. It is deliberately *not*
+         * what the webhook credits from: metadata is writable by anything holding
+         * the API key, so the authoritative pack and credit count live in Tally's
+         * own row, written before the customer ever reaches Stripe.
+         */
+        client_reference_id: request.userId,
+        metadata: {
+          tallyUserId: request.userId,
+          tallyPack: request.pack,
+          tallyCredits: String(pack.credits),
+        },
+        payment_intent_data: {
+          metadata: { tallyUserId: request.userId, tallyPack: request.pack },
+        },
+        billing_address_collection: "auto",
+        /**
+         * No promotion codes on a credit pack, unlike a subscription. A discount here
+         * would make `amount_total` disagree with the credits granted, and the credits
+         * are fixed by the catalogue — so a promo would silently change the price per
+         * credit with nothing recording why.
+         */
+        allow_promotion_codes: false,
+      }),
+    );
+
+    if (!session.url) {
+      throw new ProviderError(
+        "stripe",
+        "Stripe created a credit checkout session without a redirect URL.",
+      );
+    }
+
+    log.info("credit checkout session created", {
+      userId: request.userId,
+      pack: request.pack,
+      sessionId: session.id,
+    });
+
+    return {
+      url: session.url,
+      providerSessionId: session.id,
+      amountCents: session.amount_total,
+      currency: session.currency,
+    };
   },
 
   async createPortalSession(request: PortalRequest): Promise<{ url: string }> {

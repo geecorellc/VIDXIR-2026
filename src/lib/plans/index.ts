@@ -25,13 +25,20 @@ export type PlanTier = "starter" | "studio" | "scale";
  *    cost, so the tier that pays for AI video at all does not necessarily pay for
  *    the most expensive model. `VideoGenModel.premium` marks which ones this gates.
  *
- * Note what is deliberately absent: **there is no credit system.** §19 asks for
- * that decision to be stated rather than silently invented, so — Tally meters video
- * generation by the plan's monthly `maxVideosPerMonth` allowance, atomically claimed
- * when a project is created (see `createProject`), and gates *capability* by these
- * flags. Per-generation credits would be a second billing system alongside Stripe
- * subscriptions, with its own balance, top-up, refund-on-failure and expiry rules,
- * and Phase 11 is not the place to introduce one.
+ * These flags gate *capability*. Since §7 they no longer gate cost: **per-generation
+ * cost is metered in credits**, and the two limits do different jobs, so both are
+ * kept rather than one replacing the other:
+ *
+ *  - `maxVideosPerMonth` bounds how many **projects** a plan may start. Claimed
+ *    atomically when a project is created (see `createProject`), unchanged.
+ *  - `monthlyCredits` bounds how much **generation** those projects may do. Charged
+ *    per clip and per still by `lib/credits`, at a price that depends on the model
+ *    and resolution chosen (`lib/credits/pricing`).
+ *
+ * Collapsing them into one number was considered and rejected: a project can be
+ * regenerated scene by scene an unbounded number of times, so a per-project
+ * allowance cannot bound provider spend, and a pure credit balance cannot express
+ * "one channel, four videos" — which is what the free tier actually sells.
  */
 export type FeatureKey =
   | "aiVoiceover"
@@ -53,6 +60,20 @@ export interface PlanDefinition {
   /** null = unlimited. */
   maxChannels: number | null;
   maxVideosPerMonth: number | null;
+  /**
+   * Credits granted at the start of each billing period (§7, §8).
+   *
+   * Not nullable and never "unlimited", unlike the two limits above. An unlimited
+   * credit balance would be an unlimited licence to spend Tally's provider budget,
+   * which is the one thing a credit system exists to prevent — so even Scale has a
+   * finite monthly grant and tops up beyond it (§11).
+   *
+   * Starter gets a real, small allowance rather than zero. Zero would make the free
+   * tier unable to generate anything at all, which is not what "4 videos / month"
+   * promises; this is enough to produce those four short videos on the cheapest
+   * model.
+   */
+  monthlyCredits: number;
   features: Record<FeatureKey, boolean>;
   /** Higher runs first in the render queue. */
   queuePriority: number;
@@ -72,6 +93,12 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
     cadence: "free",
     maxChannels: 1,
     maxVideosPerMonth: 4,
+    /**
+     * 100 credits: four 30-second videos on Tal 1.0 at 720p, which is what the
+     * bullet list below promises. Starter has `aiVideoGeneration: false`, so these
+     * are spent on stills and stock-backed scenes rather than on AI clips.
+     */
+    monthlyCredits: 100,
     features: {
       aiVoiceover: false,
       brollLibrary: false,
@@ -87,6 +114,7 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
     bullets: [
       "1 channel",
       "4 videos / month",
+      "100 generation credits / month",
       "Research + script tools",
       "Standard thumbnails",
     ],
@@ -98,6 +126,12 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
     cadence: "/mo",
     maxChannels: 3,
     maxVideosPerMonth: null,
+    /**
+     * 2,500 credits: roughly ten full-length videos of twelve scenes each on
+     * Tal 2.0 at 1080p, or twice that on Tal 1.0. "Unlimited videos" above is still
+     * true — the project count is unlimited; the generation inside them is metered.
+     */
+    monthlyCredits: 2_500,
     features: {
       aiVoiceover: true,
       brollLibrary: true,
@@ -116,6 +150,7 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
     bullets: [
       "3 channels",
       "Unlimited videos",
+      "2,500 generation credits / month",
       "AI voiceover + b-roll",
       "AI video generation",
       "Thumbnail A/B testing",
@@ -131,6 +166,13 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
     cadence: "/mo",
     maxChannels: null,
     maxVideosPerMonth: null,
+    /**
+     * 10,000 credits, which is what makes the premium models usable rather than
+     * merely unlocked: Tal 3.1 costs 8× Tal 1.0, so a Scale customer generating
+     * exclusively on it gets about the same number of finished videos a Studio
+     * customer gets on Tal 2.0.
+     */
+    monthlyCredits: 10_000,
     features: {
       aiVoiceover: true,
       brollLibrary: true,
@@ -146,6 +188,7 @@ export const PLAN_CATALOG: readonly PlanDefinition[] = [
     bullets: [
       "Unlimited channels",
       "Everything in Studio",
+      "10,000 generation credits / month",
       "Premium video models",
       "Cross-channel analytics",
       "Priority render queue",

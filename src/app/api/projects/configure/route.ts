@@ -51,6 +51,15 @@ const BodySchema = z.object({
   mode: z.string().max(32).optional(),
   model: z.string().max(64).nullable().optional(),
   format: z.string().max(16).optional(),
+  /**
+   * The resolution tier (Phase 12 §4). Null is "use the model's own default".
+   *
+   * Bounded and untyped for the same reason as `mode`: `assertQuality` owns which
+   * tiers the *chosen model* supports, and that is a per-model answer this schema
+   * cannot express. A `z.enum` here would accept `2k` for a model that tops out at
+   * 1080p and reject nothing the plan layer does not already reject better.
+   */
+  quality: z.string().max(16).nullable().optional(),
 });
 
 export async function PATCH(request: NextRequest) {
@@ -74,16 +83,20 @@ export async function PATCH(request: NextRequest) {
     }
 
     /**
-     * A format change on its own is refused rather than half-applied.
+     * A format or resolution change on its own is refused rather than half-applied.
      *
-     * The frame is not independent of the model — a model that generates only
-     * landscape cannot serve a portrait project — and `validateSelection` is what
-     * checks the pair. Accepting a bare format would write a combination nothing had
-     * validated, which `generationPlanFor` would then reject at render time (§16).
+     * Neither is independent of the model — a model that generates only landscape
+     * cannot serve a portrait project, and one that tops out at 1080p cannot serve a
+     * 2K one — and `validateSelection` is what checks the combination. Accepting a
+     * bare format or quality would write a pairing nothing had validated, which
+     * `generationPlanFor` would then reject at render time (§16, Phase 12 §4).
      */
-    if (body.mode === undefined && body.format !== undefined) {
+    if (
+      body.mode === undefined &&
+      (body.format !== undefined || body.quality !== undefined)
+    ) {
       throw new ValidationError(
-        "Choose the generation method along with the video format.",
+        "Choose the generation method along with the video format and quality.",
         { field: "mode" },
       );
     }
@@ -97,6 +110,7 @@ export async function PATCH(request: NextRequest) {
             mode: body.mode,
             model: body.model ?? null,
             format: body.format ?? null,
+            quality: body.quality ?? null,
             tier,
           });
 
@@ -105,13 +119,14 @@ export async function PATCH(request: NextRequest) {
       projectId: body.projectId,
       ideaId: body.ideaId,
       // Spread rather than `?? undefined`: undefined means "leave it", and null is a
-      // real value for `generationModel` (stock mode clears it).
+      // real value for `generationModel` and `videoQuality` (stock mode clears both).
       ...(selection === null
         ? {}
         : {
             generationMode: selection.generationMode,
             generationModel: selection.generationModel,
             videoFormat: selection.videoFormat,
+            videoQuality: selection.videoQuality,
           }),
     });
 

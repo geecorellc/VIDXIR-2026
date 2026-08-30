@@ -1,13 +1,25 @@
 "use client";
 
 /**
- * "Create from YouTube" — the §18 flow, end to end.
+ * The channel-less creation flow, end to end (§18; §1C).
  *
- * Paste a link → source analysis → trending research → choose an angle → choose a
- * generation method → script → video. One screen, because the steps are a
- * sequence over a single project and splitting them across routes would lose the
- * thing that makes the flow legible: you can see what the last step decided while
- * you make the next one.
+ * Seed → research → choose an angle → choose a generation method → script → video.
+ * One screen, because the steps are a sequence over a single project and splitting
+ * them across routes would lose the thing that makes the flow legible: you can see
+ * what the last step decided while you make the next one.
+ *
+ * Two entry paths share it, chosen by `seed`:
+ *
+ *  - `"link"` — paste any public YouTube URL, analyse it, research its topic (§4).
+ *  - `"description"` — type what you want to make, and Tally interprets it into a
+ *    research brief instead (§1C).
+ *
+ * They differ only in step 1 and in what step 2 has to show. Everything after that —
+ * the run status, the measured trends, the angle cards, the generation picker, the
+ * script and the build — is the same sequence over the same rows, so it is
+ * parameterised here rather than copied into a second 900-line screen. Named for link
+ * mode because that is what it was written for, following `getLinkStudioData` and
+ * `/api/projects/link-status`, which serve both paths for the same reason.
  *
  * What this component does *not* do is as important as what it does.
  *
@@ -26,6 +38,10 @@
  * §22: the pasted video is a research source. Nothing on this screen offers to
  * download it, copy its script, or reuse its title — the angle cards are Tally's
  * own proposals, and the source panel is metadata and a thumbnail URL.
+ *
+ * §1C, on the description path: the text the user types is a subject to research, and
+ * this screen never sends it anywhere but `/api/projects/from-description`. It is not
+ * a prompt, not a script, and not passed to any generation stage.
  */
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -108,19 +124,70 @@ export interface LinkScriptView {
   estimatedDurationSeconds: number | null;
 }
 
+/** Which entry path this screen is rendering (§4, §1C). */
+export type StudioSeed = "link" | "description";
+
 export interface LinkStudioProps {
-  /** Null until the user has pasted a link and started a project. */
+  /** Null until the user has seeded a project. */
   data: LinkStudioData | null;
   script: LinkScriptView | null;
   /** Whether the AI capability is configured — gates angles and scripts (§48). */
   aiConfigured: boolean;
+  /**
+   * The entry path. Defaults to link mode so the existing screen is unchanged.
+   *
+   * Only step 1 and step 2 read it; every later step is identical, which is the
+   * reason one component serves both.
+   */
+  seed?: StudioSeed;
+  /**
+   * The route this screen lives at, for the push after a project is created.
+   *
+   * Passed in rather than derived, because the screen is not always at the path its
+   * component name suggests and a wrong guess would navigate the user off the flow.
+   */
+  basePath?: string;
 }
 
-export function LinkStudio({ data, script, aiConfigured }: LinkStudioProps) {
+/**
+ * Bounds on the typed description, mirroring `MIN/MAX_DESCRIPTION_CHARS`.
+ *
+ * Duplicated rather than imported: `@/lib/research/description` pulls in the AI
+ * provider and the capability registry, which read `env()` — none of which can be in a
+ * client bundle (§21). The server re-validates against the real constants, so this is a
+ * courtesy that cannot disagree in a way that matters: too short is refused with a 400
+ * either way.
+ */
+const MIN_DESCRIPTION = 12;
+const MAX_DESCRIPTION = 2_000;
+
+/**
+ * Run outcomes after which no source analysis is coming.
+ *
+ * `blocked_not_configured` belongs here with the other two: the run never reached the
+ * worker, so nothing read the video, and it will not start reading on its own — the
+ * operator has to configure the provider first. `succeeded` is deliberately absent,
+ * because a succeeded run always wrote its analysis, and if one ever did not, the
+ * waiting copy is the safer thing to show than a claim about why.
+ */
+const SETTLED_WITHOUT_SOURCE = new Set([
+  "failed",
+  "cancelled",
+  "blocked_not_configured",
+]);
+
+export function LinkStudio({
+  data,
+  script,
+  aiConfigured,
+  seed = "link",
+  basePath = "/dashboard/youtube",
+}: LinkStudioProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const [url, setUrl] = useState("");
+  const [description, setDescription] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [busy, setBusy] = useState<
@@ -223,14 +290,22 @@ export function LinkStudio({ data, script, aiConfigured }: LinkStudioProps) {
     setError(null);
     setBusy("start");
     try {
-      const result = await api.post<{ project: { id: string } }>(
-        "/api/projects/from-youtube",
-        { url },
-      );
+      // Two routes, because the two seeds are validated and charged differently on
+      // the server. Both create a channel-less project and enqueue one research run.
+      const result =
+        seed === "description"
+          ? await api.post<{ project: { id: string } }>(
+              "/api/projects/from-description",
+              { description },
+            )
+          : await api.post<{ project: { id: string } }>(
+              "/api/projects/from-youtube",
+              { url },
+            );
       // Navigate to the new project rather than refreshing: the screen is
       // project-scoped, and the URL should say which one.
       startTransition(() => {
-        router.push(`/dashboard/youtube?project=${result.project.id}`);
+        router.push(`${basePath}?project=${result.project.id}`);
         router.refresh();
       });
     } catch (e) {
@@ -296,10 +371,97 @@ export function LinkStudio({ data, script, aiConfigured }: LinkStudioProps) {
       )}
 
       {/* ---------------------------------------------------------------
+          Step 1 — describe an idea (§1C).
+          The description path's seed. No analysis step: there is nothing to read
+          metadata from, and interpreting the sentence is the worker's first job
+          rather than a request the user waits on.
+      ---------------------------------------------------------------- */}
+      {seed === "description" && (
+        <Card>
+          <Step number={1} title="Describe the video you want to make" />
+          <p
+            style={{
+              margin: "0 0 14px",
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: color.textDim,
+            }}
+          >
+            A sentence or two, in your own words. Tally works out the subject,
+            researches what is working in it right now, and proposes original angles
+            from what it measures. No channel connection needed.
+          </p>
+
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            maxLength={MAX_DESCRIPTION}
+            rows={3}
+            placeholder="I want to make a video about why sourdough starters die and how to revive them"
+            aria-label="Describe your video idea"
+            style={{
+              boxSizing: "border-box",
+              width: "100%",
+              background: color.inputBg,
+              border: `1px solid ${color.border}`,
+              borderRadius: radius.md,
+              padding: "11px 12px",
+              color: color.text,
+              fontFamily: font.body,
+              fontSize: 14,
+              lineHeight: 1.6,
+              resize: "vertical",
+              outline: "none",
+            }}
+          />
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              flexWrap: "wrap",
+              marginTop: 12,
+            }}
+          >
+            <Btn
+              onClick={start}
+              loading={busy === "start"}
+              disabled={working || description.trim().length < MIN_DESCRIPTION}
+              icon={<Search size={14} />}
+            >
+              Research this idea
+            </Btn>
+            <span style={{ fontSize: 11.5, color: color.textFaint }}>
+              {description.trim().length < MIN_DESCRIPTION
+                ? `At least ${MIN_DESCRIPTION} characters.`
+                : "Starts a new video and counts against your monthly allowance."}
+            </span>
+          </div>
+
+          {!aiConfigured && (
+            <p
+              style={{
+                margin: "12px 0 0",
+                fontSize: 11.5,
+                lineHeight: 1.55,
+                color: color.textFaint,
+              }}
+            >
+              The AI provider is not configured, so Tally will fall back to reading
+              search terms out of your own words, and cannot propose angles or write a
+              script until it is.
+            </p>
+          )}
+        </Card>
+      )}
+
+      {/* ---------------------------------------------------------------
           Step 1 — paste a link.
           Shown alongside an existing project too: starting another video from a
           different link is the normal next action, not a hidden one.
       ---------------------------------------------------------------- */}
+      {seed === "link" && (
       <Card>
         <Step number={1} title="Paste a YouTube link" />
         <p
@@ -401,6 +563,7 @@ export function LinkStudio({ data, script, aiConfigured }: LinkStudioProps) {
           </div>
         )}
       </Card>
+      )}
 
       {!project ? null : (
         <>
@@ -408,13 +571,52 @@ export function LinkStudio({ data, script, aiConfigured }: LinkStudioProps) {
               Step 2 — source analysis + research status.
           -------------------------------------------------------------- */}
           <Card>
-            <Step number={2} title="Source analysis" />
-            {data?.source ? (
+            <Step
+              number={2}
+              title={seed === "description" ? "Your idea" : "Source analysis"}
+            />
+            {seed === "description" ? (
+              /**
+               * The description as stored, and what Tally understood it to be about.
+               *
+               * Read back from the run row rather than from local state, so a refresh
+               * or a link to `?project=` shows it and it is visibly the same text the
+               * research used. `niche` is null until the worker interprets it — and
+               * says so, rather than guessing (§42).
+               */
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 13.5,
+                    lineHeight: 1.6,
+                    color: color.textBright,
+                  }}
+                >
+                  “{run?.description ?? project.title}”
+                </p>
+                <p style={{ margin: 0, fontSize: 12.5, color: color.textDim }}>
+                  <Label>Subject</Label>
+                  {run?.niche ??
+                    "not read yet — Tally works this out when the run starts"}
+                </p>
+              </div>
+            ) : data?.source ? (
               <SourceCard source={data.source} />
             ) : (
+              /**
+               * No analysis. Which is phrased by whether one is still coming.
+               *
+               * "when the run starts" is a promise, and a run that already failed or
+               * was cancelled is not going to keep it — leaving the screen waiting on
+               * something that will never arrive. The run's own outcome is right below
+               * this in `RunStatus`, so this line says only whether a read is still
+               * expected and does not restate the error.
+               */
               <p style={{ margin: 0, fontSize: 13, color: color.textDim }}>
-                The worker reads the source video when the run starts. Nothing is
-                shown here until it has.
+                {run && SETTLED_WITHOUT_SOURCE.has(run.status)
+                  ? "This run stopped before Tally read the source video, so there is nothing to show. Paste the link again to start a fresh one."
+                  : "The worker reads the source video when the run starts. Nothing is shown here until it has."}
               </p>
             )}
           </Card>
@@ -426,6 +628,7 @@ export function LinkStudio({ data, script, aiConfigured }: LinkStudioProps) {
               error={run.error}
               niche={run.niche}
               stage={stage}
+              seed={seed}
               trendCount={trends.length}
               angleCount={angles.length}
             />
@@ -529,8 +732,11 @@ export function LinkStudio({ data, script, aiConfigured }: LinkStudioProps) {
                   ? "Proposing angles needs the AI provider to be configured. " +
                     "Research signals above will still be collected."
                   : researching
-                    ? "Tally is researching the topic and will propose original " +
-                      "angles here when it finishes."
+                    ? seed === "description"
+                      ? "Tally is researching your idea and will propose original " +
+                        "angles here when it finishes."
+                      : "Tally is researching the topic and will propose original " +
+                        "angles here when it finishes."
                     : "No angles yet. Re-run research to propose some."}
               </p>
             ) : (
@@ -643,7 +849,10 @@ export function LinkStudio({ data, script, aiConfigured }: LinkStudioProps) {
                   }}
                 >
                   Each of these is Tally&apos;s own proposal, written from the
-                  research above. None reuses the source video&apos;s title.
+                  research above.
+                  {seed === "description"
+                    ? " Each one delivers on what you described."
+                    : " None reuses the source video’s title."}
                 </p>
               </div>
             )}
@@ -670,6 +879,7 @@ export function LinkStudio({ data, script, aiConfigured }: LinkStudioProps) {
               mode={project.generationMode}
               model={project.generationModel}
               format={project.videoFormat}
+              quality={project.videoQuality}
               disabled={building || pending}
               onSaved={() => startTransition(() => router.refresh())}
             />
@@ -802,6 +1012,7 @@ function RunStatus({
   error,
   niche,
   stage,
+  seed,
   trendCount,
   angleCount,
 }: {
@@ -810,6 +1021,7 @@ function RunStatus({
   error: string | null;
   niche: string | null;
   stage: string | null;
+  seed: StudioSeed;
   trendCount: number;
   angleCount: number;
 }) {
@@ -867,7 +1079,9 @@ function RunStatus({
                 ? `${trendCount} trending videos measured · ${angleCount} original angles proposed`
                 : niche
                   ? `Topic: ${niche}`
-                  : "Reading the source video"))}
+                  : seed === "description"
+                    ? "Working out what your idea is about"
+                    : "Reading the source video"))}
         </div>
       </div>
     </Card>

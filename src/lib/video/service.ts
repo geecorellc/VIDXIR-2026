@@ -43,6 +43,7 @@ import {
 import {
   AssetMissingError,
   ConflictError,
+  InsufficientCreditsError,
   NotFoundError,
   RenderError,
   ValidationError,
@@ -58,13 +59,28 @@ import {
   persistSceneStates,
   planContinuity,
   recordScenePrompt,
+  referenceImagePlan,
+  referencesForScene,
   regenerationPromptFor,
   scenesToRegenerate,
 } from "@/lib/continuity/service";
 import {
   countRegeneration,
+  getReferenceImages,
   latestContinuityCheck,
+  referenceAssetMeta,
+  type StoredReference,
 } from "@/lib/continuity/store";
+import type { ReferenceKind } from "@/lib/continuity/prompt";
+import {
+  chargeCredits,
+  creditBalanceFor,
+  ensureMonthlyGrant,
+  imageChargeKey,
+  refundCredits,
+  sceneChargeKey,
+} from "@/lib/credits/service";
+import { creditCostFor, type CreditOperation } from "@/lib/credits/pricing";
 import { assertCanStartVideo, queuePriorityFor } from "@/lib/plans/enforce";
 import { acquireMusic, isMusicConfigured } from "@/lib/providers/music";
 import {
@@ -86,10 +102,13 @@ import {
   type AcquiredVisual,
 } from "@/lib/providers/visuals";
 import {
+  assertImageQuality,
   generateClip,
+  generateImage,
   isGenerationMode,
   isVideoGenConfigured,
   type GenerationMode,
+  type ReferenceImageInput,
 } from "@/lib/providers/video-gen";
 import { isVoiceConfigured, synthesize } from "@/lib/providers/voice";
 import {
@@ -115,7 +134,8 @@ import {
 import type { PipelineStage } from "@/lib/stages";
 import type { CompiledEdit } from "@/lib/video/edit-document";
 import { compileProjectEdit, markEditRendered } from "@/lib/video/edit-service";
-import { formatSpec } from "@/lib/video/format";
+import { formatSpec, type VideoFormat } from "@/lib/video/format";
+import type { VideoQuality } from "@/lib/video/quality";
 import {
   generationPlanFor,
   type GenerationPlan,
@@ -153,6 +173,21 @@ export const CONTINUITY_JOB = "video-continuity-check";
  * `hasActiveJob` — there is no second queue and no second worker.
  */
 export const SCENE_REGEN_JOB = "video-scene-regenerate";
+/**
+ * Generating the story bible's reference stills (Phase 12 §5, §6).
+ *
+ * A job rather than part of the scene-plan stage, for two reasons that pull the same
+ * way. It is a paid provider call per entity — up to thirty for a full bible — and
+ * putting that inside the scene plan would make a stage whose job is *thinking* about
+ * the video also the most expensive one, retried in full whenever any part of it
+ * failed. And a reference is worth having on its own: a user who wants to see the cast
+ * before committing to eighty scenes can ask for them without starting a build.
+ *
+ * On the `pipeline` queue with the other visual work, and stamped `SCENE_PLAN` rather
+ * than a new stage — the stills belong to the plan, and `pipeline_stage` is a database
+ * enum that a new member would need a migration to extend for no behaviour change.
+ */
+export const REFERENCE_IMAGES_JOB = "video-reference-images";
 
 /** Stages completed by the time each job finishes, for the progress derivation. */
 const COMPLETED_AFTER: Record<string, PipelineStage[]> = {
@@ -745,6 +780,51 @@ export async function executeVisuals(input: StageInput): Promise<{
       tier: input.tier,
     });
 
+    /**
+     * The project's stored reference stills — read once, and only when they can be used.
+     *
+     * The §6 reuse path. Three conditions have to hold before this costs anything: the
+     * continuity layer is active, this is an AI project, and the **selected model
+     * declares `referenceImages`**. No catalogued model does today, so this is an empty
+     * array on every current build and the loop below behaves exactly as it did.
+     *
+     * Gated on the capability *here* as well as in `generateClip` for a reason that is
+     * about bytes rather than correctness: selecting references means downloading them
+     * from object storage, and doing that for a model that will discard them is real
+     * I/O for no output. `generateClip` still refuses them independently — this is the
+     * cost guard, that is the contract.
+     */
+    const references =
+      continuity.active && plan.mode === "AI_VIDEO" && plan.model?.capabilities.referenceImages
+        ? await loadContinuityReferences(input.userId, input.projectId)
+        : [];
+
+    /**
+     * The whole build's credit cost, checked before scene one is generated (§10).
+     *
+     * AI mode only: stock footage is included in the plan's video allowance, which
+     * `assertCanStartVideo` already enforced at the request that started the build.
+     * Charging credits for it as well would bill twice for one video.
+     *
+     * The durations are the same map the loop reads, with the same 6s fallback, so the
+     * estimate is the sum of the charges rather than an approximation of them.
+     */
+    if (plan.mode === "AI_VIDEO" && plan.model) {
+      const affordability = await assertCanAffordScenes({
+        userId: input.userId,
+        modelId: plan.model.id,
+        quality: plan.quality,
+        durations: sceneRows.map((scene) => narration.get(scene.index) ?? 6_000),
+      });
+      log.info("visuals stage is affordable", {
+        userId: input.userId,
+        projectId: input.projectId,
+        scenes: sceneRows.length,
+        estimate: affordability.estimate,
+        available: affordability.available,
+      });
+    }
+
     const used = new Set<string>();
     let acquired = 0;
 
@@ -786,7 +866,29 @@ export async function executeVisuals(input: StageInput): Promise<{
               scene,
               prompt: sceneContinuity.prompt,
               durationMs,
+              /**
+               * The first generation of this scene, always.
+               *
+               * Not `job.attemptsMade`: a retried visuals stage is the *same*
+               * generation of the scene and must charge once in total, which a
+               * per-attempt key would defeat — three BullMQ attempts would be three
+               * charges for one clip. Continuity regeneration is the only thing that
+               * advances this, and it passes its own count.
+               */
+              attempt: 1,
               usage,
+              /**
+               * The stills for the entities *this* scene commits to.
+               *
+               * Empty unless the model accepts references, because `references` is
+               * empty in that case. The selection is the continuity layer's decision,
+               * as every other continuity decision in this loop is.
+               */
+              references: referencesForScene({
+                context: continuity,
+                sceneIndex: scene.index,
+                stored: references,
+              }),
             })
           : await acquireVisual(
               {
@@ -876,6 +978,159 @@ function basePromptFor(scene: {
 }
 
 /**
+ * Charge for one generation, run it, and refund it if it produced nothing (§10–§13).
+ *
+ * Every provider call that costs credits goes through here, so there is exactly one
+ * definition of the order of operations. It is charge-then-generate, which §10 requires:
+ * generating first and charging after would let an empty balance consume unlimited
+ * provider spend, because the refusal would arrive once the money was already gone.
+ *
+ * ## What a retry costs
+ *
+ * Nothing, and that is the point of `idempotencyKey`. A BullMQ retry of the visuals
+ * stage replays the same key per scene, loses the ledger insert, and charges zero — so a
+ * build that failed at scene 40 and is rebuilt pays for scenes 1–40 exactly once in
+ * total, then full price for 41 onwards. The customer pays once per scene *generated*,
+ * however many attempts the pipeline needed.
+ *
+ * ## The one place a credit is given away
+ *
+ * When the provider call throws, the charge is refunded — we took money and produced no
+ * asset. The ledger row keeps its key, so the *next* attempt at that same generation
+ * finds the key used and charges zero. That single generation is therefore free.
+ *
+ * The alternative is worse in both directions: not refunding bills a customer for a
+ * still that does not exist, and clearing the key to make it re-chargeable would break
+ * `refundCredits`' own `refund:{key}` guard on the second failure. One generation per
+ * failure, in the customer's favour, is the smallest leak available and the safe
+ * direction to leak in.
+ *
+ * A refusal — `InsufficientCreditsError` — propagates untouched and writes nothing, so
+ * an unaffordable scene leaves no charge and no refund to reconcile.
+ */
+async function paidGeneration<T>(args: {
+  userId: string;
+  projectId: string;
+  operation: CreditOperation;
+  modelId: string;
+  quality: VideoQuality;
+  /** Required for `video_scene`; the image rate ignores it. */
+  durationMs?: number;
+  idempotencyKey: string;
+  /** Shown on the history screen. Must never name a vendor (§3). */
+  description: string;
+  meta?: Record<string, unknown>;
+  generate: () => Promise<T>;
+}): Promise<T> {
+  const charge = await chargeCredits({
+    userId: args.userId,
+    projectId: args.projectId,
+    operation: args.operation,
+    modelId: args.modelId,
+    quality: args.quality,
+    ...(args.durationMs === undefined ? {} : { durationMs: args.durationMs }),
+    idempotencyKey: args.idempotencyKey,
+    description: args.description,
+    ...(args.meta ? { meta: args.meta } : {}),
+  });
+
+  try {
+    return await args.generate();
+  } catch (error) {
+    /**
+     * Refunded on the way past, never instead of the error.
+     *
+     * `refundCredits` does not throw for a charge it cannot find, so this cannot
+     * replace a readable provider failure with an accounting one — but it is wrapped
+     * anyway, because a refund that failed for an unrelated reason must not hide what
+     * actually went wrong with the generation.
+     */
+    try {
+      const refund = await refundCredits({
+        userId: args.userId,
+        chargeIdempotencyKey: args.idempotencyKey,
+        reason: `${args.operation === "image" ? "Image" : "Scene"} generation failed`,
+        meta: { projectId: args.projectId, modelId: args.modelId },
+      });
+      if (refund.refunded > 0) {
+        log.info("refunded a generation that failed after being charged", {
+          userId: args.userId,
+          projectId: args.projectId,
+          operation: args.operation,
+          refunded: refund.refunded,
+        });
+      }
+    } catch (refundError) {
+      log.error("could not refund a failed generation", {
+        userId: args.userId,
+        projectId: args.projectId,
+        operation: args.operation,
+        idempotencyKey: args.idempotencyKey,
+        error: refundError,
+      });
+    }
+
+    // Unchanged. What the user needs to see is why the generation failed, and
+    // `charge.charged` credits being back is not that.
+    void charge;
+    throw error;
+  }
+}
+
+/**
+ * Refuse a build the balance cannot finish, before any of it is generated (§10).
+ *
+ * Advisory, and deliberately so: `chargeCredits` is the authority, charges per scene
+ * against a locked row, and refuses on its own. This exists for a different reason —
+ * cost. Without it a user with five credits gets scene one generated at Tally's expense
+ * and then a failed project, and the eighty-scene version of that is eighty provider
+ * calls for a video that could never complete.
+ *
+ * It grants first, because a subscriber whose period has just rolled over has a stale
+ * zero balance until something grants it, and refusing their build for that would be a
+ * bug that reads as a billing failure. Granting from a worker stage is what
+ * `ensureMonthlyGrant` is for; the tier is re-read from `subscriptions` inside it rather
+ * than taken from the job payload, which is data and not authority.
+ *
+ * The estimate can be wrong in one direction only. Between this check and the last
+ * scene's charge a concurrent build can spend the balance down, in which case that scene
+ * is refused by the charge — correctly. It cannot be wrong the other way: the per-scene
+ * prices summed here are the same `creditCostFor` calls the charges will make.
+ */
+async function assertCanAffordScenes(args: {
+  userId: string;
+  modelId: string;
+  quality: VideoQuality;
+  durations: readonly number[];
+}): Promise<{ estimate: number; available: number }> {
+  const estimate = args.durations.reduce(
+    (total, durationMs) =>
+      total +
+      creditCostFor({
+        operation: "video_scene",
+        modelId: args.modelId,
+        quality: args.quality,
+        durationMs,
+      }),
+    0,
+  );
+
+  await ensureMonthlyGrant(args.userId, {});
+  const balance = await creditBalanceFor(args.userId);
+
+  if (balance.available < estimate) {
+    throw new InsufficientCreditsError({
+      required: estimate,
+      available: balance.available,
+      operation: "video_scene",
+      modelId: args.modelId,
+    });
+  }
+
+  return { estimate, available: balance.available };
+}
+
+/**
  * Generate one scene's clip with the selected AI model (§9, §15).
  *
  * An adapter, and only an adapter: it turns a scene row into a prompt and a
@@ -895,6 +1150,13 @@ function basePromptFor(scene: {
  *    is recorded as `generated_image`, so the timeline holds it for its slot rather
  *    than expecting motion. Recording it as `generated_video` because AI mode was
  *    requested is exactly the sort of claim §42 forbids.
+ *
+ * ## The charge lives here, not at the call sites (§12)
+ *
+ * Both callers — the visuals stage and continuity regeneration — pay through
+ * `paidGeneration` inside this function. Charging here rather than in each caller means a
+ * third caller cannot be added that generates for free, which is the failure mode that
+ * matters: an unpaid generation costs real vendor money and looks like nothing at all.
  */
 async function generateSceneClip(args: {
   plan: GenerationPlan;
@@ -903,25 +1165,70 @@ async function generateSceneClip(args: {
   /** The full prompt, continuity constraints included. */
   prompt: string;
   durationMs: number;
+  /**
+   * Which generation of this scene this is, from 1 (§13).
+   *
+   * The charge key's discriminator, and therefore what separates a *deliberate*
+   * regeneration from an *accidental* retry. A BullMQ retry of the visuals stage passes 1
+   * again, loses the ledger insert and charges nothing; a continuity regeneration passes
+   * its own attempt number and is charged, which is correct — it is a second clip.
+   */
+  attempt: number;
   usage: {
     userId: string;
     projectId: string;
     jobId: string;
     traceId: string | null;
   };
+  /**
+   * Stored continuity references for this scene's entities (§6).
+   *
+   * Already filtered by the caller to the entities this scene commits to, and empty
+   * unless the model accepts them. Their bytes are fetched here rather than by the
+   * caller so a scene whose references are unreadable still generates.
+   */
+  references?: readonly StoredReference[];
 }): Promise<AcquiredVisual> {
   const { plan, modelId, scene, prompt, durationMs, usage } = args;
 
-  const clip = await generateClip(
-    {
-      prompt,
-      modelId,
-      format: plan.format,
-      durationMs,
+  const clip = await paidGeneration({
+    userId: usage.userId,
+    projectId: usage.projectId,
+    operation: "video_scene",
+    modelId,
+    quality: plan.quality,
+    durationMs,
+    idempotencyKey: sceneChargeKey({
+      projectId: usage.projectId,
       sceneIndex: scene.index,
+      attempt: args.attempt,
+    }),
+    // Names the scene, never the vendor behind the model (§3).
+    description: `Scene ${scene.index + 1} — ${plan.model?.label ?? "AI video"} (${plan.quality})`,
+    meta: { sceneIndex: scene.index, attempt: args.attempt },
+    generate: async () => {
+      /**
+       * The reference bytes are fetched inside the paid block, after the charge.
+       *
+       * Deliberate: a download that fails is a failure of this generation, and having
+       * it inside means it is refunded like any other. Fetching them before the charge
+       * would spend storage I/O on a scene that is about to be refused for having no
+       * credits.
+       */
+      const referenceImages = await referenceBytes(args.references ?? [], usage);
+      return generateClip(
+        {
+          prompt,
+          modelId,
+          format: plan.format,
+          durationMs,
+          sceneIndex: scene.index,
+          referenceImages,
+        },
+        { usage: { ...usage, operation: "video.scene.generate" } },
+      );
     },
-    { usage: { ...usage, operation: "video.scene.generate" } },
-  );
+  });
 
   return {
     provider: clip.provider,
@@ -943,6 +1250,77 @@ async function generateSceneClip(args: {
     authorName: null,
     matchedOn: clip.matchedOn,
   };
+}
+
+/**
+ * The project's stored continuity references, or none.
+ *
+ * A wrapper whose only job is to never throw. The reuse path is an enhancement over
+ * textual continuity, so a failed read has to degrade to the behaviour that existed
+ * before it — failing eighty scenes because a reference lookup timed out would make
+ * the feature a liability.
+ */
+async function loadContinuityReferences(
+  userId: string,
+  projectId: string,
+): Promise<StoredReference[]> {
+  try {
+    return await getReferenceImages(userId, projectId);
+  } catch (error) {
+    log.warn("could not load continuity references; using textual continuity", {
+      userId,
+      projectId,
+      error,
+    });
+    return [];
+  }
+}
+
+/**
+ * Fetch the bytes for a scene's references, skipping any that cannot be read.
+ *
+ * Concurrent because these are small stills from object storage and a scene may commit
+ * to five entities; sequential would add a round trip per entity to every scene of the
+ * build.
+ *
+ * A reference that fails to download is dropped rather than fatal, for the same reason
+ * the loader above returns an empty array: the fallback is the textual constraint the
+ * prompt already carries. Its absence is logged, because a scene silently generating
+ * without the reference the operator paid for is the failure worth seeing.
+ */
+async function referenceBytes(
+  references: readonly StoredReference[],
+  usage: { userId: string; projectId: string },
+): Promise<ReferenceImageInput[] | undefined> {
+  if (references.length === 0) return undefined;
+
+  const loaded = await Promise.all(
+    references.map(async (reference) => {
+      try {
+        const bytes = await getObjectBuffer(reference.storageKey);
+        return {
+          kind: reference.kind,
+          entityId: reference.entityId,
+          bytes,
+          // Stored references are always images; the fallback is the format every
+          // adapter here already produces stills in.
+          mimeType: reference.mimeType ?? "image/png",
+        } satisfies ReferenceImageInput;
+      } catch (error) {
+        log.warn("could not read a continuity reference; skipping it", {
+          userId: usage.userId,
+          projectId: usage.projectId,
+          entityId: reference.entityId,
+          referenceKind: reference.kind,
+          error,
+        });
+        return null;
+      }
+    }),
+  );
+
+  const usable = loaded.filter((entry): entry is ReferenceImageInput => entry !== null);
+  return usable.length > 0 ? usable : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1738,13 +2116,44 @@ export async function executeSceneRegeneration(
       visualPrompt: basePromptFor(scene),
     });
 
+    /**
+     * The same references the first attempt would have had (§6).
+     *
+     * A regeneration exists because continuity *failed*, so it is the attempt that
+     * most needs whatever constraint is available — omitting the references here would
+     * mean the retry was given less to go on than the attempt that already lost.
+     * Same capability gate, same fallback to textual continuity when there is nothing
+     * stored or the model cannot use it.
+     */
+    const references = plan.model.capabilities.referenceImages
+      ? referencesForScene({
+          context,
+          sceneIndex: scene.index,
+          stored: await loadContinuityReferences(input.userId, input.projectId),
+        })
+      : [];
+
     const visual = await generateSceneClip({
       plan,
       modelId: plan.model.id,
       scene: { index: scene.index },
       prompt,
       durationMs,
+      /**
+       * Offset by one, because the visuals stage already used 1.
+       *
+       * `countRegeneration` returns 1 for the *first* regeneration, and the original
+       * generation of this scene charged under `attempt: 1`. Passing the raw count would
+       * collide with that key, lose the ledger insert, and give away every first
+       * regeneration for free — the one case that costs most, since a project that
+       * fails continuity usually fails it on several scenes.
+       *
+       * Charging for a regeneration is intended: §12 makes it a second generation, and
+       * the ceiling in `context.thresholds.maxRegenerations` is what bounds the spend.
+       */
+      attempt: attempt + 1,
       usage,
+      references,
     });
 
     const asset = await storeAsset({
@@ -1793,6 +2202,411 @@ export async function executeSceneRegeneration(
 
     return { regenerated: true, attempt };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Reference stills for the story bible (§5, §6)
+// ---------------------------------------------------------------------------
+
+export interface ReferenceImagesResult {
+  /** Stills actually stored by this run. */
+  generated: number;
+  /** Entities that were wanted but could not be produced. */
+  failed: number;
+  /** Entities that already had a reference and were left alone. */
+  skipped: number;
+  /** Why nothing was generated, when nothing was. Shown verbatim. */
+  reason: string;
+}
+
+/**
+ * Generate the story bible's character, environment and prop reference stills.
+ *
+ * This is where §5's image capability meets §6's continuity layer, and the division of
+ * labour is the point:
+ *
+ *  - `lib/continuity` decides *what* to draw and writes the prompt. It reads the same
+ *    bible fields, in the same order, that the scene prompts render, so a reference is
+ *    a reference rather than a second opinion.
+ *  - This stage spends the money, using the project's **own selected model**. A
+ *    reference drawn by a different model than the scenes would be a picture of what
+ *    some other generator thinks the character looks like — worse than having none,
+ *    because it reads as approved.
+ *  - `storeAsset` persists it, on the existing `assets` table, flagged in `meta` so
+ *    `getReferenceImages` can find it again.
+ *
+ * One entity failing costs that entity its still, not the run: eight characters and one
+ * refused prompt should leave seven references, not zero. Nothing here fails the
+ * project — by the time this runs the scene plan is stored, and a missing reference
+ * degrades to the textual continuity every model already relies on (§8).
+ */
+export async function executeReferenceImages(
+  input: StageInput,
+): Promise<ReferenceImagesResult> {
+  return runStage(input, "SCENE_PLAN", async () => {
+    const project = await getProject(input.userId, input.projectId);
+    const plan = generationPlanFor(project);
+
+    if (plan.mode !== "AI_VIDEO" || !plan.model) {
+      // Stock projects have no bible to illustrate, and `resolveFor` would return an
+      // inert context anyway. Returned as a reason rather than an error: this is the
+      // ordinary state of most projects.
+      return {
+        generated: 0,
+        failed: 0,
+        skipped: 0,
+        reason: "Stock footage: there is no story bible to illustrate.",
+      };
+    }
+
+    /**
+     * Refused before anything is spent, not per entity.
+     *
+     * Every branded model generates stills, so this is reachable only for a legacy
+     * model a project stored before it was retired (§17). Failing here with the
+     * model's own name is more useful than eight identical per-entity failures.
+     */
+    if (!plan.model.capabilities.imageGeneration) {
+      return {
+        generated: 0,
+        failed: 0,
+        skipped: 0,
+        reason:
+          `${plan.model.label} does not generate still images, so this video's ` +
+          `continuity relies on textual constraints alone.`,
+      };
+    }
+
+    const wanted = await referenceImagePlan({
+      userId: input.userId,
+      project: {
+        projectId: input.projectId,
+        channelId: project.channelId,
+        generationMode: isGenerationMode(project.generationMode)
+          ? project.generationMode
+          : null,
+        tier: input.tier,
+      },
+    });
+
+    if (wanted.wanted.length === 0) {
+      return {
+        generated: 0,
+        failed: 0,
+        skipped: wanted.existing.length,
+        reason: wanted.reason,
+      };
+    }
+
+    /**
+     * The still's resolution, resolved once against what the model offers for images.
+     *
+     * `assertImageQuality` with the project's *video* quality, not a fixed tier: a
+     * project rendering at 720p does not need 2K character sheets, and one on 2K
+     * should not have its references drawn at draft. When the model's image tiers do
+     * not include the video one, `assertImageQuality` picks its nearest — which is
+     * why the video quality is passed as a preference rather than asserted.
+     */
+    const quality = assertImageQuality(
+      plan.model,
+      plan.model.capabilities.imageQualities.includes(plan.quality)
+        ? plan.quality
+        : null,
+    );
+
+    /**
+     * Landscape for every reference, whatever the video's frame is.
+     *
+     * A reference is a chart, not a shot: a full-body character sheet and an
+     * establishing view of a location both want width, and cropping either into a
+     * 9:16 frame is how the coat gets cut off in the picture the whole video is
+     * supposed to match. Falls back to the model's first supported frame for a model
+     * that somehow does not offer landscape.
+     */
+    const format = plan.model.formats.includes("landscape")
+      ? "landscape"
+      : (plan.model.formats[0] ?? plan.format);
+
+    /**
+     * Granted before the first still, for the reason the visuals stage grants: a
+     * subscriber whose period has just rolled over has a stale zero balance, and
+     * skipping their references for that would look like the feature was broken.
+     *
+     * No affordability *estimate* here, unlike the visuals stage. References are
+     * optional by design — the video renders without them — so the honest behaviour
+     * when the balance runs out mid-run is to keep the stills already paid for and stop,
+     * which is what the loop below does. An up-front refusal would throw away
+     * affordable references to avoid the unaffordable ones.
+     */
+    await ensureMonthlyGrant(input.userId, {});
+
+    let generated = 0;
+    let failed = 0;
+    let unaffordable = 0;
+
+    for (const [position, entry] of wanted.wanted.entries()) {
+      await reportProgress(
+        input.jobId,
+        Math.round((position / wanted.wanted.length) * 95),
+        `Drawing reference ${position + 1} of ${wanted.wanted.length}: ${entry.name}`,
+      );
+
+      const outcome = await generateReference({
+        input,
+        modelId: plan.model.id,
+        format,
+        quality,
+        entry,
+        index: position,
+      });
+
+      if (outcome === "stored") {
+        generated += 1;
+        continue;
+      }
+
+      if (outcome === "failed") {
+        failed += 1;
+        continue;
+      }
+
+      /**
+       * Out of credits. Stop rather than ask seven more times.
+       *
+       * Every remaining entity costs the same and the balance only goes down, so the
+       * refusals would be identical — and each one is a transaction and a log line for
+       * an answer already known. The entities not attempted are reported as skipped,
+       * because that is what happened to them.
+       */
+      unaffordable = wanted.wanted.length - position;
+      break;
+    }
+
+    log.info("reference stills generated", {
+      userId: input.userId,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      stage: "SCENE_PLAN",
+      model: plan.model.id,
+      generated,
+      failed,
+      unaffordable,
+      skipped: wanted.existing.length,
+    });
+
+    return {
+      generated,
+      failed,
+      skipped: wanted.existing.length + unaffordable,
+      /**
+       * Named plainly when credits ran out, and empty otherwise.
+       *
+       * `reason` is shown verbatim, and "there were not enough credits for the
+       * remaining N" is something the user can act on — top up, or accept textual
+       * continuity. Reporting the stills as merely "skipped" would be true and useless.
+       */
+      reason:
+        unaffordable > 0
+          ? `Generated ${generated} reference ${generated === 1 ? "image" : "images"}, ` +
+            `then ran out of credits with ${unaffordable} still to draw. This video's ` +
+            `remaining continuity relies on textual constraints. Top up to draw the rest.`
+          : "",
+    };
+  });
+}
+
+/**
+ * What happened to one entity's still.
+ *
+ * `unaffordable` is separated from `failed` because the caller does different things
+ * with them: a failure is per entity and the run continues, while an empty balance is
+ * true of every remaining entity and the run stops. Collapsing them into a boolean is
+ * what would produce eight identical credit refusals.
+ */
+type ReferenceOutcome = "stored" | "failed" | "unaffordable";
+
+/**
+ * Generate and store one reference still. Reports the outcome instead of throwing.
+ *
+ * The boundary that makes "one entity failing costs that entity" true. It is the same
+ * trade `compositeVariant` makes for thumbnails: failing the whole run to punish one
+ * refused prompt throws away the references that did work.
+ *
+ * The purpose passed to the provider is the entity kind — `character`, `environment`
+ * or `prop` — which is also what lands on `assets.meta.referenceKind`. `ImagePurpose`
+ * and `ReferenceKind` share those three words deliberately, so there is no mapping
+ * table between the prompt builder, the provider and the stored asset.
+ */
+async function generateReference(args: {
+  input: StageInput;
+  modelId: string;
+  format: VideoFormat;
+  quality: VideoQuality;
+  entry: { kind: ReferenceKind; entityId: string; name: string; prompt: string };
+  index: number;
+}): Promise<ReferenceOutcome> {
+  const { input, entry } = args;
+
+  try {
+    /**
+     * Charged at the image rate, keyed by entity (§5, §12).
+     *
+     * `imageChargeKey` is keyed on the entity rather than on an ordinal because this
+     * stage is explicitly re-runnable: `referenceImagePlan` already excludes entities
+     * that have a stored still, and the key means a re-run that races that check still
+     * cannot charge twice for the same character.
+     *
+     * A refusal for want of credits is caught by this function's own `catch` and costs
+     * that entity its still rather than the run — the same treatment a refused prompt
+     * gets, and correct for the same reason: seven references are better than none, and
+     * a missing one degrades to the textual constraint the prompt already carries.
+     */
+    const image = await paidGeneration({
+      userId: input.userId,
+      projectId: input.projectId,
+      operation: "image",
+      modelId: args.modelId,
+      quality: args.quality,
+      idempotencyKey: imageChargeKey({
+        projectId: input.projectId,
+        purpose: entry.kind,
+        entityId: entry.entityId,
+      }),
+      description: `Reference image — ${entry.name} (${args.quality})`,
+      meta: { referenceKind: entry.kind, entityId: entry.entityId },
+      generate: () =>
+        generateImage(
+          {
+            prompt: entry.prompt,
+            modelId: args.modelId,
+            format: args.format,
+            quality: args.quality,
+            purpose: entry.kind,
+            index: args.index,
+          },
+          {
+            usage: {
+              userId: input.userId,
+              projectId: input.projectId,
+              jobId: input.jobId,
+              traceId: input.traceId ?? null,
+              operation: "continuity.reference.image",
+            },
+          },
+        ),
+    });
+
+    await storeAsset({
+      userId: input.userId,
+      projectId: input.projectId,
+      folder: "reference",
+      // The bytes are a still, so the kind says so. Recording a reference as
+      // anything else would put it in the editor's clip picker.
+      kind: "generated_image",
+      bytes: image.bytes,
+      mimeType: image.mimeType,
+      extension: image.extension,
+      width: image.width,
+      height: image.height,
+      // No duration: it is a picture. Null rather than 0, which would read as a
+      // zero-length clip to the timeline.
+      durationMs: null,
+      provider: image.provider,
+      providerAssetId: image.providerAssetId,
+      sourceUrl: null,
+      license: image.license,
+      attribution: image.attribution,
+      meta: referenceAssetMeta({
+        kind: entry.kind,
+        entityId: entry.entityId,
+        entityName: entry.name,
+        prompt: entry.prompt,
+        modelId: image.modelId,
+      }),
+    });
+
+    return "stored";
+  } catch (error) {
+    /**
+     * An empty balance is reported, not logged as a failure.
+     *
+     * It is the one error here that says something about every *other* entity too, and
+     * the caller stops on it. Logged at info because it is a customer's spending
+     * decision rather than a defect — a warning per entity would make an ordinary state
+     * look like eight broken generations.
+     */
+    if (error instanceof InsufficientCreditsError) {
+      log.info("not enough credits for a continuity reference still", {
+        userId: input.userId,
+        projectId: input.projectId,
+        jobId: input.jobId,
+        stage: "SCENE_PLAN",
+        referenceKind: entry.kind,
+        entityId: entry.entityId,
+      });
+      return "unaffordable";
+    }
+
+    log.warn("could not generate a continuity reference still", {
+      userId: input.userId,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      stage: "SCENE_PLAN",
+      referenceKind: entry.kind,
+      entityId: entry.entityId,
+      error,
+    });
+    return "failed";
+  }
+}
+
+/**
+ * Queue the reference-still stage for a project.
+ *
+ * Guarded by `hasActiveJob` for the reason the guard exists everywhere else here, and
+ * with more at stake than most: two concurrent runs would both read the same "nothing
+ * stored yet" answer from `referenceImagePlan` and both pay for the whole cast.
+ *
+ * Takes its own input shape rather than `StageInput`, because the callers are a request
+ * handler and (eventually) another stage, and only one of those has a `jobId`. The one
+ * that matters — the id of the job being created — comes back from `enqueue`.
+ *
+ * Returns false when a run is already in flight, so the caller can say so.
+ */
+export async function enqueueReferenceImages(input: {
+  userId: string;
+  projectId: string;
+  tier: PlanTier;
+  traceId?: string | null;
+}): Promise<boolean> {
+  const project = await getProject(input.userId, input.projectId);
+  const scope = project.channelId ? undefined : project.id;
+
+  if (
+    await hasActiveJob(
+      input.userId,
+      project.channelId ?? null,
+      REFERENCE_IMAGES_JOB,
+      scope,
+    )
+  ) {
+    return false;
+  }
+
+  await enqueue({
+    queue: "pipeline",
+    name: REFERENCE_IMAGES_JOB,
+    userId: input.userId,
+    channelId: project.channelId,
+    projectId: input.projectId,
+    stage: "SCENE_PLAN",
+    payload: { projectId: input.projectId, tier: input.tier },
+    priority: queuePriorityFor(input.tier),
+    traceId: input.traceId ?? project.traceId,
+    statusMessage: "Queued",
+  });
+
+  return true;
 }
 
 /**
@@ -2584,7 +3398,7 @@ async function upsertMusicMood(input: StageInput, mood: string): Promise<void> {
 interface StoreAssetInput {
   userId: string;
   projectId: string;
-  folder: "voiceover" | "visual" | "music" | "caption" | "video";
+  folder: "voiceover" | "visual" | "music" | "caption" | "video" | "reference";
   kind:
     | "stock_video"
     | "stock_image"

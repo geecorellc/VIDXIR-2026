@@ -38,6 +38,7 @@ async function main() {
           priceCents: plan.priceCents,
           maxChannels: plan.maxChannels,
           maxVideosPerMonth: plan.maxVideosPerMonth,
+          monthlyCredits: plan.monthlyCredits,
           features: plan.features,
           queuePriority: plan.queuePriority,
           stripePriceId: plan.stripePriceEnvVar
@@ -51,6 +52,7 @@ async function main() {
             priceCents: plan.priceCents,
             maxChannels: plan.maxChannels,
             maxVideosPerMonth: plan.maxVideosPerMonth,
+            monthlyCredits: plan.monthlyCredits,
             features: plan.features,
             queuePriority: plan.queuePriority,
             stripePriceId: plan.stripePriceEnvVar

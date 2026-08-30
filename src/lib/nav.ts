@@ -19,13 +19,13 @@ export interface NavItem {
    */
   requires?: "idea" | "script" | "video";
   /**
-   * This stage works without a connected YouTube channel (Phase 11 §2, §4).
+   * This stage works without a connected YouTube channel (Phase 11 §2, §4; §1C).
    *
    * Every other content stage is gated on a channel, because it is the channel
-   * that gives research its niche and publishing its destination. Link mode is
-   * the exception the phase exists to add: paste a URL and research it with no
-   * channel at all. Declared here rather than as a segment check in the sidebar
-   * so the fact lives with the route it describes.
+   * that gives research its niche and publishing its destination. The two seeded
+   * entries are the exceptions: paste a URL, or describe an idea, and research it
+   * with no channel at all. Declared here rather than as a segment check in the
+   * sidebar so the fact lives with the route it describes.
    */
   channelless?: boolean;
 }
@@ -41,6 +41,20 @@ export const NAV_ITEMS: readonly NavItem[] = [
     href: "/dashboard/youtube",
     label: "Create from YouTube",
     icon: "Youtube",
+    channelless: true,
+  },
+  {
+    /**
+     * The third door (§1C): research seeded by the user's own written idea.
+     *
+     * Beside the link entry rather than under Research, because the three are
+     * alternatives at the same point in the workflow — pick your seed, then the rest
+     * of the sequence is identical.
+     */
+    segment: "describe",
+    href: "/dashboard/describe",
+    label: "Describe an idea",
+    icon: "PenLine",
     channelless: true,
   },
   { segment: "research", href: "/dashboard/research", label: "Research", icon: "Search" },

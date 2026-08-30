@@ -36,9 +36,13 @@
  *  12. the regeneration ceiling refuses a further attempt and spends nothing
  *  13. another tenant can neither read the bible, the states and the check, nor
  *      overwrite them through the upsert
- *  14. with `TALLY_CONTINUITY_ENGINE_ENABLED=false` the stage is a no-op that records
+ *  14. the reference-still stage draws one image per bible entity with visual facts
+ *  15. those stills are real landscape PNGs under the `reference/` prefix, found again
+ *      by the reader, not re-drawn by a second run, and selected per scene by the
+ *      entities that scene commits to
+ *  16. with `TALLY_CONTINUITY_ENGINE_ENABLED=false` the stage is a no-op that records
  *      nothing
- *  15. every provider call this run made was the mock — asserted from `api_usage`
+ *  17. every provider call this run made was the mock — asserted from `api_usage`
  *
  * ## Cost and safety
  *
@@ -46,7 +50,8 @@
  * environment, so `videoGenProviderIds()` resolves to `["mock"]` and every
  * regeneration is a solid PNG synthesised in-process. Step 1 asserts that rather
  * than assuming it, and step 15 audits `api_usage` afterwards to prove no other
- * provider was reached. No fal.ai, Veo, Runway, Gemini or Bedrock request is made;
+ * provider was reached. No request is made to any of the four AI video backends, to
+ * Runway or to Bedrock;
  * nothing is published; no Stripe call happens; there is no encode, because the
  * RENDER stage is never enqueued.
  *
@@ -501,7 +506,9 @@ async function main(): Promise<void> {
 
   // ---- 5. both stages registered, and the check enqueued ------------------
 
-  const { CONTINUITY_JOB, SCENE_REGEN_JOB } = await import("@/lib/video/service");
+  const { CONTINUITY_JOB, REFERENCE_IMAGES_JOB, SCENE_REGEN_JOB } = await import(
+    "@/lib/video/service"
+  );
   const { Worker } = await import("bullmq");
   const { workerConnection, closeRedis } = await import("@/lib/queue/redis");
   const { workerQueueOptions, getQueue, closeQueues } = await import(
@@ -514,7 +521,7 @@ async function main(): Promise<void> {
   // The shipped registry, not a stub: a name that never reached `videoHandlers`
   // would be registered under the key `undefined` and vanish silently.
   const pipelineHandlers = HANDLERS["pipeline"] ?? {};
-  for (const name of [CONTINUITY_JOB, SCENE_REGEN_JOB]) {
+  for (const name of [CONTINUITY_JOB, REFERENCE_IMAGES_JOB, SCENE_REGEN_JOB]) {
     assert(
       name in pipelineHandlers,
       `${name} has no handler registered on the pipeline queue`,
@@ -1046,7 +1053,210 @@ async function main(): Promise<void> {
       "from the view, and its writes through both upserts changed nothing",
   );
 
-  // ---- 14. the flag off makes the stage a no-op ---------------------------
+  // ---- 14. the reference-still stage draws the cast, once -----------------
+
+  /**
+   * §5 and §6's intersection, on real infrastructure.
+   *
+   * The integration suite proves the SQL — the `meta` flag, the tenant predicate, the
+   * newest-per-entity collapse — and the unit tests prove the prompts. What neither
+   * can prove is that the stage is reachable through the shipped registry and that its
+   * generations land in object storage as assets the reader finds again, which is the
+   * same class of gap this whole script exists for.
+   *
+   * Every generation below is the mock: a solid PNG synthesised in-process. Step 16
+   * audits `api_usage` to prove that rather than asserting it in prose.
+   */
+  const planBefore = await continuity.referenceImagePlan({
+    userId,
+    project: continuityProject,
+  });
+  assert(
+    planBefore.existing.length === 0,
+    `the fixture already has ${planBefore.existing.length} reference still(s)`,
+  );
+  // Three entities with visual facts, which is what BIBLE_DOCUMENT carries: one
+  // character, one location, one prop.
+  assert(
+    planBefore.wanted.length === 3,
+    `expected 3 entities wanting a reference, got ${planBefore.wanted.length}: ` +
+      planBefore.wanted.map((entry) => entry.entityId).join(", "),
+  );
+
+  const referenceJob = await enqueue({
+    queue: "pipeline",
+    name: REFERENCE_IMAGES_JOB,
+    userId,
+    channelId: channelId!,
+    projectId,
+    stage: "SCENE_PLAN",
+    payload: { projectId, tier: "studio" },
+    traceId: "verify-continuity",
+    statusMessage: "Queued — references",
+  });
+  await drain();
+  await requireSucceeded(referenceJob.id, "reference stills");
+
+  const referenceResult = await jobResult(referenceJob.id);
+  assert(
+    referenceResult["generated"] === 3,
+    `the stage generated ${String(referenceResult["generated"])} stills, expected 3`,
+  );
+  assert(
+    referenceResult["failed"] === 0,
+    `${String(referenceResult["failed"])} reference generation(s) failed`,
+  );
+  generations += 3;
+  ok(
+    `${REFERENCE_IMAGES_JOB} ran to succeeded — 3 stills for ` +
+      planBefore.wanted.map((entry) => entry.entityId).join(", "),
+  );
+
+  // ---- 15. the stills are real objects, found again, and not re-drawn -----
+
+  const referenceRows = await store.getReferenceImages(userId, projectId);
+  assert(
+    referenceRows.length === 3,
+    `the reader found ${referenceRows.length} stills, expected 3`,
+  );
+  assert(
+    referenceRows.every((row) => row.modelId === MOCK_MODEL),
+    `a still records a model other than ${MOCK_MODEL}: ` +
+      referenceRows.map((row) => row.modelId).join(", "),
+  );
+
+  /**
+   * The bytes exist in object storage, at the key the row records.
+   *
+   * `storeAsset` writes to MinIO and inserts the row, and a row pointing at a key
+   * that was never written is the failure mode that only a real fetch catches. Read
+   * back rather than `objectExists`, because a zero-byte object exists.
+   */
+  const { getObjectBuffer } = await import("@/lib/storage");
+  for (const row of referenceRows) {
+    /**
+     * Under the tenant's own `reference/` folder, not `visual/`.
+     *
+     * Keys are `u/{userId}/{folder}/{projectId}/{id}.{ext}`, so the folder sits mid-key
+     * and the tenant prefix is asserted alongside it. The folder matters beyond
+     * tidiness: a reference still outlives the visuals made from it, so a retention
+     * rule written for one prefix must not silently apply to the other.
+     */
+    assert(
+      row.storageKey.startsWith(`u/${userId}/reference/`),
+      `a still is stored at ${row.storageKey}, not under u/${userId}/reference/ — a ` +
+        "retention rule written for scene visuals would then apply to the cast",
+    );
+    const bytes = await getObjectBuffer(row.storageKey);
+    assert(
+      bytes.byteLength > 0,
+      `the object at ${row.storageKey} is empty`,
+    );
+    // A real PNG, not a placeholder string: the first eight bytes are the signature.
+    assert(
+      bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])),
+      `the object at ${row.storageKey} is not a PNG`,
+    );
+  }
+
+  // Landscape whatever the video's frame is: a reference is a chart, not a shot, and
+  // cropping a character sheet to 9:16 cuts off the coat the video must match.
+  assert(
+    referenceRows.every(
+      (row) => row.width !== null && row.height !== null && row.width > row.height,
+    ),
+    "a reference still is not landscape: " +
+      referenceRows.map((row) => `${row.width}x${row.height}`).join(", "),
+  );
+
+  const planAfter = await continuity.referenceImagePlan({
+    userId,
+    project: continuityProject,
+  });
+  assert(
+    planAfter.wanted.length === 0,
+    `${planAfter.wanted.length} entity/entities still want a reference after the run`,
+  );
+  assert(
+    planAfter.reason.includes("already has a reference"),
+    `the plan's reason after a complete run reads "${planAfter.reason}"`,
+  );
+
+  /**
+   * The cost control, verified by running the stage again.
+   *
+   * A second run that redrew the cast would be three paid generations to arrive back
+   * where the project already was — and on a full bible, thirty.
+   */
+  const assetsBeforeRerun = await db
+    .select({ id: schema.assets.id })
+    .from(schema.assets)
+    .where(eq(schema.assets.projectId, projectId));
+
+  const rerunJob = await enqueue({
+    queue: "pipeline",
+    name: REFERENCE_IMAGES_JOB,
+    userId,
+    channelId: channelId!,
+    projectId,
+    stage: "SCENE_PLAN",
+    payload: { projectId, tier: "studio" },
+    traceId: "verify-continuity",
+    statusMessage: "Queued — references again",
+  });
+  await drain();
+  await requireSucceeded(rerunJob.id, "reference stills, second run");
+
+  const rerunResult = await jobResult(rerunJob.id);
+  assert(
+    rerunResult["generated"] === 0,
+    `the second run generated ${String(rerunResult["generated"])} still(s) — an ` +
+      "already-drawn cast must cost nothing",
+  );
+  assert(
+    rerunResult["skipped"] === 3,
+    `the second run skipped ${String(rerunResult["skipped"])}, expected 3`,
+  );
+
+  const assetsAfterRerun = await db
+    .select({ id: schema.assets.id })
+    .from(schema.assets)
+    .where(eq(schema.assets.projectId, projectId));
+  assert(
+    assetsAfterRerun.length === assetsBeforeRerun.length,
+    `the second run created ${
+      assetsAfterRerun.length - assetsBeforeRerun.length
+    } asset(s)`,
+  );
+
+  /**
+   * The reuse decision, on the real stored set.
+   *
+   * `referencesForScene` is what the visuals stage calls per scene. The provider layer
+   * refuses references for a model that declares none — `mock/placeholder` does — so
+   * this asserts the *selection*, which is the part the continuity layer owns. Scene 1
+   * commits to the character, the location and the lamp; a stage that sent all three
+   * to a scene committed to one would put a crowd in a two-hander.
+   */
+  const liveContext = await continuity.loadContext(userId, continuityProject);
+  const forScene1 = continuity.referencesForScene({
+    context: liveContext,
+    sceneIndex: 1,
+    stored: referenceRows,
+  });
+  assert(
+    forScene1.map((entry) => `${entry.kind}:${entry.entityId}`).join(",") ===
+      "character:mara,environment:workshop,prop:lamp",
+    `scene 1 selected [${forScene1
+      .map((entry) => `${entry.kind}:${entry.entityId}`)
+      .join(", ")}], expected the cast first, then the location, then the prop`,
+  );
+  ok(
+    `3 stills are real landscape PNGs under reference/, found again by the reader, ` +
+      "not re-drawn on a second run, and selected per scene by committed entity",
+  );
+
+  // ---- 16. the flag off makes the stage a no-op ---------------------------
 
   const checksBefore = await db
     .select({ id: schema.qualityChecks.id })
@@ -1105,7 +1315,7 @@ async function main(): Promise<void> {
       "nothing and queues nothing — the pre-continuity behaviour exactly",
   );
 
-  // ---- 15. every provider call was the mock ------------------------------
+  // ---- 17. every provider call was the mock ------------------------------
 
   /**
    * The cost claim in the header, audited rather than asserted in prose.
@@ -1133,12 +1343,38 @@ async function main(): Promise<void> {
     usage.length === generations,
     `${usage.length} provider calls recorded for ${generations} regenerations`,
   );
+  /**
+   * Two operations, and only two.
+   *
+   * A scene generation per regeneration, and one still per reference. Named
+   * explicitly rather than checked loosely: an unexpected third operation is how a
+   * stage that quietly calls a provider it should not would show up here.
+   */
+  const expectedOperations = new Set([
+    "video.scene.generate",
+    "continuity.reference.image",
+  ]);
+  const unexpected = usage.filter(
+    (row) => !expectedOperations.has(row.operation) || !row.ok,
+  );
   assert(
-    usage.every((row) => row.operation === "video.scene.generate" && row.ok),
-    "a recorded provider call was not a successful scene generation",
+    unexpected.length === 0,
+    `${unexpected.length} recorded provider call(s) were not a successful scene ` +
+      `generation or reference still: ` +
+      unexpected.map((row) => `${row.operation}(ok=${String(row.ok)})`).join(", "),
+  );
+
+  const referenceCalls = usage.filter(
+    (row) => row.operation === "continuity.reference.image",
+  );
+  assert(
+    referenceCalls.length === 3,
+    `${referenceCalls.length} reference generations recorded, expected 3`,
   );
   ok(
-    `api_usage audit: ${usage.length} calls, all provider mock, model ` +
+    `api_usage audit: ${usage.length} calls (${
+      usage.length - referenceCalls.length
+    } scene, ${referenceCalls.length} reference), all provider mock, model ` +
       `${String(usage[0]?.model)} — no billable request, no publish, no encode`,
   );
 

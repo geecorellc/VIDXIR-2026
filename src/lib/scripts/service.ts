@@ -40,6 +40,7 @@ import { logger } from "@/lib/logger";
 import { queuePriorityFor } from "@/lib/plans/enforce";
 import { aiModelName, aiProviderName, generateJson } from "@/lib/providers/ai";
 import { enqueue, hasActiveJob, reportProgress } from "@/lib/queue/jobs";
+import { displayTitle } from "@/lib/projects/display-title";
 import { getProject, transition } from "@/lib/projects/service";
 import { loadOwnPerformance } from "@/lib/research/signals";
 import {
@@ -391,7 +392,16 @@ export async function buildBrief(
   const own = channelId ? await loadOwnPerformance(userId, channelId) : [];
 
   return {
-    projectTitle: project.title,
+    /**
+     * The placeholder never reaches the model.
+     *
+     * `New video from a YouTube link (<id>)` is an internal string, and passing it as
+     * `Working title` told the writer that the video is about an eleven-character video
+     * id — the one place in the product where this bug corrupted generated output rather
+     * than just the screen. `buildScriptPrompt` omits the line entirely for an empty
+     * string, which is the honest brief: there is no working title yet.
+     */
+    projectTitle: displayTitle(project.title) ?? "",
     channelTitle: channelRows[0]?.title ?? null,
     niche: settings?.niche ?? null,
     targetAudience: settings?.targetAudience ?? null,

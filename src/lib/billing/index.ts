@@ -16,6 +16,7 @@ import { NotConfiguredError } from "@/lib/errors";
 import { env } from "@/lib/env";
 import { capabilityStatus } from "@/lib/providers/config";
 import type { PlanTier } from "@/lib/plans";
+import type { CreditPackId } from "@/lib/credits/packs";
 /**
  * A static import, not a dynamic one. `stripe.ts` imports only *types* from this
  * module, so the cycle is erased at compile time and there is no runtime
@@ -38,6 +39,35 @@ export interface CheckoutSession {
   providerSessionId: string;
 }
 
+/**
+ * A one-off credit top-up (§11).
+ *
+ * Names a *pack*, exactly as `CheckoutRequest` names a tier: the price id and the
+ * credit count are resolved server-side from `credits/packs`. A client that could
+ * name either could buy 10,000 credits for a cent.
+ */
+export interface CreditCheckoutRequest {
+  userId: string;
+  email: string;
+  pack: CreditPackId;
+  successUrl: string;
+  cancelUrl: string;
+}
+
+export interface CreditCheckoutSession extends CheckoutSession {
+  /**
+   * What the provider will actually charge, as the provider itself reports it.
+   *
+   * Read back from the created session rather than copied from the pack catalogue,
+   * so the `credit_purchases` receipt line records the real figure even if
+   * `packs.ts`' display amount has drifted from the Stripe price object. The credit
+   * count is *not* treated this way — that comes from the catalogue, because it is
+   * the thing being bought rather than the thing being paid.
+   */
+  amountCents: number | null;
+  currency: string | null;
+}
+
 export interface PortalRequest {
   userId: string;
   providerCustomerId: string;
@@ -47,6 +77,19 @@ export interface PortalRequest {
 export interface BillingProvider {
   readonly name: string;
   startCheckout(request: CheckoutRequest): Promise<CheckoutSession>;
+  /**
+   * Open a one-off payment session for a credit pack (§11).
+   *
+   * Separate from `startCheckout` rather than a `mode` flag on it, because the two
+   * differ in the way that matters: a subscription checkout grants a *tier* and its
+   * event stream carries a subscription object forever after, whereas this grants
+   * *credits* once and its only event is the completed session. Conflating them
+   * would mean one webhook branch deciding which of two unrelated things a payment
+   * bought, which is how a top-up ends up granting Scale.
+   */
+  startCreditCheckout(
+    request: CreditCheckoutRequest,
+  ): Promise<CreditCheckoutSession>;
   /** Provider-hosted page for changing card, invoices and cancellation. */
   createPortalSession(request: PortalRequest): Promise<{ url: string }>;
 }

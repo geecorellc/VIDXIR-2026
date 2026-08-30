@@ -24,6 +24,8 @@
     "verify:video-providers": "tsx scripts/verify-video-providers.ts",
     "verify:editor": "tsx scripts/verify-editor.ts",
     "verify:continuity": "tsx scripts/verify-continuity.ts",
+    "verify:credits": "tsx scripts/verify-credits.ts",
+    "verify:abandoned-source": "tsx scripts/verify-abandoned-source.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "db:studio": "drizzle-kit studio",

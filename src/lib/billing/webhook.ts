@@ -44,6 +44,8 @@ import { ForbiddenError, NotConfiguredError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { isPlanTier, type PlanTier } from "@/lib/plans";
 import { stripeClient, tierForPriceId } from "@/lib/billing/stripe";
+import { ensureMonthlyGrant } from "@/lib/credits/service";
+import { completeCreditPurchase } from "@/lib/credits/purchase";
 
 const log = logger.child({ component: "billing-webhook", provider: "stripe" });
 
@@ -54,6 +56,14 @@ const log = logger.child({ component: "billing-webhook", provider: "stripe" });
  */
 const HANDLED = new Set([
   "checkout.session.completed",
+  /**
+   * Delayed payment methods (§11). A `mode: "payment"` session for a credit pack
+   * completes *before* such a payment clears, so the session arrives `unpaid` and is
+   * refused; these are the events that report the eventual outcome. Without them a
+   * customer using one of those methods would be charged and never credited.
+   */
+  "checkout.session.async_payment_succeeded",
+  "checkout.session.async_payment_failed",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
@@ -65,7 +75,15 @@ export interface WebhookOutcome {
   eventId: string;
   eventType: string;
   applied: boolean;
-  /** `duplicate`, `stale`, `unhandled`, `unknown_customer`, or null when applied. */
+  /**
+   * Why nothing was applied, or null when something was.
+   *
+   * `duplicate`, `stale`, `unhandled`, `unknown_customer`, or — for a credit top-up —
+   * `credit_not_paid`, `credit_already_credited`, `credit_unknown_pack`,
+   * `credit_wrong_owner`. The `credit_` prefix exists so an operator reading
+   * `billing_events` can tell a top-up that granted nothing from a subscription event
+   * that did, without joining anything.
+   */
   skipReason: string | null;
   userId: string | null;
   /** The tier after processing, when this event resolved one. */
@@ -213,10 +231,55 @@ export async function processEvent(event: Stripe.Event): Promise<WebhookOutcome>
     return finish("unknown_customer");
   }
 
+  /**
+   * Credit top-ups, before any subscription handling (§11).
+   *
+   * Ordering matters: a `mode: "payment"` session has no subscription, so
+   * `subscriptionObjectFor` returns null for it and the delivery would fall out as
+   * `unhandled` — which is what it did before top-ups existed, and which would now
+   * mean a customer paid and received nothing.
+   *
+   * Keyed on the session's own `mode` rather than on whether a purchase row exists:
+   * "is this a one-off payment" is a fact about the event, whereas "do we have a row"
+   * is a question about our own state, and confusing the two would make a lost row
+   * turn a top-up into a subscription event.
+   */
+  const topUp = creditSessionOf(event);
+  if (topUp) {
+    const purchase = await completeCreditPurchase({
+      userId: context.userId,
+      providerSessionId: topUp.sessionId,
+      paymentStatus: topUp.paymentStatus,
+      providerPaymentIntentId: topUp.paymentIntentId,
+      /**
+       * Only invoked when there is no purchase row, so the normal path costs no
+       * request. The line items are not on the event — Stripe sends the session
+       * without them — so recovering an orphaned payment genuinely requires asking.
+       */
+      resolvePriceId: () => lineItemPriceId(topUp.sessionId),
+    });
+
+    /**
+     * `applied` follows whether credits actually moved, so the log and the
+     * `billing_events` row say what happened rather than merely that the event was
+     * seen. Every skip reason here is still a 200: a replay, an uncleared payment and
+     * an unrecognised price are all outcomes Stripe must stop redelivering, because
+     * none of them will change on a retry.
+     */
+    if (purchase.skipReason) return finish(`credit_${purchase.skipReason}`);
+
+    log.info("credits added from webhook", {
+      userId: context.userId,
+      eventType: event.type,
+      credits: purchase.credited,
+    });
+    return finish(null);
+  }
+
   const subscription = await subscriptionObjectFor(event, context);
   if (!subscription) {
-    // `checkout.session.completed` for a non-subscription mode, or an invoice with
-    // no subscription attached. Nothing to entitle.
+    // An invoice with no subscription attached, or a session that bought nothing
+    // Tally sells. Nothing to entitle.
     return finish("unhandled");
   }
 
@@ -238,6 +301,50 @@ export async function processEvent(event: Stripe.Event): Promise<WebhookOutcome>
       userId: context.userId,
     });
     return finish("stale");
+  }
+
+  /**
+   * Grant the period's credits now that the tier is known (§7).
+   *
+   * Without this a new subscriber would have no credits until their first generation
+   * — `chargeCredits` grants inside its own transaction, so nothing would actually
+   * break, but the dashboard would greet them with a zero balance immediately after
+   * they paid, which reads as a failed purchase.
+   *
+   * Three properties make this safe here:
+   *
+   *  - **Idempotent per period**, so a redelivery or an unrelated
+   *    `customer.subscription.updated` grants nothing a second time.
+   *  - **Outside the event transaction, and non-fatal.** A grant that threw would fail
+   *    the whole webhook and make Stripe retry an event that was already applied,
+   *    which would then be recorded as `stale`. The tier is the thing the webhook
+   *    exists to record; credits are recoverable from the charge path.
+   *  - **Uses the tier just applied**, not a re-read, so an upgrade grants against the
+   *    plan the customer has actually paid for.
+   *
+   * A downgrade grants nothing new — the period is already granted, and the smaller
+   * allowance applies from the next period. That is the same rule an upgrade follows.
+   */
+  try {
+    const grant = await ensureMonthlyGrant(context.userId, {
+      tier: applied.status === "active" || applied.status === "trialing"
+        ? applied.tier
+        : "starter",
+    });
+    if (grant.granted) {
+      log.info("granted monthly credits from webhook", {
+        userId: context.userId,
+        eventType: event.type,
+        credits: grant.credits,
+        period: grant.period,
+      });
+    }
+  } catch (error) {
+    log.error("failed to grant monthly credits after a billing event", {
+      userId: context.userId,
+      eventId: event.id,
+      err: error,
+    });
   }
 
   log.info("subscription updated from webhook", {
@@ -372,6 +479,71 @@ function metadataUserId(metadata: unknown): string | null {
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+// ---------------------------------------------------------------------------
+// Credit top-up sessions
+// ---------------------------------------------------------------------------
+
+interface CreditSession {
+  sessionId: string;
+  paymentStatus: string | null;
+  paymentIntentId: string | null;
+}
+
+/**
+ * The one-off payment session this event is about, or null.
+ *
+ * Recognised by three facts about the event, all of which must hold: it is a checkout
+ * session event, its `mode` is `payment`, and it carries a session id. A subscription
+ * checkout fails the second test and an invoice fails the first, so neither can be
+ * mistaken for a top-up.
+ *
+ * `async_payment_succeeded` and `async_payment_failed` are included because delayed
+ * payment methods complete the session before the money clears: the `completed` event
+ * arrives with `payment_status: "unpaid"` and is refused, and the *succeeding* event is
+ * the one that credits. Without those two types in the list, a customer paying by such
+ * a method would be charged and never credited.
+ *
+ * `checkout.session.expired` is deliberately absent. Marking the purchase row
+ * `expired` would be tidy, but it is not *entitlement*, and a `pending` row that never
+ * completes is already the correct reading of "the customer did not pay" — whereas
+ * adding a write path here would be a second place that touches purchase rows.
+ */
+function creditSessionOf(event: Stripe.Event): CreditSession | null {
+  if (
+    event.type !== "checkout.session.completed" &&
+    event.type !== "checkout.session.async_payment_succeeded" &&
+    event.type !== "checkout.session.async_payment_failed"
+  ) {
+    return null;
+  }
+
+  const session = event.data.object as Stripe.Checkout.Session;
+  if (session.mode !== "payment") return null;
+  if (typeof session.id !== "string" || session.id.length === 0) return null;
+
+  const intent = session.payment_intent;
+  return {
+    sessionId: session.id,
+    paymentStatus: session.payment_status ?? null,
+    paymentIntentId:
+      typeof intent === "string" ? intent : (intent?.id ?? null),
+  };
+}
+
+/**
+ * The price id on a session's single line item, fetched from Stripe.
+ *
+ * Reached only for a paid credit session with no purchase row. Returns null on any
+ * failure, which the caller reads as "unrecognised pack" and credits nothing — the
+ * safe direction, because the alternative to knowing what was bought is guessing.
+ */
+async function lineItemPriceId(sessionId: string): Promise<string | null> {
+  const items = await stripeClient().checkout.sessions.listLineItems(sessionId, {
+    limit: 1,
+  });
+  return items.data[0]?.price?.id ?? null;
 }
 
 // ---------------------------------------------------------------------------

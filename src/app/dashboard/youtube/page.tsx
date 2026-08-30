@@ -16,13 +16,11 @@
  * rows (§45), so a refresh mid-research resumes exactly where the worker is.
  */
 import { redirect } from "next/navigation";
-import { and, desc, eq } from "drizzle-orm";
 import { SectionHeader } from "@/components/ui/SectionHeader";
-import { LinkStudio, type LinkScriptView } from "@/components/youtube/LinkStudio";
+import { LinkStudio } from "@/components/youtube/LinkStudio";
 import { getSession } from "@/lib/auth/session";
 import { getLinkStudioData, latestLinkProjectId } from "@/lib/dashboard/link-studio";
-import { db } from "@/lib/db";
-import { scriptVersions, scripts } from "@/lib/db/schema";
+import { loadStudioScript } from "@/lib/dashboard/studio-script";
 import { capabilityStatus } from "@/lib/providers/config";
 
 export const metadata = { title: "Create from YouTube — Tally" };
@@ -48,7 +46,7 @@ export default async function YouTubePage({
    */
   const data = projectId ? await getLinkStudioData(userId, projectId) : null;
 
-  const script = data ? await loadScript(userId, data.project.id) : null;
+  const script = data ? await loadStudioScript(userId, data.project.id) : null;
 
   // §48: whether the AI provider is configured is a server fact. The client gets
   // the boolean, never the credential (§21).
@@ -65,66 +63,9 @@ export default async function YouTubePage({
         data={data}
         script={script}
         aiConfigured={ai.state !== "not_configured"}
+        seed="link"
+        basePath="/dashboard/youtube"
       />
     </div>
   );
-}
-
-/**
- * The project's active script, summarised.
- *
- * A focused two-query read rather than `getStageContext`, which would run nine
- * queries for renders, thumbnails, metadata, publish jobs and quality checks that
- * this screen does not show — the build and publish stages have their own pages
- * for those.
- */
-async function loadScript(
-  userId: string,
-  projectId: string,
-): Promise<LinkScriptView | null> {
-  const scriptRows = await db
-    .select({
-      id: scripts.id,
-      activeVersionId: scripts.activeVersionId,
-      approvedAt: scripts.approvedAt,
-    })
-    .from(scripts)
-    .where(and(eq(scripts.projectId, projectId), eq(scripts.userId, userId)))
-    .limit(1);
-
-  const scriptRow = scriptRows[0];
-  if (!scriptRow) return null;
-
-  const versions = await db
-    .select({
-      id: scriptVersions.id,
-      version: scriptVersions.version,
-      title: scriptVersions.title,
-      wordCount: scriptVersions.wordCount,
-      estimatedDurationSeconds: scriptVersions.estimatedDurationSeconds,
-    })
-    .from(scriptVersions)
-    .where(
-      and(
-        eq(scriptVersions.scriptId, scriptRow.id),
-        eq(scriptVersions.userId, userId),
-      ),
-    )
-    .orderBy(desc(scriptVersions.version))
-    .limit(5);
-
-  // Prefer the version the script row points at, falling back to the newest — the
-  // same rule `getStageContext` uses, so the two screens never disagree about
-  // which draft is current.
-  const active =
-    versions.find((v) => v.id === scriptRow.activeVersionId) ?? versions[0];
-  if (!active) return null;
-
-  return {
-    title: active.title,
-    version: active.version,
-    approved: scriptRow.approvedAt !== null,
-    wordCount: active.wordCount,
-    estimatedDurationSeconds: active.estimatedDurationSeconds,
-  };
 }

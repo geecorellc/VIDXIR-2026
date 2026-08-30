@@ -49,6 +49,7 @@ import {
   jar,
   resetDatabase,
   setTier,
+  signIn,
   useDatabase,
   type TestUser,
 } from "./setup";
@@ -1278,7 +1279,10 @@ suite("continuity layer (integration)", () => {
       const previous = process.env["VIDEO_GEN_PROVIDERS"];
 
       try {
-        for (const providers of ["mock", "fal", "veo,runway"]) {
+        // Two live configurations and one retired id. `fal` resolves to nothing
+        // since §14 removed it, so the third case also covers "a stale environment
+        // line must not change how much continuity a project gets".
+        for (const providers of ["mock", "qwen,minimax,seedance,veo", "fal"]) {
           process.env["VIDEO_GEN_PROVIDERS"] = providers;
           resetEnvCache();
           const context = await withFlag(true, async () => {
@@ -1322,7 +1326,7 @@ suite("continuity layer (integration)", () => {
       const prompts: string[] = [];
 
       try {
-        for (const providers of ["mock", "fal", "veo"]) {
+        for (const providers of ["mock", "qwen,minimax", "veo", "fal"]) {
           process.env["VIDEO_GEN_PROVIDERS"] = providers;
           resetEnvCache();
 
@@ -1349,8 +1353,9 @@ suite("continuity layer (integration)", () => {
         resetEnvCache();
       }
 
-      // Byte-identical across all three. The provider chooses how to render the
-      // request; it does not change what the request says.
+      // Byte-identical across every configuration. The provider chooses how to
+      // render the request; it does not change what the request says.
+      expect(prompts).toHaveLength(4);
       expect(new Set(prompts).size).toBe(1);
       expect(prompts[0]).toContain("brown canvas coat");
     });
@@ -1412,6 +1417,708 @@ suite("continuity layer (integration)", () => {
       const after = await getBible(owner.user.id, owner.projectId);
       expect(after?.bible.characters[0]?.name).toBe("Mara Reconsidered");
       expect(after?.editedByUser).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Reference stills (§5, §6)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Reference images are the one part of the layer whose correctness is entirely
+   * about the *database*, so almost none of it is testable in a unit test:
+   *
+   *  - Whether a reference is found again depends on a `meta->>'…' = 'true'` predicate
+   *    against a jsonb column. That is a SQL fact, and it type-checks either way.
+   *  - Whether it is invisible to another tenant depends on a `userId` in a WHERE
+   *    clause, the same class of defect §20 exists to catch.
+   *  - Whether a second run costs money depends on `referencedEntityKeys` actually
+   *    excluding what is stored. Getting that wrong is a paid regeneration of the
+   *    whole cast on every build, which no unit test would notice.
+   *
+   * No provider is called anywhere below. Reference rows are inserted directly, which
+   * is exactly what the pipeline stage does with a generated still — the stage's own
+   * provider call is covered by the video-provider tests against the mock.
+   */
+  describe("reference stills", () => {
+    /**
+     * Store a reference row the way the pipeline stage does.
+     *
+     * Through `referenceAssetMeta` rather than a hand-written `meta` literal, so a
+     * change to the flag or the key names breaks the writer and the reader together
+     * instead of leaving this test passing against a vocabulary nothing else uses.
+     */
+    async function storeReference(args: {
+      userId: string;
+      projectId: string;
+      kind: "character" | "environment" | "prop";
+      entityId: string;
+      entityName?: string;
+    }): Promise<string> {
+      const { db } = await import("@/lib/db");
+      const { assets } = await import("@/lib/db/schema");
+      const { referenceAssetMeta } = await import("@/lib/continuity/store");
+
+      const rows = await db
+        .insert(assets)
+        .values({
+          userId: args.userId,
+          projectId: args.projectId,
+          kind: "generated_image",
+          storageKey: `reference/${args.projectId}/${args.kind}-${args.entityId}.png`,
+          mimeType: "image/png",
+          width: 1280,
+          height: 720,
+          provider: "mock",
+          license: "Generated",
+          meta: referenceAssetMeta({
+            kind: args.kind,
+            entityId: args.entityId,
+            entityName: args.entityName ?? args.entityId,
+            prompt: `A reference for ${args.entityId}`,
+            // Branded id, never a vendor name — the same value the stage stores.
+            modelId: "mock/standard",
+          }),
+        })
+        .returning({ id: assets.id });
+
+      return rows[0]!.id;
+    }
+
+    it("finds a stored reference again through the meta flag", async () => {
+      const { getReferenceImages } = await import("@/lib/continuity/store");
+      const owner = await project("reference-read@tally.test");
+
+      await storeReference({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        kind: "character",
+        entityId: "mara",
+        entityName: "Mara",
+      });
+
+      const stored = await getReferenceImages(owner.user.id, owner.projectId);
+
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.kind).toBe("character");
+      expect(stored[0]?.entityId).toBe("mara");
+      expect(stored[0]?.entityName).toBe("Mara");
+      expect(stored[0]?.storageKey).toContain("reference/");
+      expect(stored[0]?.modelId).toBe("mock/standard");
+    });
+
+    it("does not mistake an ordinary generated image for a reference", async () => {
+      const { db } = await import("@/lib/db");
+      const { assets } = await import("@/lib/db/schema");
+      const { getReferenceImages } = await import("@/lib/continuity/store");
+      const owner = await project("reference-not-flagged@tally.test");
+
+      // A scene visual that happens to be a still — same kind, no flag. If the
+      // predicate were on `kind` alone, this would be served as a character sheet.
+      await db.insert(assets).values({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        kind: "generated_image",
+        storageKey: `visual/${owner.projectId}/scene-0.png`,
+        mimeType: "image/png",
+        provider: "mock",
+        meta: { sceneIndex: 0 },
+      });
+
+      expect(await getReferenceImages(owner.user.id, owner.projectId)).toEqual([]);
+    });
+
+    it("does not return one tenant's references to another", async () => {
+      const { getReferenceImages } = await import("@/lib/continuity/store");
+      const owner = await project("reference-owner@tally.test");
+      const intruder = await project("reference-intruder@tally.test");
+
+      await storeReference({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        kind: "character",
+        entityId: "mara",
+      });
+
+      // The owner's project id with the intruder's user id — the exact shape of a
+      // guard that checks the project but forgets the tenant.
+      expect(
+        await getReferenceImages(intruder.user.id, owner.projectId),
+      ).toEqual([]);
+    });
+
+    it("returns only the newest reference per entity", async () => {
+      const { getReferenceImages } = await import("@/lib/continuity/store");
+      const owner = await project("reference-superseded@tally.test");
+
+      const first = await storeReference({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        kind: "character",
+        entityId: "mara",
+        entityName: "Mara",
+      });
+      const second = await storeReference({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        kind: "character",
+        entityId: "mara",
+        entityName: "Mara Redrawn",
+      });
+
+      const stored = await getReferenceImages(owner.user.id, owner.projectId);
+
+      // The older row stays as provenance, exactly as a replaced scene visual does,
+      // but a caller receiving both would have to decide which is current.
+      expect(stored).toHaveLength(1);
+      expect(stored[0]?.assetId).toBe(second);
+      expect(stored[0]?.assetId).not.toBe(first);
+      expect(stored[0]?.entityName).toBe("Mara Redrawn");
+    });
+
+    it("plans every entity with visual facts, and nothing when the flag is off", async () => {
+      const { saveUserBible } = await import("@/lib/continuity/store");
+      const owner = await project("reference-plan@tally.test");
+
+      await saveUserBible({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        bible: bible("Mara"),
+        level: "character",
+      });
+
+      const planned = await withFlag(true, async () => {
+        const { referenceImagePlan } = await import("@/lib/continuity/service");
+        return referenceImagePlan({
+          userId: owner.user.id,
+          project: continuityProject(owner.projectId, owner.channelId),
+        });
+      });
+
+      expect(planned.wanted.map((entry) => `${entry.kind}:${entry.entityId}`)).toEqual([
+        "character:mara",
+        "environment:workshop",
+        "prop:lamp",
+      ]);
+      expect(planned.existing).toEqual([]);
+      expect(planned.reason).toBe("");
+
+      // The same project with the flag off wants nothing, and says why.
+      const off = await withFlag(false, async () => {
+        const { referenceImagePlan } = await import("@/lib/continuity/service");
+        return referenceImagePlan({
+          userId: owner.user.id,
+          project: continuityProject(owner.projectId, owner.channelId),
+        });
+      });
+
+      expect(off.wanted).toEqual([]);
+      expect(off.reason).toContain("switched off");
+    });
+
+    it("excludes entities that already have a reference, so a second run costs nothing", async () => {
+      const { saveUserBible } = await import("@/lib/continuity/store");
+      const owner = await project("reference-plan-partial@tally.test");
+
+      await saveUserBible({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        bible: bible("Mara"),
+        level: "character",
+      });
+
+      await storeReference({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        kind: "character",
+        entityId: "mara",
+        entityName: "Mara",
+      });
+
+      const planned = await withFlag(true, async () => {
+        const { referenceImagePlan } = await import("@/lib/continuity/service");
+        return referenceImagePlan({
+          userId: owner.user.id,
+          project: continuityProject(owner.projectId, owner.channelId),
+        });
+      });
+
+      expect(planned.wanted.map((entry) => entry.entityId)).toEqual([
+        "workshop",
+        "lamp",
+      ]);
+      expect(planned.existing.map((entry) => entry.entityId)).toEqual(["mara"]);
+    });
+
+    it("wants nothing, with a distinct reason, once every entity is drawn", async () => {
+      const { saveUserBible } = await import("@/lib/continuity/store");
+      const owner = await project("reference-plan-complete@tally.test");
+
+      await saveUserBible({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        bible: bible("Mara"),
+        level: "character",
+      });
+
+      for (const entity of [
+        { kind: "character" as const, entityId: "mara" },
+        { kind: "environment" as const, entityId: "workshop" },
+        { kind: "prop" as const, entityId: "lamp" },
+      ]) {
+        await storeReference({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          ...entity,
+        });
+      }
+
+      const planned = await withFlag(true, async () => {
+        const { referenceImagePlan } = await import("@/lib/continuity/service");
+        return referenceImagePlan({
+          userId: owner.user.id,
+          project: continuityProject(owner.projectId, owner.channelId),
+        });
+      });
+
+      expect(planned.wanted).toEqual([]);
+      expect(planned.existing).toHaveLength(3);
+      // "Already drawn" is a different answer from "nothing to draw", and a user
+      // reading the second when the first is true would go looking for a bug.
+      expect(planned.reason).toContain("already has a reference");
+    });
+
+    /**
+     * What the panel quotes before the user presses Generate (§20).
+     *
+     * The reference panel is the one place a *total* can be quoted honestly: the entity
+     * count comes out of the stored bible, so unlike a scene count it is known before
+     * any generation happens. These cases are about that total being the figure the
+     * stage will actually charge, and about it being absent rather than zero when the
+     * project cannot be priced at all.
+     */
+    describe("the cost quote (§20)", () => {
+      /** Set the project's model and resolution, as the picker's Save would. */
+      async function selectModel(
+        projectId: string,
+        model: string | null,
+        quality: string | null,
+      ): Promise<void> {
+        const { db } = await import("@/lib/db");
+        const { projects } = await import("@/lib/db/schema");
+        const { eq } = await import("drizzle-orm");
+        await db
+          .update(projects)
+          .set({ generationModel: model, videoQuality: quality })
+          .where(eq(projects.id, projectId));
+      }
+
+      /** The panel, as the studio fetches it. */
+      async function fetchPanel(projectId: string) {
+        const { NextRequest } = await import("next/server");
+        const { GET } = await import(
+          "@/app/api/video/continuity/references/route"
+        );
+        const response = await GET(
+          new NextRequest(
+            `http://localhost:3000/api/video/continuity/references?projectId=${projectId}`,
+            { method: "GET" },
+          ) as never,
+        );
+        return {
+          status: response.status,
+          body: (await response.json()) as {
+            data?: {
+              pending?: { entityId: string }[];
+              cost?: {
+                perImage: number;
+                total: number;
+                quality: string;
+                entities: number;
+              } | null;
+            };
+            error?: { code?: string };
+          },
+        };
+      }
+
+      /** Onboarded and signed in, which `requireOnboarded()` demands. */
+      async function asCaller(user: TestUser): Promise<void> {
+        const { saveStep, complete } = await import("@/lib/onboarding/service");
+        await saveStep(user.id, {
+          niche: "animated stories",
+          contentStyle: "storytelling",
+          voicePreference: "warm-male",
+        });
+        await complete(user.id);
+        await signIn(user);
+      }
+
+      it("totals the outstanding entities at the image rate", async () => {
+        const { saveUserBible } = await import("@/lib/continuity/store");
+        const owner = await project("reference-cost@tally.test");
+        await selectModel(owner.projectId, "mock/placeholder", "1080p");
+        await asCaller(owner.user);
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+
+        const result = await withFlag(true, () => fetchPanel(owner.projectId));
+
+        expect(result.status).toBe(200);
+        // Three entities in the fixture bible: one character, one environment, one prop.
+        expect(result.body.data?.pending).toHaveLength(3);
+
+        const cost = result.body.data?.cost;
+        const { imagePriceFor } = await import("@/lib/credits/pricing");
+        const expected = imagePriceFor("mock/placeholder", "1080p");
+
+        expect(cost?.perImage).toBe(expected);
+        expect(cost?.entities).toBe(3);
+        /*
+         * The total is the product, which is the whole claim: a panel that quoted the
+         * per-image rate as the total would understate a three-character bible by two
+         * thirds, and the button next to it spends the difference.
+         */
+        expect(cost?.total).toBe(expected * 3);
+        expect(cost?.quality).toBe("1080p");
+      });
+
+      it("charges nothing more for an entity already drawn, and says so in the total", async () => {
+        const { saveUserBible } = await import("@/lib/continuity/store");
+        const owner = await project("reference-cost-partial@tally.test");
+        await selectModel(owner.projectId, "mock/placeholder", "1080p");
+        await asCaller(owner.user);
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+        await storeReference({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          kind: "character",
+          entityId: "mara",
+          entityName: "Mara",
+        });
+
+        const result = await withFlag(true, () => fetchPanel(owner.projectId));
+
+        // The quote follows `pending`, not the bible: the stage skips what is already
+        // stored, so a total over all three would charge for a still nobody will draw.
+        expect(result.body.data?.pending).toHaveLength(2);
+        expect(result.body.data?.cost?.entities).toBe(2);
+        const { imagePriceFor } = await import("@/lib/credits/pricing");
+        expect(result.body.data?.cost?.total).toBe(
+          imagePriceFor("mock/placeholder", "1080p") * 2,
+        );
+      });
+
+      it("quotes the resolution the model actually draws stills at", async () => {
+        /**
+         * The project asks for 2K; the quote has to name whatever
+         * `assertImageQuality` resolves, because that is what the stage will charge.
+         * Asserted as "one of the model's own image tiers" rather than as a literal,
+         * so this stays true if the mock's tiers change — the property is that the
+         * quoted resolution is a real one, not a repetition of the request.
+         */
+        const { saveUserBible } = await import("@/lib/continuity/store");
+        const owner = await project("reference-cost-quality@tally.test");
+        await selectModel(owner.projectId, "mock/placeholder", "2k");
+        await asCaller(owner.user);
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+
+        const result = await withFlag(true, () => fetchPanel(owner.projectId));
+
+        const { resolveModel } = await import("@/lib/providers/video-gen");
+        const { isVideoQuality } = await import("@/lib/video/quality");
+        const tiers = resolveModel("mock/placeholder").model.capabilities
+          .imageQualities as readonly string[];
+
+        const quoted = result.body.data?.cost?.quality;
+        // Narrowed rather than cast: a `as VideoQuality` here would let a junk string
+        // through to `imagePriceFor`, which prices anything it does not recognise at the
+        // unknown rate — and the test would pass on a quote nobody could be charged.
+        expect(isVideoQuality(quoted)).toBe(true);
+        expect(tiers).toContain(quoted);
+
+        const { imagePriceFor } = await import("@/lib/credits/pricing");
+        if (isVideoQuality(quoted)) {
+          expect(result.body.data?.cost?.perImage).toBe(
+            imagePriceFor("mock/placeholder", quoted),
+          );
+        }
+      });
+
+      it("quotes nothing rather than zero for a stock-footage project", async () => {
+        /**
+         * Null, not `total: 0`. A zero reads as "free", and the panel has to be able to
+         * tell "this costs nothing" from "there is no price to quote here" — the second
+         * is the truth for a project that will never draw a still.
+         */
+        const owner = await project("reference-cost-stock@tally.test", {
+          generationMode: "STOCK",
+        });
+        await asCaller(owner.user);
+
+        const result = await withFlag(true, () => fetchPanel(owner.projectId));
+
+        expect(result.status).toBe(200);
+        expect(result.body.data?.cost).toBeNull();
+      });
+
+      it("still renders the panel when the project's model cannot be priced", async () => {
+        /**
+         * A project holding a model id no provider declares — a §17 pre-existing row, or
+         * one whose provider an operator has since removed. `generationPlanFor` throws
+         * for it, and the GET must still answer: the panel's job is to report the state,
+         * and the POST is where that project is refused with a message naming the
+         * problem.
+         */
+        const owner = await project("reference-cost-unknown@tally.test");
+        await selectModel(owner.projectId, "retired/model", "1080p");
+        await asCaller(owner.user);
+
+        const result = await withFlag(true, () => fetchPanel(owner.projectId));
+
+        expect(result.status).toBe(200);
+        expect(result.body.data?.cost).toBeNull();
+      });
+
+      it("refuses an unauthenticated read of the panel", async () => {
+        const owner = await project("reference-cost-anon@tally.test");
+        await selectModel(owner.projectId, "mock/placeholder", "1080p");
+        jar.clear();
+
+        expect((await fetchPanel(owner.projectId)).status).toBe(401);
+      });
+    });
+
+    it("wants nothing for a project with no bible", async () => {
+      const owner = await project("reference-plan-no-bible@tally.test");
+
+      const planned = await withFlag(true, async () => {
+        const { referenceImagePlan } = await import("@/lib/continuity/service");
+        return referenceImagePlan({
+          userId: owner.user.id,
+          project: continuityProject(owner.projectId, owner.channelId),
+        });
+      });
+
+      expect(planned.wanted).toEqual([]);
+      expect(planned.reason).toContain("No story bible");
+    });
+
+    /**
+     * The reuse half of §6, at the level it is decided.
+     *
+     * `referencesForScene` is pure, but a meaningful test of it needs a real context —
+     * a stored bible, real scene states and the level the settings resolve to — and
+     * assembling those by hand would be asserting against a fixture rather than
+     * against the resolution the pipeline actually performs.
+     */
+    describe("per-scene selection", () => {
+      async function contextFor(owner: {
+        user: TestUser;
+        channelId: string;
+        projectId: string;
+      }) {
+        const { loadContext } = await import("@/lib/continuity/service");
+        return loadContext(
+          owner.user.id,
+          continuityProject(owner.projectId, owner.channelId),
+        );
+      }
+
+      it("sends only the entities the scene commits to, cast first", async () => {
+        const { saveSceneContinuity, saveUserBible, getReferenceImages } =
+          await import("@/lib/continuity/store");
+        const { referencesForScene } = await import("@/lib/continuity/service");
+        const owner = await project("reference-scene-select@tally.test");
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+        await insertScenes(owner.user.id, owner.projectId, 2);
+
+        // Scene 0 has the whole cast; scene 1 is the location alone.
+        await saveSceneContinuity({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          sceneIndex: 0,
+          state: sceneState(),
+          continuityPrompt: null,
+        });
+        await saveSceneContinuity({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          sceneIndex: 1,
+          state: sceneState({ characters: [], props: [] }),
+          continuityPrompt: null,
+        });
+
+        for (const entity of [
+          { kind: "character" as const, entityId: "mara" },
+          { kind: "environment" as const, entityId: "workshop" },
+          { kind: "prop" as const, entityId: "lamp" },
+        ]) {
+          await storeReference({
+            userId: owner.user.id,
+            projectId: owner.projectId,
+            ...entity,
+          });
+        }
+
+        await withFlag(true, async () => {
+          const context = await contextFor(owner);
+          const stored = await getReferenceImages(owner.user.id, owner.projectId);
+
+          // Characters, then the location, then the objects — the order
+          // `buildContinuityPrompt` weights its clauses by, so a backend that caps
+          // how many it accepts drops the least important.
+          expect(
+            referencesForScene({ context, sceneIndex: 0, stored }).map(
+              (entry) => `${entry.kind}:${entry.entityId}`,
+            ),
+          ).toEqual(["character:mara", "environment:workshop", "prop:lamp"]);
+
+          // Scene 1 must not be handed the character. Sending the whole cast to
+          // every scene is how a two-hander becomes a crowd.
+          expect(
+            referencesForScene({ context, sceneIndex: 1, stored }).map(
+              (entry) => entry.entityId,
+            ),
+          ).toEqual(["workshop"]);
+        });
+      });
+
+      it("returns nothing for a scene with no recorded state", async () => {
+        const { saveUserBible, getReferenceImages } = await import(
+          "@/lib/continuity/store"
+        );
+        const { referencesForScene } = await import("@/lib/continuity/service");
+        const owner = await project("reference-scene-nostate@tally.test");
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+        await insertScenes(owner.user.id, owner.projectId, 1);
+        await storeReference({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          kind: "character",
+          entityId: "mara",
+        });
+
+        await withFlag(true, async () => {
+          const context = await contextFor(owner);
+          const stored = await getReferenceImages(owner.user.id, owner.projectId);
+
+          // §25's shape: a scene the planner never wrote a state for commits to
+          // nothing, so it constrains nothing.
+          expect(referencesForScene({ context, sceneIndex: 0, stored })).toEqual([]);
+        });
+      });
+
+      it("skips an entity the scene commits to but nobody has drawn", async () => {
+        const { saveSceneContinuity, saveUserBible, getReferenceImages } =
+          await import("@/lib/continuity/store");
+        const { referencesForScene } = await import("@/lib/continuity/service");
+        const owner = await project("reference-scene-partial@tally.test");
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+        await insertScenes(owner.user.id, owner.projectId, 1);
+        await saveSceneContinuity({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          sceneIndex: 0,
+          state: sceneState(),
+          continuityPrompt: null,
+        });
+
+        // Only the character exists. The location and the prop fall back to text.
+        await storeReference({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          kind: "character",
+          entityId: "mara",
+        });
+
+        await withFlag(true, async () => {
+          const context = await contextFor(owner);
+          const stored = await getReferenceImages(owner.user.id, owner.projectId);
+
+          expect(
+            referencesForScene({ context, sceneIndex: 0, stored }).map(
+              (entry) => entry.entityId,
+            ),
+          ).toEqual(["mara"]);
+        });
+      });
+
+      it("returns nothing when the layer is inert", async () => {
+        const { saveSceneContinuity, saveUserBible, getReferenceImages } =
+          await import("@/lib/continuity/store");
+        const owner = await project("reference-scene-inert@tally.test");
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+        await insertScenes(owner.user.id, owner.projectId, 1);
+        await saveSceneContinuity({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          sceneIndex: 0,
+          state: sceneState(),
+          continuityPrompt: null,
+        });
+        await storeReference({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          kind: "character",
+          entityId: "mara",
+        });
+
+        // Stills that exist, a state that names them, and the flag off. §25: a
+        // project must behave exactly as it did before this layer existed.
+        const stored = await withFlag(true, () =>
+          getReferenceImages(owner.user.id, owner.projectId),
+        );
+        expect(stored).toHaveLength(1);
+
+        await withFlag(false, async () => {
+          const { referencesForScene } = await import("@/lib/continuity/service");
+          const context = await contextFor(owner);
+          expect(context.active).toBe(false);
+          expect(referencesForScene({ context, sceneIndex: 0, stored })).toEqual([]);
+        });
+      });
     });
   });
 });

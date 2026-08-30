@@ -65,6 +65,13 @@ const BodySchema = z.object({
   mode: z.string().max(32).optional(),
   model: z.string().max(64).nullable().optional(),
   format: z.string().max(16).optional(),
+  /**
+   * The resolution tier (Phase 12 §4). Null or omitted means "the model's default".
+   *
+   * Ignored unless `mode` is present, since `validateSelection` is the only thing
+   * that decides whether a tier is one the chosen model actually offers.
+   */
+  quality: z.string().max(16).nullable().optional(),
   targetDurationSeconds: z.coerce
     .number()
     .int()
@@ -106,6 +113,7 @@ export async function POST(request: NextRequest) {
             mode: body.mode,
             model: body.model ?? null,
             format: body.format ?? null,
+            quality: body.quality ?? null,
             tier,
           });
 
@@ -130,6 +138,7 @@ export async function POST(request: NextRequest) {
       generationMode: selection?.generationMode ?? null,
       generationModel: selection?.generationModel ?? null,
       videoFormat: selection?.videoFormat ?? null,
+      videoQuality: selection?.videoQuality ?? null,
       sourceVideoId: link.videoId,
       maxVideosPerMonth: planByTier(tier).maxVideosPerMonth,
     });

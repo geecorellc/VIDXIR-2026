@@ -9,12 +9,19 @@
  * in is the wardrobe, the palette, the lighting and the state changes, verbatim
  * and in a fixed order.
  *
- * Text-only, deliberately. No catalogued model accepts a caller-supplied
- * reference image today, so §8's stated fallback — "detailed textual continuity
- * constraints" — is the behaviour for every model, and this module is that
+ * The *scene* prompt is text-only, deliberately. No catalogued model accepts a
+ * caller-supplied reference image today, so §8's stated fallback — "detailed textual
+ * continuity constraints" — is the behaviour for every model, and this module is that
  * fallback in full rather than a placeholder for it. The seam is here: when a
  * reference-capable model is added to the catalogue, `buildContinuityPrompt`
  * gains a branch, and nothing above it changes.
+ *
+ * `referenceImagePrompt` is the other direction and is live now: it describes one
+ * bible entity to an *image* model, so the reference still exists and is stored
+ * whether or not any video backend can yet be handed it. That ordering is deliberate.
+ * A reference image is worth having on its own — it is what a human reviews to say
+ * "no, her coat is wrong" before eighty scenes are paid for — and it means the day a
+ * backend accepts a first frame there is already a library to feed it.
  *
  * Everything is pure and deterministic. The same bible, state and graph produce
  * byte-identical text, which is what lets `prompt.test.ts` assert continuity
@@ -39,7 +46,7 @@ import {
 /**
  * Ceiling on the continuity block, in characters.
  *
- * The provider layer already truncates a prompt (FAL slices at 1,500), and a
+ * The provider layer already truncates a prompt (every backend slices at 1,500), and a
  * continuity block that consumed the whole budget would push out the shot
  * description — leaving a model with a wardrobe and no idea what is happening.
  * 900 characters is room for a cast of three plus a style, and it is enforced by
@@ -211,6 +218,179 @@ export function regenerationPrompt(args: {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Reference stills (§5, §6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which kind of bible entity a reference still is for.
+ *
+ * Deliberately the same three words `ImagePurpose` uses for its continuity members,
+ * because the value is passed straight through to the provider and stored on the
+ * asset: one vocabulary means a stored reference can be found by what it is for
+ * without a translation table that can drift.
+ */
+export type ReferenceKind = "character" | "environment" | "prop";
+
+export interface ReferenceImagePrompt {
+  kind: ReferenceKind;
+  /** The bible entity's slug. What the asset is keyed by, so it can be found again. */
+  entityId: string;
+  /** Display name, for a caption in the review UI. */
+  name: string;
+  prompt: string;
+}
+
+/**
+ * Ceiling on one reference prompt.
+ *
+ * Larger than `MAX_CONTINUITY_CHARS` because the opposite trade applies: a scene
+ * prompt must leave room for the shot, while a reference prompt *is* the shot — the
+ * entity described as fully as the bible knows it. Still bounded, and still below the
+ * 1,500 every backend slices at, so the closing instruction is never the thing cut.
+ */
+export const MAX_REFERENCE_CHARS = 1_200;
+
+/**
+ * The framing instruction appended to every reference prompt.
+ *
+ * Plain and identical across entities on purpose. A reference still is a *chart*, not
+ * a scene: a dramatic three-quarter shot of a character in shadow is worse than useless
+ * as a reference because the facts it is supposed to fix — the coat colour, the hair —
+ * are the parts the lighting hides. Recognisable people are refused for the same reason
+ * the video adapters refuse them: a generated likeness in a published video is a rights
+ * problem, and no bible entity needs one.
+ */
+const REFERENCE_FRAMING: Record<ReferenceKind, string> = {
+  character:
+    "Full-body character reference sheet on a plain neutral background, even " +
+    "front lighting, neutral pose, no text, no logos, not a recognisable real person.",
+  environment:
+    "Establishing reference view of this location on its own, no people present, " +
+    "even lighting, no text, no logos.",
+  prop:
+    "Product-style reference of this single object on a plain neutral background, " +
+    "even lighting, no people, no text, no logos.",
+};
+
+/**
+ * Describe one bible entity to an image model.
+ *
+ * Built from the same fields `buildContinuityPrompt` renders into a scene, in the same
+ * order, which is the property that makes the reference worth generating at all: a
+ * still drawn from different facts than the scenes would not be a reference, it would
+ * be a second opinion. The whole-video style is included because a character sheet in
+ * photoreal detail is no use to a project rendering hand-drawn animation.
+ *
+ * Returns null when the entity carries no visual facts. An entity with a name and
+ * nothing else would produce a picture of the model's guess, which then reads as an
+ * approved reference — worse than having none (§19).
+ */
+export function referenceImagePrompt(args: {
+  bible: StoryBible;
+  kind: ReferenceKind;
+  entityId: string;
+  capabilities: LevelCapabilities;
+}): ReferenceImagePrompt | null {
+  const { bible, kind, entityId } = args;
+
+  let name: string;
+  let facts: string[];
+
+  if (kind === "character") {
+    if (!args.capabilities.characters) return null;
+    const character = findCharacter(bible, entityId);
+    if (!character) return null;
+    name = character.name;
+    facts = [
+      ...character.appearance,
+      ...character.wardrobe,
+      ...(character.demeanour ? [character.demeanour] : []),
+    ];
+  } else if (kind === "environment") {
+    if (!args.capabilities.environments) return null;
+    const environment = findEnvironment(bible, entityId);
+    if (!environment) return null;
+    name = environment.name;
+    facts = [
+      ...environment.description,
+      ...(environment.lighting ? [environment.lighting] : []),
+      ...environment.palette,
+    ];
+  } else {
+    if (!args.capabilities.props) return null;
+    const prop = findProp(bible, entityId);
+    if (!prop) return null;
+    name = prop.name;
+    facts = [...prop.description];
+  }
+
+  const described = joinFacts(facts);
+  if (described === "") return null;
+
+  const style =
+    args.capabilities.style && hasStyle(bible.style)
+      ? joinFacts([
+          ...(bible.style.medium ? [bible.style.medium] : []),
+          ...bible.style.palette,
+          ...(bible.style.lighting ? [bible.style.lighting] : []),
+        ])
+      : "";
+
+  /**
+   * Framing last, so a prompt long enough to be sliced loses a palette note rather
+   * than the instruction that makes the output a usable reference. The subject and
+   * its facts come first for the same reason the shot precedes the continuity block.
+   */
+  const parts = [
+    `${name}: ${described}.`,
+    ...(style ? [`Rendered in this style: ${style}.`] : []),
+    REFERENCE_FRAMING[kind],
+  ];
+
+  return {
+    kind,
+    entityId,
+    name,
+    prompt: fitText(parts.join(" "), MAX_REFERENCE_CHARS),
+  };
+}
+
+/**
+ * Every reference still a bible would need, in a stable order.
+ *
+ * Characters first, then locations, then objects — the same priority
+ * `buildContinuityPrompt` weights its clauses by, so a caller that generates only the
+ * first few produces the references that matter most rather than an arbitrary prefix.
+ * Entities with no visual facts are absent, not present-and-empty.
+ */
+export function referenceImagePrompts(
+  bible: StoryBible,
+  capabilities: LevelCapabilities,
+): ReferenceImagePrompt[] {
+  const out: ReferenceImagePrompt[] = [];
+
+  const targets: Array<[ReferenceKind, readonly { id: string }[]]> = [
+    ["character", bible.characters],
+    ["environment", bible.environments],
+    ["prop", bible.props],
+  ];
+
+  for (const [kind, entities] of targets) {
+    for (const entity of entities) {
+      const prompt = referenceImagePrompt({
+        bible,
+        kind,
+        entityId: entity.id,
+        capabilities,
+      });
+      if (prompt) out.push(prompt);
+    }
+  }
+
+  return out;
+}
+
 /**
  * Continuity context for the scene *planner*, not for a generator.
  *
@@ -295,6 +475,30 @@ function joinFacts(facts: readonly string[]): string {
     .map((fact) => fact.trim().replace(/[.;]+$/, ""))
     .filter(Boolean)
     .join(", ");
+}
+
+/**
+ * Trim one string to a budget on a sentence boundary.
+ *
+ * `fit` below drops whole clauses, which is right when the clauses are independent.
+ * A reference prompt is not: its three parts are subject, style and framing, and
+ * dropping the subject to keep the framing would ask for a well-lit picture of
+ * nothing. So this cuts from the end at the last sentence break instead, which loses
+ * the framing note — the part a model most often infers correctly anyway — and never
+ * leaves a half-written fact.
+ *
+ * Only reachable for a bible near its own field limits; the ceiling is set above what
+ * the bounded schema normally produces.
+ */
+function fitText(text: string, budget: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= budget) return trimmed;
+
+  const window = trimmed.slice(0, budget);
+  const lastStop = window.lastIndexOf(". ");
+  // No sentence break at all: a hard cut is the only option left, and it is still
+  // better than sending a prompt the backend will slice at an arbitrary byte.
+  return lastStop > 0 ? window.slice(0, lastStop + 1) : window.trimEnd();
 }
 
 function dedupe(values: readonly string[]): string[] {

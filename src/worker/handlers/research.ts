@@ -7,9 +7,15 @@
  * be exercised by integration tests without a live queue.
  *
  * Since Phase 11 a payload may carry a `sourceVideoId` instead of a `channelId`
- * (§4: researching a pasted link requires no connected channel). Both fields are
+ * (§4: researching a pasted link requires no connected channel), and since §1C it
+ * may carry neither and set `mode: "description"` instead. All three fields are
  * optional in the schema and the *combination* is what is validated, so a payload
- * with neither is refused rather than silently researching nothing.
+ * that identifies no seed at all is refused rather than silently researching
+ * nothing.
+ *
+ * `mode` says which seed to expect; it does not carry the seed. The description
+ * itself lives on the run row, because it is user prose that reaches a model and the
+ * copy that gets used must be the one the authorising request wrote (§34).
  */
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -46,6 +52,15 @@ const PayloadSchema = z.object({
     .refine(isValidVideoId, "not a YouTube video id")
     .optional(),
   linkForm: z.enum(LINK_FORMS).optional(),
+  /**
+   * Which entry path created this run (§1C).
+   *
+   * Only `"description"` is meaningful — the other two identify themselves by
+   * carrying a `channelId` or a `sourceVideoId`. This exists so a description run,
+   * whose payload carries no seed of its own, is still a payload that *says* what it
+   * is instead of one recognised by the absence of everything else.
+   */
+  mode: z.literal("description").optional(),
 });
 
 export const researchHandler: JobHandler = async ({
@@ -65,11 +80,12 @@ export const researchHandler: JobHandler = async ({
     );
   }
 
-  const { runId, channelId, sourceVideoId, linkForm } = parsed.data;
+  const { runId, channelId, sourceVideoId, linkForm, mode } = parsed.data;
 
-  if (!channelId && !sourceVideoId) {
+  if (!channelId && !sourceVideoId && mode !== "description") {
     throw new ValidationError(
-      "Invalid research payload: needs either a channelId or a sourceVideoId.",
+      "Invalid research payload: needs a channelId, a sourceVideoId or " +
+        'mode "description".',
     );
   }
 

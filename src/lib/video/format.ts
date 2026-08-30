@@ -25,8 +25,9 @@
  *  3. The timeline and the renderer size the canvas.
  *
  * `aspectRatioLabel` exists because providers disagree on how to spell a ratio:
- * Runway wants pixel dimensions (`1920:1080`), fal.ai and Veo want the reduced
- * form (`16:9`). Both are derived here so no provider module invents its own.
+ * Runway wants pixel dimensions (`1920:1080`), the four backends behind Tally's own
+ * models want the reduced form (`16:9`). Both are derived here so no provider module
+ * invents its own.
  */
 
 /** The formats Tally can render. */
@@ -47,7 +48,7 @@ export interface FormatSpec {
   width: number;
   height: number;
   fps: number;
-  /** Reduced ratio, e.g. "16:9" — the form fal.ai and Veo accept. */
+  /** Reduced ratio, e.g. "16:9" — the form the AI video backends accept. */
   ratio: string;
   /** Short label for the picker. */
   label: string;

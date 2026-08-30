@@ -140,6 +140,11 @@ export async function prepareDatabase(): Promise<void> {
           priceCents: plan.priceCents,
           maxChannels: plan.maxChannels,
           maxVideosPerMonth: plan.maxVideosPerMonth,
+          // Seeded even though `ensureMonthlyGrant` reads the code catalogue rather
+          // than this row: a plans row claiming zero included credits is reference
+          // data that contradicts the catalogue, and the next reader of it would be
+          // right to believe it.
+          monthlyCredits: plan.monthlyCredits,
           features: plan.features,
         })
         .onConflictDoNothing();
@@ -171,13 +176,109 @@ const RESET_ROOTS = [
   "billing_events",
 ] as const;
 
+/**
+ * How long the reset waits for its lock before reporting who is holding it.
+ *
+ * `TRUNCATE` takes `ACCESS EXCLUSIVE` on every table it names, so it queues behind
+ * any other connection holding so much as a `SELECT`'s lock. Without a `lock_timeout`
+ * that wait runs into the pool's own `statement_timeout` (15s), which surfaces as a
+ * bare `canceling statement due to statement timeout` inside a `beforeEach` — a
+ * failure that names neither the reset nor the connection that blocked it. That
+ * happened once in a full serial run and cost a diagnosis.
+ *
+ * Three seconds is far longer than the reset itself takes (tens of milliseconds
+ * against a database this size) and well short of the 15s ceiling, so the lock wait
+ * is now a distinguishable outcome rather than an indistinguishable one.
+ */
+const RESET_LOCK_TIMEOUT_MS = 3_000;
+
+/** Attempts before the reset gives up and reports what blocked it. */
+const RESET_ATTEMPTS = 3;
+
 export async function resetDatabase(): Promise<void> {
   const { rawSql } = await import("@/lib/db");
   const sql = rawSql();
-  await sql.unsafe(
-    `TRUNCATE TABLE ${RESET_ROOTS.map((t) => `"${t}"`).join(", ")} CASCADE`,
+  const statement = `TRUNCATE TABLE ${RESET_ROOTS.map((t) => `"${t}"`).join(
+    ", ",
+  )} CASCADE`;
+
+  for (let attempt = 1; attempt <= RESET_ATTEMPTS; attempt += 1) {
+    try {
+      /**
+       * `lock_timeout` is set inside the same transaction as the TRUNCATE.
+       *
+       * Transaction-local via `SET LOCAL`, so it reverts on commit and cannot leak
+       * onto a pooled connection that application code will reuse — a stray 3s
+       * `lock_timeout` on a shared connection would make an unrelated test fail for a
+       * reason nothing in it explains.
+       */
+      await sql.begin(async (tx) => {
+        await tx.unsafe(`SET LOCAL lock_timeout = ${RESET_LOCK_TIMEOUT_MS}`);
+        await tx.unsafe(statement);
+      });
+      jar.clear();
+      return;
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      // 55P03 lock_not_available, 40P01 deadlock_detected. Anything else — a syntax
+      // error, a missing table, a dead connection — is a real failure and rethrown
+      // immediately rather than retried three times into a confusing timeout.
+      const contended = code === "55P03" || code === "40P01";
+      if (!contended || attempt === RESET_ATTEMPTS) {
+        if (contended) throw new Error(await lockReport(sql, error));
+        throw error;
+      }
+    }
+  }
+}
+
+/**
+ * Who is holding the lock, appended to the error the reset throws.
+ *
+ * The point of the retry is not to paper over contention: application code that
+ * leaked an open transaction would block this reset every time, and a silent retry
+ * would turn that leak into a slow test suite instead of a reported bug. So the final
+ * failure names the blocking backends — their state, how long they have been in it,
+ * and their query — which is enough to tell a leaked transaction apart from a busy
+ * machine without reproducing the failure first.
+ */
+async function lockReport(
+  sql: Awaited<ReturnType<typeof import("@/lib/db").rawSql>>,
+  cause: unknown,
+): Promise<string> {
+  let holders = "could not be read";
+  try {
+    const rows = await sql<
+      { pid: number; state: string | null; waiting: string | null; query: string }[]
+    >`
+      SELECT pid,
+             state,
+             to_char(now() - COALESCE(xact_start, query_start), 'MI:SS') AS waiting,
+             left(query, 120) AS query
+        FROM pg_stat_activity
+       WHERE datname = current_database()
+         AND pid <> pg_backend_pid()
+    `;
+    holders =
+      rows.length === 0
+        ? "no other backends — the contention had already cleared"
+        : rows
+            .map(
+              (row) =>
+                `pid ${row.pid} [${row.state ?? "unknown"}, ${row.waiting ?? "?"}] ${row.query}`,
+            )
+            .join("\n  ");
+  } catch {
+    // Reporting must not replace the original failure with its own.
+  }
+
+  return (
+    `resetDatabase() could not take its TRUNCATE lock within ` +
+    `${RESET_LOCK_TIMEOUT_MS}ms across ${RESET_ATTEMPTS} attempts. ` +
+    `A connection is holding a lock on one of ${RESET_ROOTS.join(", ")} — most ` +
+    `likely a leaked open transaction in application code, or a previous test file ` +
+    `whose pool was not closed.\n  ${holders}\n  cause: ${String(cause)}`
   );
-  jar.clear();
 }
 
 // ---------------------------------------------------------------------------

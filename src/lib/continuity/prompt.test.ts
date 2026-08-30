@@ -21,8 +21,11 @@ import { emptyStoryBible, parseStoryBible } from "@/lib/continuity/bible";
 import { capabilitiesFor, type LevelCapabilities } from "@/lib/continuity/config";
 import {
   MAX_CONTINUITY_CHARS,
+  MAX_REFERENCE_CHARS,
   buildContinuityPrompt,
   plannerContext,
+  referenceImagePrompt,
+  referenceImagePrompts,
   regenerationPrompt,
   withContinuity,
   type ContinuityPromptInput,
@@ -482,6 +485,214 @@ describe("regenerationPrompt", () => {
       issues: ["coat wrong"],
     };
     expect(regenerationPrompt(args)).toBe(regenerationPrompt(args));
+  });
+});
+
+/**
+ * Reference stills (§5, §6).
+ *
+ * Four properties, in the order of what they cost to get wrong:
+ *
+ *  - **Null for an entity with no visual facts.** A picture of the model's guess,
+ *    stored as a reference, reads as approved and then constrains eighty scenes to a
+ *    look nobody chose. Costlier than having no reference at all (§19).
+ *  - **The same facts the scene prompts use.** A reference drawn from different fields
+ *    would be a second opinion rather than a reference.
+ *  - **Framing survives truncation.** The instruction that makes the output a usable
+ *    chart is last, so an over-long prompt loses a palette note instead.
+ *  - **Level gating.** A `style`-level project has no cast to illustrate.
+ */
+describe("referenceImagePrompt", () => {
+  const CAPS = capabilitiesFor("episodic");
+
+  it("describes a character from the same fields a scene prompt renders", () => {
+    const out = referenceImagePrompt({
+      bible: BIBLE,
+      kind: "character",
+      entityId: "mara",
+      capabilities: CAPS,
+    });
+
+    expect(out).not.toBeNull();
+    expect(out?.kind).toBe("character");
+    expect(out?.entityId).toBe("mara");
+    expect(out?.name).toBe("Mara");
+    // Appearance, wardrobe and demeanour — the three fields `buildContinuityPrompt`
+    // renders for a character, in that order.
+    expect(out?.prompt).toContain("grey beard");
+    expect(out?.prompt).toContain("brown canvas coat");
+    expect(out?.prompt).toContain("moves slowly and deliberately");
+    // The whole-video style: a photoreal sheet is no use to a hand-drawn project.
+    expect(out?.prompt).toContain("hand-drawn 2D animation");
+    // And the framing that makes it a reference rather than a dramatic shot.
+    expect(out?.prompt).toContain("character reference sheet");
+    expect(out?.prompt).toContain("not a recognisable real person");
+  });
+
+  it("returns null for an entity carrying no visual facts", () => {
+    // `key` has a name and an empty description. Drawing it would invent a key.
+    expect(
+      referenceImagePrompt({
+        bible: BIBLE,
+        kind: "prop",
+        entityId: "key",
+        capabilities: CAPS,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null for an entity that is not in the bible", () => {
+    expect(
+      referenceImagePrompt({
+        bible: BIBLE,
+        kind: "character",
+        entityId: "nobody",
+        capabilities: CAPS,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns null for a kind the level does not track", () => {
+    // `style` level tracks the look and nothing else, so there is no cast to draw.
+    const styleOnly = capabilitiesFor("style");
+
+    expect(
+      referenceImagePrompt({
+        bible: BIBLE,
+        kind: "character",
+        entityId: "mara",
+        capabilities: styleOnly,
+      }),
+    ).toBeNull();
+  });
+
+  it("frames an environment without people and a prop on its own", () => {
+    const place = referenceImagePrompt({
+      bible: BIBLE,
+      kind: "environment",
+      entityId: "workshop",
+      capabilities: CAPS,
+    });
+    const thing = referenceImagePrompt({
+      bible: BIBLE,
+      kind: "prop",
+      entityId: "lamp",
+      capabilities: CAPS,
+    });
+
+    // A location reference with a character in it fixes the wrong facts.
+    expect(place?.prompt).toContain("brass tools on pegboard");
+    expect(place?.prompt).toContain("no people present");
+    expect(thing?.prompt).toContain("dented shade");
+    expect(thing?.prompt).toContain("no people");
+  });
+
+  it("omits the style clause for a bible that records no style", () => {
+    // The reachable form of "no style to render": every level from `style` up tracks
+    // the look, so the absent thing is the bible's style block, not the capability.
+    const styleless = parseStoryBible({
+      characters: [{ id: "mara", name: "Mara", appearance: ["grey beard"] }],
+    });
+
+    const out = referenceImagePrompt({
+      bible: styleless,
+      kind: "character",
+      entityId: "mara",
+      capabilities: CAPS,
+    });
+
+    expect(out?.prompt).toContain("grey beard");
+    expect(out?.prompt).not.toContain("Rendered in this style");
+    // The framing is still there: it is what makes the output a reference.
+    expect(out?.prompt).toContain("character reference sheet");
+  });
+
+  it("respects the budget and keeps the framing instruction", () => {
+    // A character whose facts alone exceed the budget. Each trait is within the bible's
+    // own 120-character limit, so this is a bible a planner could legitimately produce.
+    const verbose = parseStoryBible({
+      characters: [
+        {
+          id: "mara",
+          name: "Mara",
+          appearance: Array.from(
+            { length: 8 },
+            (_, i) => `appearance ${i} ${"x".repeat(100)}`,
+          ),
+          wardrobe: Array.from(
+            { length: 8 },
+            (_, i) => `wardrobe ${i} ${"y".repeat(100)}`,
+          ),
+        },
+      ],
+    });
+
+    const out = referenceImagePrompt({
+      bible: verbose,
+      kind: "character",
+      entityId: "mara",
+      capabilities: CAPS,
+    });
+
+    expect(out).not.toBeNull();
+    expect(out!.prompt.length).toBeLessThanOrEqual(MAX_REFERENCE_CHARS);
+    // The subject is still named, and the prompt does not end mid-word.
+    expect(out!.prompt).toContain("Mara");
+    expect(out!.prompt.trimEnd()).toBe(out!.prompt);
+  });
+
+  it("is deterministic", () => {
+    const args = {
+      bible: BIBLE,
+      kind: "character" as const,
+      entityId: "mara",
+      capabilities: CAPS,
+    };
+    expect(referenceImagePrompt(args)?.prompt).toBe(
+      referenceImagePrompt(args)?.prompt,
+    );
+  });
+});
+
+describe("referenceImagePrompts", () => {
+  it("orders characters, then environments, then props", () => {
+    const out = referenceImagePrompts(BIBLE, capabilitiesFor("episodic"));
+
+    // A caller that generates only the first few gets the references that matter most,
+    // which is the same priority `buildContinuityPrompt` weights its clauses by.
+    expect(out.map((entry) => `${entry.kind}:${entry.entityId}`)).toEqual([
+      "character:mara",
+      "character:ben",
+      "environment:workshop",
+      "prop:lamp",
+    ]);
+  });
+
+  it("omits entities with no visual facts rather than including them empty", () => {
+    // `key` is in the bible and absent from the list — not present with a bare name.
+    const ids = referenceImagePrompts(BIBLE, capabilitiesFor("episodic")).map(
+      (entry) => entry.entityId,
+    );
+    expect(ids).not.toContain("key");
+  });
+
+  it("is empty for an empty bible", () => {
+    expect(referenceImagePrompts(emptyStoryBible(), capabilitiesFor("episodic"))).toEqual(
+      [],
+    );
+  });
+
+  it("is empty at level off", () => {
+    expect(referenceImagePrompts(BIBLE, capabilitiesFor("off"))).toEqual([]);
+  });
+
+  it("drops the kinds a level does not track", () => {
+    // `world` level holds the places and the look, and has no recurring cast — so the
+    // locations are drawn and the characters and props are not.
+    const out = referenceImagePrompts(BIBLE, capabilitiesFor("world"));
+
+    expect(out.every((entry) => entry.kind === "environment")).toBe(true);
+    expect(out.map((entry) => entry.entityId)).toEqual(["workshop"]);
   });
 });
 

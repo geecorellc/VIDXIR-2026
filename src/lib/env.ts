@@ -140,17 +140,19 @@ const schema = z.object({
   /**
    * AI video-generation providers an operator has enabled (Phase 11 §10).
    *
-   * A comma-separated allow-list of provider ids — `fal`, `veo`, `runway`.
-   * Empty is the default and means link mode offers stock footage only, which is
+   * A comma-separated allow-list of provider ids. Since Phase 12 the ids are the
+   * four direct vendor APIs behind Tally's branded models — `qwen`, `minimax`,
+   * `seedance`, `veo` — plus the pre-existing `runway`. Empty is the default and
+   * means AI video is unavailable and every project uses stock footage, which is
    * the pre-Phase-11 behaviour.
    *
-   * `fal` is the fal.ai provider and carries a catalogue of models (Seedance,
-   * Kling, Hailuo/MiniMax, Hunyuan, Wan, Veo 3) behind one key. The older value
-   * `seedance` is still accepted and resolves to `fal`, so an environment written
-   * before the catalogue existed keeps working.
+   * `fal` was removed as a video route in Phase 12 (§14). It is still accepted
+   * here and resolves to nothing with a warning rather than a boot failure, so a
+   * stale `VIDEO_GEN_PROVIDERS=fal` line degrades to "no AI video" instead of
+   * taking the deployment down. See `PROVIDER_ALIASES` in `providers/video-gen.ts`.
    *
    * This is the *server's* list, and it is what makes §10's rule enforceable: a
-   * client sends a provider id and the server answers from this variable plus the
+   * client sends a model id and the server answers from this variable plus the
    * credential check. A provider absent here is unavailable however the request
    * is manipulated, and a provider present here but missing its key reports
    * `not_configured` rather than being quietly skipped (§11, §12).
@@ -160,32 +162,89 @@ const schema = z.object({
    * for one project must not change how every other project acquires visuals.
    */
   VIDEO_GEN_PROVIDERS: csv,
+
   /**
-   * fal.ai API key — one credential for the whole fal.ai model catalogue (§11).
+   * Alibaba Cloud Model Studio (DashScope) key — the backend for Tal 1.0 (§2).
    *
-   * fal.ai hosts video models from ByteDance (Seedance), Kuaishou (Kling), MiniMax
-   * (Hailuo), Tencent (Hunyuan), Alibaba (Wan) and Google (Veo 3) behind a single
-   * queue API. Most of those vendors publish no first-party public API Tally could
-   * integrate against, so fal.ai is the actual, verifiable service. Unset means
-   * every fal model reports NOT_CONFIGURED, never faked.
+   * DashScope is Alibaba's own first-party API and hosts the Wan video models
+   * directly, so this is a vendor API rather than an aggregator. Unset means
+   * Tal 1.0 reports NOT_CONFIGURED and cannot be selected, never faked (§42).
+   */
+  DASHSCOPE_API_KEY: z.string().optional(),
+  /**
+   * DashScope region host. Alibaba runs separate endpoints for mainland China and
+   * the international estate, and a key issued for one is rejected by the other.
+   */
+  DASHSCOPE_BASE_URL: z
+    .string()
+    .default("https://dashscope-intl.aliyuncs.com/api/v1"),
+  /** Wan text-to-video model id. Versioned by Alibaba, so configurable. */
+  DASHSCOPE_VIDEO_MODEL: z.string().default("wan2.2-t2v-plus"),
+  /** Wan text-to-image model id, used for continuity reference stills (§5). */
+  DASHSCOPE_IMAGE_MODEL: z.string().default("wan2.2-t2i-plus"),
+
+  /**
+   * MiniMax platform key — the backend for Tal 2.0 (§2).
+   *
+   * MiniMax publishes its own video API, so Hailuo is reached first-party here
+   * rather than through an aggregator as it was in Phase 11.
+   */
+  MINIMAX_API_KEY: z.string().optional(),
+  /** MiniMax API host. The `.chat` domain serves the international estate. */
+  MINIMAX_BASE_URL: z.string().default("https://api.minimaxi.chat/v1"),
+  /** MiniMax video model id. */
+  MINIMAX_VIDEO_MODEL: z.string().default("MiniMax-Hailuo-02"),
+  /**
+   * MiniMax text-to-image model id, used for continuity reference stills (§5).
+   *
+   * The same key and host as the video API — MiniMax serves images from its own
+   * `image_generation` endpoint, so Tal 2.0 generating references costs no second
+   * credential and introduces no second integration.
+   */
+  MINIMAX_IMAGE_MODEL: z.string().default("image-01"),
+
+  /**
+   * Seedance key — the backend for Tal 3.0 (§2).
+   *
+   * ByteDance serves Seedance through Volcengine Ark. The variable is named for
+   * the model rather than the platform because §2 names it that way and because
+   * an operator setting it is thinking about Seedance, not about Ark.
+   */
+  SEEDANCE_API_KEY: z.string().optional(),
+  /** Ark API host. */
+  SEEDANCE_BASE_URL: z.string().default("https://ark.ap-southeast.volces.com/api/v3"),
+  /** Seedance model id. Ark versions these, so it is configurable. */
+  SEEDANCE_VIDEO_MODEL: z.string().default("doubao-seedance-1-0-pro-250528"),
+  /**
+   * Ark text-to-image model id, used for continuity reference stills (§5).
+   *
+   * Ark serves images through the Seedream family on the same host and key as
+   * Seedance video, under the OpenAI-shaped `/images/generations` route. Separate
+   * variable because the model families version independently.
+   */
+  SEEDANCE_IMAGE_MODEL: z.string().default("doubao-seedream-3-0-t2i-250415"),
+
+  /**
+   * fal.ai API key.
+   *
+   * Superseded as a video route in Phase 12 (§14): the four branded models now
+   * reach their vendors directly, so nothing reads this. Retained rather than
+   * deleted because `env.ts` parses strictly and removing a key an existing
+   * deployment sets would turn a harmless stale line into a boot failure.
+   *
+   * @deprecated Video generation goes direct to the vendor APIs above.
    */
   FAL_KEY: z.string().optional(),
   /**
-   * Superseded, and kept only so setting it is not an error.
+   * Superseded, and kept only so setting it is not an error. Nothing reads it.
    *
-   * Each fal model now carries its own endpoint slug in the catalogue in
-   * `providers/video-gen.ts`, because one variable cannot express ten endpoints.
-   * Retained rather than deleted: `env.ts` parses strictly, and removing a key an
-   * existing deployment sets would turn a harmless stale line into a boot failure.
-   * Nothing reads it.
-   *
-   * @deprecated Model endpoints come from `FAL_MODELS`, not from configuration.
+   * @deprecated Model ids come from the branded model catalogue, not config.
    */
   FAL_SEEDANCE_MODEL: z
     .string()
     .default("fal-ai/bytedance/seedance/v1/pro/text-to-video"),
   /**
-   * Google AI (Gemini) API key for Veo video generation (§12).
+   * Google AI (Gemini) API key — the backend for Tal 3.1 (§2, §12, §15).
    *
    * Distinct from `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and not derivable
    * from them. Those are an OAuth client for acting *as a user's YouTube
@@ -193,10 +252,20 @@ const schema = z.object({
    * API authenticated with a project API key. Reusing the OAuth client here is
    * not possible, so no duplicate Google auth infrastructure is created —
    * `GEMINI_API_KEY` is simply a different credential for a different API.
+   *
+   * §15: this is the *existing* Gemini integration, adapted to the branded model
+   * layer rather than duplicated.
    */
   GEMINI_API_KEY: z.string().optional(),
   /** Veo model id. Overridable because Google versions these behind previews. */
   GEMINI_VEO_MODEL: z.string().default("veo-3.1-generate-preview"),
+  /**
+   * Gemini image model, used for continuity reference stills on Tal 3.1 (§5).
+   *
+   * The same credential as Veo — one Google AI key covers both APIs, which is
+   * why no second Gemini integration is introduced (§15).
+   */
+  GEMINI_IMAGE_MODEL: z.string().default("imagen-4.0-generate-001"),
 
   MUSIC_PROVIDER: z.enum(["freesound", "mock"]).default("mock"),
   FREESOUND_API_KEY: z.string().optional(),
@@ -240,6 +309,22 @@ const schema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_STUDIO: z.string().optional(),
   STRIPE_PRICE_SCALE: z.string().optional(),
+
+  /**
+   * Stripe price ids for the one-off credit packs (§11).
+   *
+   * One variable per pack, resolved server-side by `priceIdForPack` exactly as the
+   * subscription prices are: the request body names a *pack*, never a price id, so
+   * a client cannot select what it will be charged. A pack whose variable is unset
+   * is simply not offered — there is no fallback price and no default amount.
+   *
+   * These are `mode: "payment"` prices rather than recurring ones, which is what
+   * makes the webhook able to tell a top-up from a subscription (§11).
+   */
+  STRIPE_PRICE_CREDITS_100: z.string().optional(),
+  STRIPE_PRICE_CREDITS_500: z.string().optional(),
+  STRIPE_PRICE_CREDITS_1000: z.string().optional(),
+  STRIPE_PRICE_CREDITS_2500: z.string().optional(),
 
   MAX_REMOTE_ASSET_BYTES: z.coerce
     .number()

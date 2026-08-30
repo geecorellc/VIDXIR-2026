@@ -57,6 +57,27 @@
       "when": 1788240000000,
       "tag": "0007_continuity_layer",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788480000000,
+      "tag": "0008_phase12_video_quality",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788720000000,
+      "tag": "0009_phase13_credits",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788960000000,
+      "tag": "0010_phase13_description_path",
+      "breakpoints": true
     }
   ]
 }
