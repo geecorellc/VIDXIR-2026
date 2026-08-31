@@ -26,6 +26,10 @@
  *  - **Capabilities are honoured, not decorative** (§4, §5, §18 cases 4–7). An
  *    unsupported resolution is refused server-side; a model that declares no image
  *    support cannot be talked into an image request.
+ *  - **A declared reference-image capability is a claim about a request body** (§6,
+ *    §19). Where a model says it accepts continuity stills, the recorded body is
+ *    searched for the actual bytes; where it says it does not, the body is searched to
+ *    prove they were stripped before the adapter saw them.
  *  - **Reported configuration is the truth** (§18 case 12 and its Phase 11
  *    ancestor). Enabled without a key reports `not_configured` and names the
  *    variable; not enabled reports `disabled` rather than vanishing; neither can
@@ -757,10 +761,10 @@ describe("capability matrix (§4, §16, §18 cases 4–7)", () => {
   it("declares text-to-video everywhere and claims no capability it lacks", () => {
     for (const model of availableModels()) {
       expect(model.capabilities.textToVideo).toBe(true);
-      // No adapter here sends a first frame or a reference image, so §19's "do not
-      // fabricate provider capabilities" makes both of these false until one does.
+      // No adapter sends a first frame, so §19's "do not fabricate provider
+      // capabilities" keeps this false everywhere until one does. Image-to-video is a
+      // separate feature from reference images and is not implemented on any model.
       expect(model.capabilities.imageToVideo).toBe(false);
-      expect(model.capabilities.referenceImages).toBe(false);
     }
     // Audio is declared only where the vendor actually produces it.
     const audio = new Map(
@@ -768,6 +772,33 @@ describe("capability matrix (§4, §16, §18 cases 4–7)", () => {
     );
     expect(audio.get("tal/3.1")).toBe(true);
     expect(audio.get("tal/1.0")).toBe(false);
+  });
+
+  it("declares reference images only where an adapter actually sends them (§6, §19)", () => {
+    const references = new Map(
+      availableModels().map((m) => [m.id, m.capabilities.referenceImages]),
+    );
+
+    // Tal 3.1's vendor documents a reference-image input on the endpoint its adapter
+    // calls, and the adapter sends the bytes. The cases further down prove that rather
+    // than trusting this flag.
+    expect(references.get("tal/3.1")).toBe(true);
+
+    // The other three vendors do offer *something* in this area, and none of it is
+    // reachable from the endpoint and model each adapter uses:
+    //  - Tal 1.0's Wan route takes `first_frame`/`last_frame` image-to-video inputs,
+    //    at most one of each, on an i2v model — not the configured t2v one — and its
+    //    documentation states there is no multi-subject reference support.
+    //  - Tal 2.0's reference images are a v2-API feature on MiniMax-H3, and this
+    //    adapter is on v1 with Hailuo-02; claiming it would need an endpoint *and* a
+    //    model migration, not a flag.
+    //  - Tal 3.0's reference support could not be verified at all: Volcengine's and
+    //    BytePlus's documentation hosts were unreachable, and the official SDK types
+    //    the content item's `role` as a bare string with no enumerated values. A guess
+    //    is exactly what §19 forbids.
+    expect(references.get("tal/1.0")).toBe(false);
+    expect(references.get("tal/2.0")).toBe(false);
+    expect(references.get("tal/3.0")).toBe(false);
   });
 
   it("states strengths and honest limitations for each model (§4)", () => {
@@ -1612,6 +1643,331 @@ describe("Tal 3.1 on its vendor API (§15)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// §6 — continuity reference stills reaching a vendor
+// ---------------------------------------------------------------------------
+
+/**
+ * The reuse half of §6, asserted at the only layer where it can be proved.
+ *
+ * "The model accepts reference images" is a claim about an outbound HTTP body, and the
+ * failure it guards against is silent by construction: an adapter that declares support
+ * and drops the field produces a *working video*, just one that ignores the stills the
+ * workspace paid to generate. Nothing downstream can tell the difference. So these cases
+ * read the recorded request body and assert the bytes are in it.
+ *
+ * Every case is offline. `providers/http` is replaced at the top of this file, so the
+ * only thing being asserted is what Tally *would* have sent — which is the strongest
+ * honest claim available without spending money, and the only one available at all here
+ * since `GEMINI_API_KEY` is a placeholder. Whether the real vendor accepts this body is
+ * `verify:video-providers`' question and is not answered anywhere in this file.
+ */
+describe("continuity reference stills (§6)", () => {
+  beforeEach(() => {
+    configure(ALL_KEYS);
+  });
+
+  /** A finished Veo operation. Two replies: the submit, then one poll. */
+  function veoReplies(): unknown[] {
+    return [
+      { name: "models/veo/operations/op-ref" },
+      {
+        done: true,
+        response: {
+          generateVideoResponse: {
+            generatedSamples: [
+              { video: { uri: "https://generativelanguage.googleapis.com/v1beta/files/r" } },
+            ],
+          },
+        },
+      },
+    ];
+  }
+
+  /** One stored still, with recognisable bytes so the base64 can be identified. */
+  function reference(over: Partial<{
+    kind: "character" | "environment" | "prop";
+    entityId: string;
+    bytes: Buffer;
+    mimeType: string;
+  }> = {}) {
+    return {
+      kind: "character" as const,
+      entityId: "maya",
+      bytes: Buffer.from("still-bytes-for-maya"),
+      mimeType: "image/png",
+      ...over,
+    };
+  }
+
+  /** The `instances[0]` object of the recorded submit. */
+  function instance(): Record<string, unknown> {
+    const body = (net.calls[0] as Call).body as {
+      instances: Array<Record<string, unknown>>;
+    };
+    return body.instances[0] as Record<string, unknown>;
+  }
+
+  it("sends the still's bytes inline, inside the instance (§6)", async () => {
+    net.replies = veoReplies();
+
+    await generateClip(
+      request({ modelId: "tal/3.1", referenceImages: [reference()] }),
+      USAGE,
+    );
+
+    const sent = instance()["referenceImages"] as Array<{
+      image: { inlineData: { mimeType: string; data: string } };
+      referenceType: string;
+    }>;
+
+    expect(sent).toHaveLength(1);
+    // The actual bytes, not a URL and not a filename. Decoded rather than compared as
+    // base64, so the assertion is about the image the vendor receives.
+    expect(Buffer.from(sent[0]!.image.inlineData.data, "base64").toString()).toBe(
+      "still-bytes-for-maya",
+    );
+    expect(sent[0]!.image.inlineData.mimeType).toBe("image/png");
+    // The only documented reference type: preserve this subject's appearance.
+    expect(sent[0]!.referenceType).toBe("asset");
+
+    // Inside the instance beside the prompt — this vendor does not read them from
+    // `parameters`, and putting them there would be accepted-and-ignored.
+    expect(instance()["prompt"]).toContain("Wide shot of a kitchen worktop");
+    const params = ((net.calls[0] as Call).body as {
+      parameters: Record<string, unknown>;
+    }).parameters;
+    expect(params["referenceImages"]).toBeUndefined();
+  });
+
+  it("never sends a private storage URL in place of the bytes (§21)", async () => {
+    net.replies = veoReplies();
+
+    await generateClip(
+      request({ modelId: "tal/3.1", referenceImages: [reference()] }),
+      USAGE,
+    );
+
+    // Tally's stills live in a private bucket. The alternative to inlining would be
+    // handing the vendor a signed URL to object storage, which is a credential in a
+    // request body by another name.
+    const serialised = JSON.stringify((net.calls[0] as Call).body);
+    expect(serialised).not.toContain("http://");
+    expect(serialised).not.toContain("X-Amz-Signature");
+    expect(serialised).not.toContain("storageKey");
+  });
+
+  it("omits the field entirely when the scene has no references", async () => {
+    net.replies = veoReplies();
+
+    await generateClip(request({ modelId: "tal/3.1" }), USAGE);
+
+    // Absent rather than `[]`. An empty array is a different request to a vendor that
+    // gates behaviour on the field's presence, and this is the ordinary path — most
+    // scenes on most projects have no stored stills.
+    expect(instance()).not.toHaveProperty("referenceImages");
+    expect(Object.keys(instance())).toEqual(["prompt"]);
+  });
+
+  it("caps the request at the three stills the vendor accepts, keeping priority order", async () => {
+    net.replies = veoReplies();
+
+    // `referencesForScene` emits characters, then the environment, then props — so the
+    // props are what a cap should drop.
+    await generateClip(
+      request({
+        modelId: "tal/3.1",
+        referenceImages: [
+          reference({ entityId: "maya", bytes: Buffer.from("a") }),
+          reference({ entityId: "sam", bytes: Buffer.from("b") }),
+          reference({ kind: "environment", entityId: "kitchen", bytes: Buffer.from("c") }),
+          reference({ kind: "prop", entityId: "kettle", bytes: Buffer.from("d") }),
+        ],
+      }),
+      USAGE,
+    );
+
+    const sent = instance()["referenceImages"] as Array<{
+      image: { inlineData: { data: string } };
+    }>;
+    // Truncated, not rejected: a fourth would have the vendor refuse the whole request
+    // after the scene's credits were already committed.
+    expect(sent).toHaveLength(3);
+    expect(
+      sent.map((s) => Buffer.from(s.image.inlineData.data, "base64").toString()),
+    ).toEqual(["a", "b", "c"]);
+  });
+
+  it("skips a still whose stored format the vendor does not take", async () => {
+    net.replies = veoReplies();
+
+    const clip = await generateClip(
+      request({
+        modelId: "tal/3.1",
+        referenceImages: [
+          reference({ mimeType: "image/webp", bytes: Buffer.from("webp") }),
+          reference({ entityId: "sam", mimeType: "image/jpeg", bytes: Buffer.from("jpeg") }),
+        ],
+      }),
+      USAGE,
+    );
+
+    const sent = instance()["referenceImages"] as Array<{
+      image: { inlineData: { mimeType: string; data: string } };
+    }>;
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.image.inlineData.mimeType).toBe("image/jpeg");
+    // The scene still renders. A reference that cannot be sent degrades to the textual
+    // continuity every other model relies on — it does not fail the build.
+    expect(clip.modelId).toBe("tal/3.1");
+  });
+
+  it("skips an implausibly large still rather than building a body to be rejected", async () => {
+    net.replies = veoReplies();
+
+    const clip = await generateClip(
+      request({
+        modelId: "tal/3.1",
+        referenceImages: [
+          // Larger than anything `executeReferenceImages` produces. Base64 inflates by
+          // a third and three stills share one request body.
+          reference({ bytes: Buffer.alloc(7 * 1_048_576, 1) }),
+          // And an empty one: a zero-byte asset is a storage fault, not an image.
+          reference({ entityId: "sam", bytes: Buffer.alloc(0) }),
+          reference({ entityId: "ana", bytes: Buffer.from("small-and-fine") }),
+        ],
+      }),
+      USAGE,
+    );
+
+    const sent = instance()["referenceImages"] as Array<{
+      image: { inlineData: { data: string } };
+    }>;
+    expect(sent).toHaveLength(1);
+    expect(Buffer.from(sent[0]!.image.inlineData.data, "base64").toString()).toBe(
+      "small-and-fine",
+    );
+    expect(clip.modelId).toBe("tal/3.1");
+  });
+
+  it("normalises image/jpg to the mime type the vendor documents", async () => {
+    net.replies = veoReplies();
+
+    await generateClip(
+      request({ modelId: "tal/3.1", referenceImages: [reference({ mimeType: "image/jpg" })] }),
+      USAGE,
+    );
+
+    const sent = instance()["referenceImages"] as Array<{
+      image: { inlineData: { mimeType: string } };
+    }>;
+    expect(sent[0]!.image.inlineData.mimeType).toBe("image/jpeg");
+  });
+
+  it("relaxes personGeneration only on the reference path, because the vendor requires it", async () => {
+    net.replies = veoReplies();
+    await generateClip(
+      request({ modelId: "tal/3.1", referenceImages: [reference()] }),
+      USAGE,
+    );
+
+    // The vendor documents `allow_adult` as the *only* accepted value once
+    // `referenceImages` is present. `dont_allow` here would not be a stricter request —
+    // it would be a rejected one. Every still Tally sends was drawn from Tally's own
+    // story bible, so the subject preserved is a generated character.
+    const withRefs = ((net.calls[0] as Call).body as {
+      parameters: Record<string, unknown>;
+    }).parameters;
+    expect(withRefs["personGeneration"]).toBe("allow_adult");
+
+    // And the ordinary text-to-video path is untouched.
+    net.calls = [];
+    net.replies = veoReplies();
+    await generateClip(request({ modelId: "tal/3.1" }), USAGE);
+    const withoutRefs = ((net.calls[0] as Call).body as {
+      parameters: Record<string, unknown>;
+    }).parameters;
+    expect(withoutRefs["personGeneration"]).toBe("dont_allow");
+  });
+
+  it("sends nothing when the operator has pinned a Veo version without the feature", async () => {
+    // The vendor gates reference images on the model version, and GEMINI_VEO_MODEL is
+    // operator-configurable. A deployment on Veo 3 must get textual continuity rather
+    // than have every scene rejected for carrying an unknown field.
+    for (const model of ["veo-3.0-generate-001", "veo-2.0-generate-001", "veo-3.1-lite"]) {
+      configure({ ...ALL_KEYS, GEMINI_VEO_MODEL: model });
+      net.calls = [];
+      net.replies = veoReplies();
+
+      const clip = await generateClip(
+        request({ modelId: "tal/3.1", referenceImages: [reference()] }),
+        USAGE,
+      );
+
+      expect(instance(), model).not.toHaveProperty("referenceImages");
+      // Still `dont_allow`: nothing was sent, so there is no reason to relax it.
+      expect(
+        (((net.calls[0] as Call).body as { parameters: Record<string, unknown> })
+          .parameters)["personGeneration"],
+        model,
+      ).toBe("dont_allow");
+      // The scene renders regardless.
+      expect(clip.modelId, model).toBe("tal/3.1");
+    }
+  });
+
+  it("sends them on the fast 3.1 variant too", async () => {
+    configure({ ...ALL_KEYS, GEMINI_VEO_MODEL: "veo-3.1-fast-generate-preview" });
+    net.replies = veoReplies();
+
+    await generateClip(
+      request({ modelId: "tal/3.1", referenceImages: [reference()] }),
+      USAGE,
+    );
+
+    expect(instance()["referenceImages"]).toHaveLength(1);
+    expect((net.calls[0] as Call).url).toContain("veo-3.1-fast-generate-preview");
+  });
+
+  it("strips references before an adapter that cannot use them ever sees one", async () => {
+    // The contract `generateClip` enforces for every other model. Asserted on Tal 3.0
+    // because Ark's request body is text-only: if the normalisation regressed, the
+    // bytes would arrive at an adapter with nowhere to put them and be dropped
+    // silently rather than loudly.
+    net.replies = [
+      { id: "ark-ref" },
+      { status: "succeeded", content: { video_url: "https://tos.volces.com/c.mp4" } },
+    ];
+
+    await generateClip(
+      request({ modelId: "tal/3.0", referenceImages: [reference()] }),
+      USAGE,
+    );
+
+    const serialised = JSON.stringify((net.calls[0] as Call).body);
+    expect(serialised).not.toContain("still-bytes-for-maya");
+    expect(serialised).not.toContain(Buffer.from("still-bytes-for-maya").toString("base64"));
+    expect(serialised).not.toContain("referenceImages");
+    expect(serialised).not.toContain("maya");
+  });
+
+  it("charges the same for a scene whether or not stills were sent", async () => {
+    // References are a constraint on the generation, not a billable extra. A vendor
+    // that priced them separately would need a pricing change rather than a silent one.
+    net.replies = veoReplies();
+    const plain = await generateClip(request({ modelId: "tal/3.1" }), USAGE);
+
+    net.replies = veoReplies();
+    const constrained = await generateClip(
+      request({ modelId: "tal/3.1", referenceImages: [reference()] }),
+      USAGE,
+    );
+
+    expect(constrained.durationMs).toBe(plain.durationMs);
+    expect(constrained.modelId).toBe(plain.modelId);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §21 — credentials, and the placeholder
 // ---------------------------------------------------------------------------
 
@@ -1776,5 +2132,132 @@ describe("test-suite discipline (§18, §19)", () => {
     expect(stripped).not.toContain("queue.fal.run");
     expect(stripped).not.toContain("FAL_KEY");
     expect(stripped).not.toContain("fal.media");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §6, §19 — the registry cannot claim what no adapter does
+// ---------------------------------------------------------------------------
+
+/**
+ * `assertRegistryIntegrity` runs at module load, so the registry as configured is
+ * already proven consistent by this file importing at all. What these cases add is
+ * proof that the check is *load-bearing in both directions* — that it would actually
+ * catch the two ways reference support can silently go false, rather than being a
+ * comment that happens to be true today.
+ *
+ * The invariant matters because a capability flag is one line and an adapter is fifty.
+ * Flipping the flag alone would have the visuals stage download stills from object
+ * storage, attach them to a request, and have the adapter discard them — a workspace
+ * charged for reference generations with no consumer, and no symptom beyond continuity
+ * being worse than the operator believes.
+ */
+describe("reference-image registry integrity (§6, §19)", () => {
+  beforeEach(() => {
+    configure(ALL_KEYS);
+  });
+
+  /** The registry source, comments removed so prose cannot satisfy an assertion. */
+  function registrySource(): string {
+    return readFileSync(new URL("../providers/video-gen.ts", import.meta.url), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "");
+  }
+
+  it("checks the flag and the adapter against each other in both directions", () => {
+    const stripped = registrySource();
+    // A model claiming support with no adapter: stills generated, charged, discarded.
+    expect(stripped).toContain(
+      "declares reference images but its adapter ignores them",
+    );
+    // An adapter claiming support with no model: a dead branch that reads as shipped.
+    expect(stripped).toContain(
+      "accepts reference images but no model declares them",
+    );
+    // Enforced at load rather than only here, because a test can be skipped.
+    expect(stripped).toContain("assertRegistryIntegrity();");
+  });
+
+  it("pairs every declaring model with a provider that signed for it", () => {
+    // The runtime half of the same invariant, over the live registry rather than its
+    // source. `availableModels()` is env-derived, so this covers what this deployment
+    // would actually offer.
+    const declaring = availableModels().filter(
+      (model) => model.capabilities.referenceImages,
+    );
+    expect(declaring.length).toBeGreaterThan(0);
+
+    for (const model of declaring) {
+      const { provider } = resolveModel(model.id);
+      // The adapter's signature is not readable from outside the module, so the
+      // observable consequence is asserted instead: a declaring model's provider must
+      // put the bytes in its request body. `resolveModel` proves the pairing exists.
+      expect(provider, model.id).toBe("veo");
+    }
+  });
+
+  it("keeps the capability out of the customer-facing model payload (§3)", () => {
+    // A capability flag is an internal fact. The picker renders `strengths` and
+    // `limitations`, which say what a customer needs in plain words, and those must not
+    // leak the vendor name along with it.
+    const serialised = JSON.stringify(publicModels());
+    for (const forbidden of FORBIDDEN_NAMES) {
+      expect(serialised).not.toMatch(forbidden);
+    }
+    const ultra = availableModels().find((m) => m.id === "tal/3.1");
+    // Stated honestly, including the cap, since §4 requires limitations to be honest.
+    expect(ultra?.limitations.join(" ")).toMatch(/three continuity reference stills/i);
+  });
+
+  it("still declares image generation for the stage that draws the stills (§5)", () => {
+    // The reuse path has a prerequisite: something has to draw a reference before a
+    // scene can be shown one. Both halves live on the same model, which is what makes
+    // reference continuity work without a second provider.
+    const ultra = availableModels().find((m) => m.id === "tal/3.1");
+    expect(ultra?.capabilities.imageGeneration).toBe(true);
+    expect(ultra?.capabilities.referenceImages).toBe(true);
+    // And image-to-video remains a separate, unimplemented feature.
+    expect(ultra?.capabilities.imageToVideo).toBe(false);
+  });
+
+  it("does not populate the vendor's first-frame field (imageToVideo is separate)", async () => {
+    net.replies = [
+      { name: "models/veo/operations/op-nf" },
+      {
+        done: true,
+        response: {
+          generateVideoResponse: {
+            generatedSamples: [
+              { video: { uri: "https://generativelanguage.googleapis.com/v1beta/files/n" } },
+            ],
+          },
+        },
+      },
+    ];
+
+    await generateClip(
+      request({
+        modelId: "tal/3.1",
+        referenceImages: [
+          {
+            kind: "character" as const,
+            entityId: "maya",
+            bytes: Buffer.from("still"),
+            mimeType: "image/png",
+          },
+        ],
+      }),
+      USAGE,
+    );
+
+    // This vendor takes a first frame as an instance-level `image`, beside
+    // `referenceImages`. Sending one would animate a still rather than generate a shot
+    // constrained by it — a different feature with different framing and cost, and out
+    // of scope until it is implemented deliberately.
+    const body = (net.calls[0] as Call).body as {
+      instances: Array<Record<string, unknown>>;
+    };
+    expect(body.instances[0]).not.toHaveProperty("image");
+    expect(body.instances[0]).toHaveProperty("referenceImages");
   });
 });

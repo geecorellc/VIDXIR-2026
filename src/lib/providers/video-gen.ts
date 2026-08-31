@@ -212,16 +212,17 @@ export interface VideoGenProviderStatus {
 /**
  * A stored reference still, offered to a model that can constrain generation with one.
  *
- * §6's other half. The continuity engine's fallback when this cannot be used is
- * detailed textual prompting, which is what every catalogued model gets today — no
- * model here declares `capabilities.referenceImages`, so this type is currently
- * inhabited by nothing that reaches a provider.
+ * §6's other half. Reaches exactly one adapter today — Tal 3.1, whose vendor documents
+ * a reference-image input on the model Tally configures by default. Every other
+ * catalogued model gets the fallback instead: detailed textual prompting, which is what
+ * the continuity engine has always done and still does whenever a still cannot be used.
  *
- * It exists now rather than when the first such backend lands because the *decision*
- * exists now: `generateClip` refuses references for a model that declares none, so the
+ * `generateClip` strips this field for a model that declares no support, so the
  * capability flag is what gates the feature rather than each adapter remembering to
- * ignore a field. Flipping one model's flag and reading `request.referenceImages` in
- * its adapter is the whole change.
+ * ignore a field. Reading `request.referenceImages` in an adapter and flipping its
+ * model's flag is the whole change for the next backend that qualifies —
+ * `assertRegistryIntegrity` refuses to load a registry where only one of the two
+ * happened.
  */
 export interface ReferenceImageInput {
   /** What the still depicts. Same vocabulary as `ImagePurpose`'s continuity members. */
@@ -1330,6 +1331,111 @@ interface ImagenResponse {
   }> | null;
 }
 
+/**
+ * How many reference stills Veo accepts on one request.
+ *
+ * The vendor documents "up to three asset images of a single person, character, or
+ * product". A fourth is not merged or ignored by the API — the request is rejected — so
+ * the adapter truncates rather than forwarding whatever the continuity layer selected.
+ * `referencesForScene` already emits them in continuity priority order (characters,
+ * then the environment, then props), which is what makes truncation from the end the
+ * right end: the least important reference is the one dropped.
+ */
+const VEO_MAX_REFERENCE_IMAGES = 3;
+
+/**
+ * Image types Veo's reference input accepts.
+ *
+ * Checked rather than trusted because the bytes come from object storage via
+ * `assets.mimeType`, and a still stored as something else — a WebP from a vendor whose
+ * image endpoint returned one — would be a request the vendor rejects *after* the
+ * scene's credits are committed. A rejected still is skipped and the scene keeps its
+ * textual continuity, which is the same degradation as having no still at all.
+ */
+const VEO_REFERENCE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg"] as const;
+
+/**
+ * Largest still this adapter will inline, before base64.
+ *
+ * **Tally's own guard, not a quoted vendor limit.** The reference-image documentation
+ * does not state a per-image size, and inventing a number and attributing it to the
+ * vendor is exactly what §19 forbids — so this is chosen from what is actually known:
+ * base64 inflates bytes by a third, three stills share one request, and Tally's own
+ * stills are 1080p-to-2K PNGs that land far below this. A still much larger than this
+ * did not come from `executeReferenceImages`, and inlining three of them would build a
+ * multi-megabyte body to be rejected after the scene's credits were committed.
+ *
+ * Skipping is the safe direction: the scene keeps its textual continuity and renders.
+ */
+const VEO_MAX_REFERENCE_BYTES = 6 * 1_048_576;
+
+/**
+ * Whether the *configured* Veo model version accepts reference images.
+ *
+ * `GEMINI_VEO_MODEL` is operator-configurable and the vendor gates this feature on the
+ * model version: Veo 3.1 accepts reference images, Veo 3.1 Lite, Veo 3 and Veo 2 reject
+ * the field. Tally's default (`veo-3.1-generate-preview`) qualifies, but a deployment
+ * that pinned an older version must not have its requests rejected wholesale for
+ * carrying a field that version has never heard of.
+ *
+ * So the capability is declared statically on the model — the matrix describes Tal 3.1,
+ * not one deployment's env — and enforced dynamically here. An operator on Veo 3 gets
+ * textual continuity, which is the documented fallback and exactly what they get today.
+ */
+function veoReferenceModel(model: string): boolean {
+  const id = model.toLowerCase();
+  return id.startsWith("veo-3.1") && !id.includes("lite");
+}
+
+/** One `VideoGenerationReferenceImage`, in the shape the REST API documents. */
+interface VeoReferenceImage {
+  image: { inlineData: { mimeType: string; data: string } };
+  /** The only documented value. Preserves a subject's appearance across the clip. */
+  referenceType: "asset";
+}
+
+/**
+ * Map continuity stills onto Veo's `referenceImages` instance field (§6).
+ *
+ * The vendor takes them inline, base64, *inside the instance* alongside the prompt —
+ * not in `parameters`, and not as a URL the vendor fetches. Sending bytes rather than a
+ * link is also the only option available here: Tally's stills live in a private bucket,
+ * and the alternative would be handing Google a signed URL to storage.
+ *
+ * Deliberately not `imageToVideo`. The instance-level `image` field is a *first frame*
+ * to animate and is a separate feature with separate cost and framing consequences;
+ * this function never populates it, and `capabilities.imageToVideo` stays false.
+ *
+ * Returns the images and the count skipped, so the caller can say which it is when a
+ * scene ends up with fewer references than the continuity layer chose.
+ */
+function veoReferenceImages(
+  references: readonly ReferenceImageInput[],
+): { images: VeoReferenceImage[]; skipped: number } {
+  const usable = references.filter(
+    (reference) =>
+      (VEO_REFERENCE_MIME_TYPES as readonly string[]).includes(
+        reference.mimeType.toLowerCase(),
+      ) &&
+      reference.bytes.byteLength > 0 &&
+      reference.bytes.byteLength <= VEO_MAX_REFERENCE_BYTES,
+  );
+
+  const images = usable.slice(0, VEO_MAX_REFERENCE_IMAGES).map((reference) => ({
+    image: {
+      inlineData: {
+        mimeType: reference.mimeType.toLowerCase() === "image/jpg"
+          ? "image/jpeg"
+          : reference.mimeType.toLowerCase(),
+        data: reference.bytes.toString("base64"),
+      },
+    },
+    referenceType: "asset" as const,
+  }));
+
+  return { images, skipped: references.length - images.length };
+}
+
 const TAL_3_1: VideoGenModel = {
   id: "tal/3.1",
   provider: "veo",
@@ -1341,12 +1447,14 @@ const TAL_3_1: VideoGenModel = {
     "Generates a native audio track with the clip",
     "Strongest prompt adherence for complex direction",
     "Also generates 2K reference stills for the continuity engine",
+    "The only model that can be shown a continuity still, not just told about one",
   ],
   limitations: [
     "Highest credit cost per scene",
     "Eight seconds maximum per clip",
     "Landscape and portrait only — no square",
     "Refuses prompts asking for recognisable people",
+    "Uses at most three continuity reference stills per scene",
   ],
   maxClipSeconds: 8,
   formats: ["landscape", "portrait"],
@@ -1356,7 +1464,17 @@ const TAL_3_1: VideoGenModel = {
     textToVideo: true,
     imageToVideo: false,
     imageGeneration: true,
-    referenceImages: false,
+    /**
+     * The one model in the catalogue whose vendor documents a reference-image input on
+     * the endpoint this adapter calls (§6).
+     *
+     * Paired with `veo.acceptsReferenceImages`; `assertRegistryIntegrity` fails the
+     * module load if either is set without the other, so this cannot become a claim the
+     * adapter does not honour. The support is model-version-gated at the vendor —
+     * Veo 3.1 only — which `veoReferenceModel()` checks against the configured
+     * `GEMINI_VEO_MODEL` at request time rather than assuming.
+     */
+    referenceImages: true,
     audio: true,
     qualities: ["720p", "1080p"],
     imageQualities: ["1080p", "2k"],
@@ -1377,6 +1495,13 @@ const veo: GenerationProvider = {
     "authentication path is introduced — this is a different credential for a " +
     "different Google API, and the video and image halves share it.",
   models: [TAL_3_1],
+  /**
+   * Signed: `generate` below reads `request.referenceImages` and sends the bytes (§6).
+   *
+   * Paired with `TAL_3_1.capabilities.referenceImages`. Both directions are checked at
+   * module load, so this cannot outlive the code that honours it.
+   */
+  acceptsReferenceImages: true,
   missingEnvVars() {
     return env().GEMINI_API_KEY ? [] : ["GEMINI_API_KEY"];
   },
@@ -1402,22 +1527,79 @@ const veo: GenerationProvider = {
     );
     const headers = { "x-goog-api-key": key };
 
+    /**
+     * The scene's continuity stills, if this deployment's Veo version takes them (§6).
+     *
+     * `generateClip` has already stripped the field for a model that declares no
+     * support, so a non-empty list here means Tal 3.1 was selected and the continuity
+     * layer chose these entities for this scene. The version check is the remaining
+     * unknown: it is the *operator's* `GEMINI_VEO_MODEL` that decides, not the matrix.
+     */
+    const videoModel = env().GEMINI_VEO_MODEL;
+    const requested = request.referenceImages ?? [];
+    const supportsReferences = veoReferenceModel(videoModel);
+    const { images: referenceImages, skipped } = supportsReferences
+      ? veoReferenceImages(requested)
+      : { images: [] as VeoReferenceImage[], skipped: requested.length };
+
+    if (skipped > 0) {
+      // Never silently: a skipped still means this scene fell back to textual
+      // continuity, and the operator is the only one who can tell whether the cause
+      // is a pinned model version, an unsupported stored format, or simply a cast
+      // larger than three.
+      log.warn("some continuity references were not sent to the vendor", {
+        model: TAL_3_1.id,
+        videoModel,
+        supportsReferences,
+        requested: requested.length,
+        sent: referenceImages.length,
+        skipped,
+      });
+    }
+
     const started = await providerJson<VeoOperation>({
       provider: TAL_3_1.label,
-      url: `${GEMINI_API}/models/${env().GEMINI_VEO_MODEL}:predictLongRunning`,
+      url: `${GEMINI_API}/models/${videoModel}:predictLongRunning`,
       method: "POST",
       headers,
       body: {
-        instances: [{ prompt: request.prompt.slice(0, 1_500) }],
+        instances: [
+          {
+            prompt: request.prompt.slice(0, 1_500),
+            /**
+             * Reference stills go *inside the instance*, beside the prompt — this
+             * vendor does not take them in `parameters`, and the field is omitted
+             * entirely rather than sent empty when there are none.
+             */
+            ...(referenceImages.length > 0 ? { referenceImages } : {}),
+          },
+        ],
         parameters: {
           aspectRatio: frame.ratio,
           resolution: quality === "720p" ? "720p" : "1080p",
           durationSeconds: String(seconds),
           numberOfVideos: 1,
-          // No recognisable people: a generated likeness in a published video is a
-          // rights problem, and the scene director is already instructed never to
-          // ask for one.
-          personGeneration: "dont_allow",
+          /**
+           * No recognisable people: a generated likeness in a published video is a
+           * rights problem, and the scene director is already instructed never to ask
+           * for one.
+           *
+           * Relaxed to `allow_adult` on the reference-image path, and only there,
+           * because the vendor does not offer the choice: it documents `allow_adult` as
+           * the *only* accepted value once `referenceImages` is present, so
+           * `dont_allow` here would not be a stricter request — it would be a rejected
+           * one, after the scene's credits were already committed.
+           *
+           * What that does and does not concede is worth being exact about. It permits
+           * an adult figure in the frame, which a character reference for a story bible
+           * with human characters obviously requires. It does not introduce a real
+           * likeness: every still Tally sends was drawn by `executeReferenceImages`
+           * from Tally's own story bible, so the subject being preserved is a generated
+           * character, and the scene director still never asks for a named person. The
+           * text-to-video path — every other scene, and every scene on every other
+           * model — is untouched and still sends `dont_allow`.
+           */
+          personGeneration: referenceImages.length > 0 ? "allow_adult" : "dont_allow",
         },
       },
     });

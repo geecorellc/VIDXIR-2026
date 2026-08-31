@@ -9,19 +9,24 @@
  * in is the wardrobe, the palette, the lighting and the state changes, verbatim
  * and in a fixed order.
  *
- * The *scene* prompt is text-only, deliberately. No catalogued model accepts a
- * caller-supplied reference image today, so §8's stated fallback — "detailed textual
- * continuity constraints" — is the behaviour for every model, and this module is that
- * fallback in full rather than a placeholder for it. The seam is here: when a
- * reference-capable model is added to the catalogue, `buildContinuityPrompt`
- * gains a branch, and nothing above it changes.
+ * The *scene* prompt is text-only, deliberately — and stays text-only even on the one
+ * model that now accepts reference stills. §8's fallback ("detailed textual continuity
+ * constraints") is the behaviour for every model without reference support, which is
+ * most of the catalogue, and it is the behaviour *alongside* the stills on Tal 3.1
+ * rather than instead of it: a still shows a face and a coat, and it cannot express a
+ * state change, a lighting note or an entity the scene must not contain. Sending both
+ * costs nothing extra and degrades cleanly — if the vendor drops a reference, or the
+ * operator has pinned a model version that takes none, the words are still there.
  *
- * `referenceImagePrompt` is the other direction and is live now: it describes one
- * bible entity to an *image* model, so the reference still exists and is stored
- * whether or not any video backend can yet be handed it. That ordering is deliberate.
- * A reference image is worth having on its own — it is what a human reviews to say
- * "no, her coat is wrong" before eighty scenes are paid for — and it means the day a
- * backend accepts a first frame there is already a library to feed it.
+ * So this module is not a placeholder and gains no branch for reference-capable models.
+ * Which stills a scene gets is `referencesForScene`'s decision, in `service.ts`.
+ *
+ * `referenceImagePrompt` is the other direction: it describes one bible entity to an
+ * *image* model, so the reference still exists and is stored whether or not the
+ * project's video backend can be handed it. That ordering was deliberate and has now
+ * paid off — a reference image is worth having on its own, since it is what a human
+ * reviews to say "no, her coat is wrong" before eighty scenes are paid for, and because
+ * the library was already there, Tal 3.1's reference support needed no new generator.
  *
  * Everything is pure and deterministic. The same bible, state and graph produce
  * byte-identical text, which is what lets `prompt.test.ts` assert continuity

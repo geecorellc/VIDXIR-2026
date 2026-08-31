@@ -7,13 +7,14 @@
  *
  * **Why this is a user action rather than a pipeline step.** Every branded model can
  * draw a still, so the pipeline *could* generate the whole cast during the scene plan.
- * It deliberately does not: no catalogued model accepts a caller-supplied reference
- * frame today (`capabilities.referenceImages` is false on all of them), so a still's
- * only consumer right now is the human who reviews the cast before eighty scenes are
- * paid for. Spending up to thirty generations per build on something no backend can yet
- * be handed would be cost with no output, and §21 forbids exactly that. When a
- * reference-capable backend lands, `executeReferenceImages` is already the stage the
- * visuals step would call ahead of itself — the seam is the enqueue, not the work.
+ * It deliberately does not, and still does not now that one model can consume a still.
+ * Only Tal 3.1 declares `capabilities.referenceImages`, so on every other model a
+ * still's only consumer is the human who reviews the cast before eighty scenes are paid
+ * for — and spending up to thirty generations per build on something the project's own
+ * backend cannot be handed would be cost with no output, which §21 forbids. Even on
+ * Tal 3.1 the review is the point: a still nobody approved is a wrong coat propagated
+ * into eighty scenes at premium rates instead of one. `executeReferenceImages` is the
+ * stage either path runs, so the seam stays the enqueue rather than the work.
  *
  * Three properties, each a rule the mandate names:
  *

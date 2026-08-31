@@ -849,8 +849,9 @@ export async function executeVisuals(input: StageInput): Promise<{
      *
      * The §6 reuse path. Three conditions have to hold before this costs anything: the
      * continuity layer is active, this is an AI project, and the **selected model
-     * declares `referenceImages`**. No catalogued model does today, so this is an empty
-     * array on every current build and the loop below behaves exactly as it did.
+     * declares `referenceImages`** — which today means the project chose Tal 3.1. Every
+     * other model leaves this an empty array, and the loop below behaves exactly as it
+     * did before the reuse path existed.
      *
      * Gated on the capability *here* as well as in `generateClip` for a reason that is
      * about bytes rather than correctness: selecting references means downloading them
