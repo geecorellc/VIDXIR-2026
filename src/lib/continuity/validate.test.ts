@@ -38,8 +38,11 @@ import {
   type IndexedSceneState,
 } from "@/lib/continuity/scene-state";
 import {
+  isVoiceCode,
   issuesForScene,
+  sceneOfFinding,
   statusFor,
+  storedIssuesForScene,
   toQualityFindings,
   validateContinuity,
   type ContinuityComponents,
@@ -383,10 +386,21 @@ describe("validateContinuity", () => {
         sceneIndex: 1,
         state: parseSceneState({ characters: ["mara"], environment: "workshop" }),
       },
+      /**
+       * A third scene, so the negative control below still has a pair whose blocks are
+       * byte-identical. Scene 0 *introduces* Mara and the workshop while 1 and 2 return
+       * to both, and `buildContinuityPrompt` says so — which means 0's block differs
+       * from 1's by that one clause. Scenes 1 and 2 are the identical pair.
+       */
+      {
+        sceneIndex: 2,
+        state: parseSceneState({ characters: ["mara"], environment: "workshop" }),
+      },
     ];
     const shots = [
       "Mara winds a mainspring at the bench, grey beard, brown canvas coat",
       "Mara steps out into rain past a bus stop, grey beard, brown canvas coat",
+      "Mara sorts escapement wheels under a desk lamp, grey beard, brown canvas coat",
     ];
     const graph = buildSceneStateGraph(states);
 
@@ -850,6 +864,301 @@ describe("toQualityFindings", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Reading a stored finding's scene back out
+// ---------------------------------------------------------------------------
+
+/**
+ * `sceneOfFinding` is the inverse of the `scene N` field `toQualityFindings` writes, and
+ * it exists because the regeneration stage rebuilds a prompt from *stored* findings.
+ *
+ * The bug it replaces was a substring test: `detail.includes("scene 1")` matched scene 1,
+ * scenes 10–19 and scenes 100–119 alike, so on a project near `MAX_SCENES` redrawing
+ * scene 1 was handed twenty other shots' failures to correct — at full provider price,
+ * with the wrong instructions.
+ */
+describe("sceneOfFinding", () => {
+  it("does not read scene 1 out of a finding about scene 10", () => {
+    // The regression, stated at its narrowest. Every one of these is a real detail
+    // `toQualityFindings` can produce, and the old predicate matched all of them.
+    expect(sceneOfFinding("scene 10 · entity mara · Expected: a brown canvas coat.")).toBe(
+      10,
+    );
+    expect(sceneOfFinding("scene 1 · entity mara · Expected: a brown canvas coat.")).toBe(
+      1,
+    );
+
+    for (const near of ["scene 10", "scene 12", "scene 19", "scene 100", "scene 119"]) {
+      expect(sceneOfFinding(`${near} · entity mara · drifted`), near).not.toBe(1);
+    }
+  });
+
+  it("reads every scene index back exactly, across the whole plan", () => {
+    /**
+     * The full range rather than a sample, because the failure was arithmetical: any
+     * index whose decimal form has another index as a prefix was affected, which is most
+     * of them once a project passes ten scenes. `MAX_SCENES` is 120.
+     */
+    for (let index = 0; index < 120; index += 1) {
+      const detail = `scene ${index} · entity mara · the coat is the wrong colour`;
+      expect(sceneOfFinding(detail), detail).toBe(index);
+    }
+  });
+
+  it("round-trips what toQualityFindings actually wrote", () => {
+    /**
+     * The contract asserted end to end rather than against a hand-written string. The
+     * writer and the reader are in one module precisely so this cannot drift, and a
+     * fixture detail would let the format change without either test noticing.
+     */
+    const report = validateContinuity(
+      input({
+        visuals: [
+          { sceneIndex: 0, visualPrompt: "A wide shot of a room", searchTerms: [] },
+          ...realVisuals().slice(1),
+        ],
+      }),
+    );
+
+    const rows = toQualityFindings(report).filter(
+      (row) => row.code === "continuity.character.missing_constraint",
+    );
+
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(sceneOfFinding(row.detail)).toBe(0);
+    }
+  });
+
+  it("says null rather than zero for a finding about no scene", () => {
+    // The summary row and a whole-video finding have no scene, and null must not be
+    // confused with scene 0 — which is a real scene, and the first one.
+    const report = validateContinuity(input());
+    const summary = toQualityFindings(report)[0];
+
+    expect(summary?.code).toBe("continuity.score");
+    expect(sceneOfFinding(summary?.detail)).toBeNull();
+
+    expect(sceneOfFinding(undefined)).toBeNull();
+    expect(sceneOfFinding(null)).toBeNull();
+    expect(sceneOfFinding("")).toBeNull();
+    expect(sceneOfFinding("entity mara · no scene here")).toBeNull();
+  });
+
+  it("does not match a scene number that appears in a finding's own prose", () => {
+    // Anchored to the leading field, which is where the writer puts it. Searching the
+    // whole string would let a change description name a scene and be believed.
+    expect(sceneOfFinding("entity lamp · echoes scene 4, which is not in the plan")).toBe(
+      null,
+    );
+    // And the leading field wins when the prose mentions another scene.
+    expect(
+      sceneOfFinding("scene 7 · entity mara · differs from scene 2's rendering"),
+    ).toBe(7);
+  });
+});
+
+/**
+ * The selector the regeneration stage runs, against the rows it actually has.
+ *
+ * `issuesForScene` is the same decision made on a live report. This one reads stored
+ * `quality_checks` rows, which is the only thing available to a job that runs after the
+ * check's job has ended — and it is where the scene-matching bug lived.
+ */
+describe("storedIssuesForScene", () => {
+  /** A stored row, in the shape `toQualityFindings` writes. */
+  function row(
+    overrides: Partial<{
+      code: string;
+      severity: "info" | "warn" | "fail";
+      message: string;
+      detail: string;
+    }> = {},
+  ) {
+    return {
+      code: "continuity.character.missing_constraint",
+      severity: "fail" as const,
+      message: "Scene 1's prompt did not carry Mara's description.",
+      detail: "scene 1 · entity mara",
+      ...overrides,
+    };
+  }
+
+  it("does not hand scene 1 the failures of scenes 10 through 19", () => {
+    /**
+     * The regression, on the path that spends money. Every row below is a real detail
+     * for a different scene; the old `includes("scene 1")` matched all of them, so a
+     * redraw of scene 1 was told to correct nineteen other shots.
+     */
+    const findings = [
+      row({ message: "scene 1's own failure", detail: "scene 1 · entity mara" }),
+      ...[10, 11, 12, 15, 19, 100, 119].map((index) =>
+        row({
+          message: `scene ${index}'s failure`,
+          detail: `scene ${index} · entity mara`,
+        }),
+      ),
+    ];
+
+    expect(storedIssuesForScene(findings, 1)).toEqual(["scene 1's own failure"]);
+    expect(storedIssuesForScene(findings, 19)).toEqual(["scene 19's failure"]);
+    expect(storedIssuesForScene(findings, 119)).toEqual(["scene 119's failure"]);
+    // And a scene with no findings gets no instructions rather than somebody else's.
+    expect(storedIssuesForScene(findings, 2)).toEqual([]);
+  });
+
+  it("excludes voice findings, which no redraw can fix", () => {
+    // The whole reason `isVoiceCode` is exported. A scene with both a wrong coat and a
+    // wrong voice is redrawn to fix the coat; telling an image model about the narration
+    // spends a generation on an instruction it cannot act on.
+    const findings = [
+      row({ message: "The coat is the wrong colour." }),
+      row({
+        code: "continuity.voice.assignment_mismatch",
+        message: "Scene 1 was narrated in a different voice.",
+      }),
+      row({ code: "continuity.voice.drift", message: "Mara sounds like two people." }),
+    ];
+
+    expect(storedIssuesForScene(findings, 1)).toEqual(["The coat is the wrong colour."]);
+  });
+
+  it("ignores warnings and notes, so a warn verdict cannot bill a redraw", () => {
+    const findings = [
+      row({ severity: "warn", message: "A note about scene 1." }),
+      row({ severity: "info", message: "Another note about scene 1." }),
+      row({ code: "continuity.score", severity: "fail", detail: "characters 40" }),
+    ];
+
+    expect(storedIssuesForScene(findings, 1)).toEqual([]);
+    // The summary row has no scene, and null must not read as scene 0.
+    expect(storedIssuesForScene(findings, 0)).toEqual([]);
+  });
+
+  it("selects from the rows a real check wrote, not from a fixture", () => {
+    /**
+     * End to end through the writer, because the format is the contract. A change to how
+     * `toQualityFindings` renders the scene field would leave the fixtures above passing
+     * and this failing, which is the right way round.
+     */
+    const report = validateContinuity(
+      input({
+        // Scene 1's constraints stripped: the block never reached the request.
+        visuals: realVisuals().map((visual) =>
+          visual.sceneIndex === 1
+            ? { ...visual, visualPrompt: "A kettle on a stove", shotPrompt: "A kettle on a stove" }
+            : visual,
+        ),
+      }),
+    );
+
+    const stored = toQualityFindings(report);
+    const selected = storedIssuesForScene(stored, 1);
+
+    expect(selected.length).toBeGreaterThan(0);
+    // Every message selected belongs to a row whose stored scene really is 1.
+    for (const message of selected) {
+      const source = stored.find((f) => f.message === message);
+      expect(sceneOfFinding(source?.detail)).toBe(1);
+    }
+    // And scene 0, which carried its constraints, is told to correct nothing.
+    expect(storedIssuesForScene(stored, 0)).toEqual([]);
+  });
+
+  it("is empty for a project that has never been checked", () => {
+    // The stage passes `check?.findings ?? []`, so this is the first-run case: a
+    // regeneration with no stored report is a plain redraw, not a crash.
+    expect(storedIssuesForScene([], 0)).toEqual([]);
+  });
+});
+
+describe("isVoiceCode", () => {
+  it("is true for exactly the codes a visual regeneration cannot fix", () => {
+    /**
+     * Exported so `executeSceneRegeneration` can apply the same exclusion the report
+     * already applies. A second copy of the prefix test in the pipeline is how the two
+     * would come to disagree — and a disagreement here means an image model being told
+     * to correct a narration.
+     */
+    for (const code of [
+      "continuity.voice.missing",
+      "continuity.voice.assignment_mismatch",
+      "continuity.voice.drift",
+      "continuity.voice.unused",
+      // A code that does not exist yet is excluded by default, which is the point of a
+      // prefix test rather than a list of the three that do.
+      "continuity.voice.something_added_later",
+    ]) {
+      expect(isVoiceCode(code), code).toBe(true);
+    }
+
+    for (const code of [
+      "continuity.score",
+      "continuity.character.missing_constraint",
+      "continuity.style.missing_constraint",
+      "continuity.duplicate.shot",
+      "continuity.story.dangling_echo",
+      "continuity.regenerate",
+    ]) {
+      expect(isVoiceCode(code), code).toBe(false);
+    }
+  });
+
+  it("keeps voice findings out of a stored-finding regeneration prompt", () => {
+    /**
+     * The other half of the exclusion, on the path that actually spends money.
+     * `issuesForScene` covers a live report; `storedIssuesForScene` covers the rows the
+     * regeneration stage reads back, and only the second one is reachable from a job.
+     */
+    const voiced = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(3),
+        voices: voiceRecords(3, { 1: OTHER }),
+        // A real visual failure on the same scene, so the prompt is not empty for the
+        // trivial reason that nothing at all was wrong with it.
+        visuals: realVisuals(voicedStates(3), capabilitiesFor("episodic"), voicedBible(CANONICAL)).map(
+          (visual) =>
+            visual.sceneIndex === 1
+              ? { ...visual, visualPrompt: "A figure at a bench", shotPrompt: "A figure at a bench" }
+              : visual,
+        ),
+      }),
+    );
+
+    const stored = toQualityFindings(voiced);
+    expect(stored.some((row) => row.code === "continuity.voice.assignment_mismatch")).toBe(
+      true,
+    );
+
+    const issues = storedIssuesForScene(stored, 1);
+
+    expect(issues.length).toBeGreaterThan(0);
+    for (const issue of issues) {
+      expect(issue.toLowerCase()).not.toContain("narrated");
+      expect(issue.toLowerCase()).not.toContain("voice");
+    }
+  });
+
+  it("agrees with the codes checkVoices actually emits", () => {
+    // The predicate is a string test; this is what ties it to the emitter. A voice code
+    // added under a different prefix would pass the test above and fail here.
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(3),
+        voices: voiceRecords(3, { 2: OTHER }),
+      }),
+    );
+
+    const voice = report.issues.filter((issue) =>
+      issue.message.toLowerCase().includes("voice"),
+    );
+    expect(voice.length).toBeGreaterThan(0);
+    for (const issue of voice) expect(isVoiceCode(issue.code)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Voice continuity
 // ---------------------------------------------------------------------------
 
@@ -1237,5 +1546,48 @@ describe("voice continuity", () => {
     expect(row).toBeDefined();
     expect(row?.detail).toContain("scene 1");
     expect(row?.detail).toContain("entity mara");
+  });
+
+  it("names an action an operator can actually take", () => {
+    /**
+     * The messaging correction, asserted rather than left to review.
+     *
+     * These details used to instruct a "re-run of the voiceover stage". No surface
+     * offers one, and there is no narrow path to add cheaply: `executeVoiceover` ends by
+     * chaining into visuals, so re-running it redraws every scene at full provider cost,
+     * and the segment durations it produces are what the timeline, the captions and the
+     * render are built from. A finding that names an unavailable action is a finding an
+     * operator cannot act on, so each one names the rebuild that does fix it — which
+     * works because `sceneVoicesFor` resolves the assignment from the bible on every
+     * run, so a corrected bible is obeyed by the next build.
+     */
+    const report = validateContinuity(
+      input({
+        bible: voicedBible(CANONICAL),
+        states: voicedStates(3),
+        voices: voiceRecords(3, { 1: OTHER, 2: OTHER }),
+      }),
+    );
+
+    const voice = report.issues.filter((issue) => isVoiceCode(issue.code));
+    const failures = voice.filter((issue) => issue.severity === "fail");
+    expect(failures.length).toBeGreaterThan(0);
+
+    for (const issue of failures) {
+      const detail = issue.detail ?? "";
+      // The action that exists.
+      expect(detail.toLowerCase(), issue.code).toContain("rebuild");
+      // And not the one that does not. No phrasing of "re-run the voiceover", and
+      // nothing promising a single scene can be re-narrated on its own.
+      expect(detail.toLowerCase(), issue.code).not.toMatch(/re-?run/);
+      expect(detail.toLowerCase(), issue.code).not.toMatch(/voiceover stage/);
+    }
+
+    // The mismatch says outright that no per-scene re-narration exists, because an
+    // operator's first instinct is to look for one.
+    const mismatch = failures.find(
+      (issue) => issue.code === "continuity.voice.assignment_mismatch",
+    );
+    expect(mismatch?.detail).toContain("no way to re-narrate one scene on its own");
   });
 });

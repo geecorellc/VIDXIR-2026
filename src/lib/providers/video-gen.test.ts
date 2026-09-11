@@ -708,7 +708,10 @@ describe("capability matrix (§4, §16, §18 cases 4–7)", () => {
     );
     expect(qualities.get("tal/1.0")).toEqual(["draft", "720p", "1080p"]);
     expect(qualities.get("tal/2.0")).toEqual(["720p", "1080p"]);
-    expect(qualities.get("tal/3.0")).toEqual(["draft", "720p", "1080p"]);
+    // No 1080p on Tal 3.0: the Seedance 2.0 fast tier serves 8-bit 480p and 720p, and
+    // 1080p belongs to the standard and mini tiers. Declaring it would be a capability
+    // the vendor rejects after the scene's credits are committed.
+    expect(qualities.get("tal/3.0")).toEqual(["draft", "720p"]);
     expect(qualities.get("tal/3.1")).toEqual(["720p", "1080p"]);
     // Nothing claims 2K video: §19 forbids fabricating a capability, and no vendor
     // integrated here serves 2K on these model families.
@@ -779,12 +782,15 @@ describe("capability matrix (§4, §16, §18 cases 4–7)", () => {
       availableModels().map((m) => [m.id, m.capabilities.referenceImages]),
     );
 
-    // Tal 3.1's vendor documents a reference-image input on the endpoint its adapter
-    // calls, and the adapter sends the bytes. The cases further down prove that rather
-    // than trusting this flag.
+    // Both of these vendors document a reference-image input on the endpoint and model
+    // each adapter actually calls, and both adapters send the bytes. The cases further
+    // down prove that rather than trusting these flags.
     expect(references.get("tal/3.1")).toBe(true);
+    // Omni reference-to-video, on the Dreamina Seedance 2.0 series: a `reference_image`
+    // role on an `image_url` item of the multimodal content array, 1–9 images.
+    expect(references.get("tal/3.0")).toBe(true);
 
-    // The other three vendors do offer *something* in this area, and none of it is
+    // The other two vendors do offer *something* in this area, and none of it is
     // reachable from the endpoint and model each adapter uses:
     //  - Tal 1.0's Wan route takes `first_frame`/`last_frame` image-to-video inputs,
     //    at most one of each, on an i2v model — not the configured t2v one — and its
@@ -792,13 +798,8 @@ describe("capability matrix (§4, §16, §18 cases 4–7)", () => {
     //  - Tal 2.0's reference images are a v2-API feature on MiniMax-H3, and this
     //    adapter is on v1 with Hailuo-02; claiming it would need an endpoint *and* a
     //    model migration, not a flag.
-    //  - Tal 3.0's reference support could not be verified at all: Volcengine's and
-    //    BytePlus's documentation hosts were unreachable, and the official SDK types
-    //    the content item's `role` as a bare string with no enumerated values. A guess
-    //    is exactly what §19 forbids.
     expect(references.get("tal/1.0")).toBe(false);
     expect(references.get("tal/2.0")).toBe(false);
-    expect(references.get("tal/3.0")).toBe(false);
   });
 
   it("states strengths and honest limitations for each model (§4)", () => {
@@ -1306,7 +1307,20 @@ describe("Tal 3.0 on its vendor API", () => {
     configure(ALL_KEYS);
   });
 
-  it("submits with parameters as text commands, polls and downloads", async () => {
+  /** The recorded submit body, typed for the fields these cases read. */
+  function arkBody(): {
+    model: string;
+    content: Array<Record<string, unknown>>;
+    resolution: string;
+    duration: number;
+    ratio: string;
+    watermark: boolean;
+    generate_audio: boolean;
+  } {
+    return (net.calls[0] as Call).body as ReturnType<typeof arkBody>;
+  }
+
+  it("submits parameters in the body, polls and downloads", async () => {
     net.replies = [
       { id: "ark-1" },
       { status: "succeeded", content: { video_url: "https://tos.volces.com/c.mp4" } },
@@ -1320,13 +1334,34 @@ describe("Tal 3.0 on its vendor API", () => {
       "https://ark.ap-southeast.volces.com/api/v3/contents/generations/tasks",
     );
     expect(submit.headers["authorization"]).toContain(FAKE_SEEDANCE_KEY);
-    const content = (submit.body as { content: Array<{ text: string }> }).content;
-    // This vendor's documented convention: `--flag value` inside the prompt text.
-    // Unusual enough that a regression would be silent without this assertion.
-    expect(content[0]?.text).toContain("--resolution 1080p");
-    expect(content[0]?.text).toContain("--duration 6");
-    expect(content[0]?.text).toContain("--ratio 16:9");
-    expect(content[0]?.text).toContain("Wide shot of a kitchen worktop");
+
+    /**
+     * Typed body fields, not `--flag` commands inside the prompt.
+     *
+     * The vendor accepts both forms and they are not equivalent: the body is documented
+     * as strictly validated, a flag in the text is "ignored or causes an error", and the
+     * 2.0 series renamed the flags (`--rs`, `--rt`, `--dur`) so the long-form commands
+     * this adapter once sent would now be dropped in silence. A regression back to text
+     * commands would still produce a video — at the wrong resolution and duration.
+     */
+    const body = arkBody();
+    expect(body.model).toBe("dreamina-seedance-2-0-fast-260128");
+    expect(body.resolution).toBe("720p");
+    expect(body.duration).toBe(6);
+    expect(body.ratio).toBe("16:9");
+    expect(body.watermark).toBe(false);
+    expect(body.content[0]?.["text"]).toContain("Wide shot of a kitchen worktop");
+    expect(JSON.stringify(body)).not.toContain("--");
+
+    /**
+     * Audio off explicitly, because the vendor's default is on.
+     *
+     * Tally lays its own narration over the clip. A vendor soundtrack baked into the
+     * video cannot be separated again, so omitting this field would silently ship
+     * double audio — and `capabilities.audio` tells the pipeline the clip is silent.
+     */
+    expect(body.generate_audio).toBe(false);
+    expect(resolveModel("tal/3.0").model.capabilities.audio).toBe(false);
 
     expect((net.calls[1] as Call).url).toContain("/contents/generations/tasks/ark-1");
 
@@ -1350,9 +1385,7 @@ describe("Tal 3.0 on its vendor API", () => {
         { status: "succeeded", content: { video_url: "https://tos.volces.com/f.mp4" } },
       ];
       await generateClip(request({ modelId: "tal/3.0", format }), USAGE);
-      const content = ((net.calls[0] as Call).body as { content: Array<{ text: string }> })
-        .content;
-      expect(content[0]?.text).toContain(`--ratio ${ratio}`);
+      expect(arkBody().ratio, format).toBe(ratio);
     }
   });
 
@@ -1361,15 +1394,29 @@ describe("Tal 3.0 on its vendor API", () => {
       { id: "ark-long" },
       { status: "succeeded", content: { video_url: "https://tos.volces.com/l.mp4" } },
     ];
-    // A 40-second scene: capped at 12s and the renderer fills the remainder — final
-    // assembly stays the worker's job.
+    // A 40-second scene: capped at 15s — the documented maximum for this family — and
+    // the renderer fills the remainder. Final assembly stays the worker's job.
     const clip = await generateClip(
       request({ modelId: "tal/3.0", durationMs: 40_000 }),
       USAGE,
     );
-    expect(((net.calls[0] as Call).body as { content: Array<{ text: string }> }).content[0]?.text)
-      .toContain("--duration 12");
-    expect(clip.durationMs).toBe(12_000);
+    expect(arkBody().duration).toBe(15);
+    expect(clip.durationMs).toBe(15_000);
+  });
+
+  it("raises a scene below the vendor's four-second floor", async () => {
+    net.replies = [
+      { id: "ark-short" },
+      { status: "succeeded", content: { video_url: "https://tos.volces.com/s.mp4" } },
+    ];
+    // The documented range starts at four. A three-second scene rounds up rather than
+    // being sent as a duration the vendor rejects.
+    const clip = await generateClip(
+      request({ modelId: "tal/3.0", durationMs: 3_000 }),
+      USAGE,
+    );
+    expect(arkBody().duration).toBe(4);
+    expect(clip.durationMs).toBe(4_000);
   });
 
   it("uses the vendor's own resolution token for a draft", async () => {
@@ -1379,8 +1426,17 @@ describe("Tal 3.0 on its vendor API", () => {
     ];
     await generateClip(request({ modelId: "tal/3.0", quality: "draft" }), USAGE);
     // 480p, not "draft" — the vocabulary is Tally's and the token is the vendor's.
-    expect(((net.calls[0] as Call).body as { content: Array<{ text: string }> }).content[0]?.text)
-      .toContain("--resolution 480p");
+    expect(arkBody().resolution).toBe("480p");
+  });
+
+  it("refuses 1080p rather than generating at a tier this model has not got", async () => {
+    // The fast tier tops out at 720p. Refused before a request is made, so the failure
+    // is an honest message naming the supported tiers instead of a vendor rejection
+    // after the scene's credits are committed.
+    await expect(
+      generateClip(request({ modelId: "tal/3.0", quality: "1080p" }), USAGE),
+    ).rejects.toMatchObject({ retryable: false, status: 400 });
+    expect(net.calls).toHaveLength(0);
   });
 
   it("classifies a moderation failure as permanent", async () => {
@@ -1929,17 +1985,20 @@ describe("continuity reference stills (§6)", () => {
   });
 
   it("strips references before an adapter that cannot use them ever sees one", async () => {
-    // The contract `generateClip` enforces for every other model. Asserted on Tal 3.0
-    // because Ark's request body is text-only: if the normalisation regressed, the
-    // bytes would arrive at an adapter with nowhere to put them and be dropped
-    // silently rather than loudly.
+    /**
+     * The contract `generateClip` enforces for every model that does not declare the
+     * capability. Asserted on Tal 2.0: its vendor's reference support is a different API
+     * version, so if the normalisation regressed the bytes would arrive at an adapter
+     * with nowhere to put them and be dropped silently rather than loudly.
+     */
     net.replies = [
-      { id: "ark-ref" },
-      { status: "succeeded", content: { video_url: "https://tos.volces.com/c.mp4" } },
+      { task_id: "mm-ref", base_resp: { status_code: 0 } },
+      { status: "Success", file_id: "f-ref" },
+      { file: { download_url: "https://cdn.minimaxi.chat/r.mp4" } },
     ];
 
     await generateClip(
-      request({ modelId: "tal/3.0", referenceImages: [reference()] }),
+      request({ modelId: "tal/2.0", referenceImages: [reference()] }),
       USAGE,
     );
 
@@ -1959,6 +2018,311 @@ describe("continuity reference stills (§6)", () => {
     net.replies = veoReplies();
     const constrained = await generateClip(
       request({ modelId: "tal/3.1", referenceImages: [reference()] }),
+      USAGE,
+    );
+
+    expect(constrained.durationMs).toBe(plain.durationMs);
+    expect(constrained.modelId).toBe(plain.modelId);
+  });
+});
+
+/**
+ * The same half of §6 on the other vendor that signed for it.
+ *
+ * A separate block because nothing is shared with Veo's: this vendor takes the stills in
+ * the multimodal `content` array beside the prompt, as `data:` URIs with a sibling `role`,
+ * and resolves them positionally from the prompt text. Every case is offline — the HTTP
+ * layer is replaced at the top of this file — so what is asserted is the body Tally
+ * *would* send. Whether the live vendor accepts it is `verify:video-providers`' question
+ * and is not answered here.
+ */
+describe("continuity reference stills on Tal 3.0 (§6)", () => {
+  beforeEach(() => {
+    configure(ALL_KEYS);
+  });
+
+  /** A submitted-then-finished Ark task. */
+  function arkReplies(): unknown[] {
+    return [
+      { id: "ark-ref" },
+      { status: "succeeded", content: { video_url: "https://tos.volces.com/r.mp4" } },
+    ];
+  }
+
+  function reference(over: Partial<{
+    kind: "character" | "environment" | "prop";
+    entityId: string;
+    bytes: Buffer;
+    mimeType: string;
+  }> = {}) {
+    return {
+      kind: "character" as const,
+      entityId: "maya",
+      bytes: Buffer.from("still-bytes-for-maya"),
+      mimeType: "image/png",
+      ...over,
+    };
+  }
+
+  /** The `content` array of the recorded submit. */
+  function content(): Array<Record<string, unknown>> {
+    return ((net.calls[0] as Call).body as {
+      content: Array<Record<string, unknown>>;
+    }).content;
+  }
+
+  /** Only the reference items, in order. */
+  function sent(): Array<{ image_url: { url: string }; role: string; type: string }> {
+    return content().filter((item) => item["type"] === "image_url") as Array<{
+      image_url: { url: string };
+      role: string;
+      type: string;
+    }>;
+  }
+
+  it("sends the still as a data URI in the content array, with the documented role", async () => {
+    net.replies = arkReplies();
+
+    await generateClip(
+      request({ modelId: "tal/3.0", referenceImages: [reference()] }),
+      USAGE,
+    );
+
+    const images = sent();
+    expect(images).toHaveLength(1);
+    expect(images[0]!.type).toBe("image_url");
+    // Omni reference-to-video. A sibling of `image_url`, not a field inside it.
+    expect(images[0]!.role).toBe("reference_image");
+    expect(images[0]!.image_url).not.toHaveProperty("role");
+
+    // The actual bytes, decoded rather than compared as base64, so the assertion is
+    // about the image the vendor receives.
+    const url = images[0]!.image_url.url;
+    expect(url.startsWith("data:image/png;base64,")).toBe(true);
+    expect(
+      Buffer.from(url.slice("data:image/png;base64,".length), "base64").toString(),
+    ).toBe("still-bytes-for-maya");
+
+    // Beside the prompt in the same array, which is where this vendor reads them from.
+    expect(content()[0]?.["type"]).toBe("text");
+  });
+
+  it("names each reference positionally in the prompt, or the vendor ignores it", async () => {
+    net.replies = arkReplies();
+
+    await generateClip(
+      request({
+        modelId: "tal/3.0",
+        referenceImages: [
+          reference(),
+          reference({ kind: "environment", entityId: "kitchen" }),
+        ],
+      }),
+      USAGE,
+    );
+
+    /**
+     * The documented resolution rule: "Image n" means the nth `image_url` item of the
+     * content array. A body carrying stills whose prompt never names them is a no-op at
+     * the vendor — accepted and ignored — which is the silent failure this whole §6
+     * apparatus exists to prevent, so the naming is asserted as strictly as the bytes.
+     */
+    const text = content()[0]?.["text"] as string;
+    expect(text).toContain("Image 1");
+    expect(text).toContain("Image 2");
+    expect(text).not.toContain("Image 3");
+    expect(text).toContain("Wide shot of a kitchen worktop");
+    // Numbered from one, in array order, so the prompt and the array cannot disagree.
+    expect(text.indexOf("Image 1")).toBeLessThan(text.indexOf("Image 2"));
+    expect(sent()).toHaveLength(2);
+  });
+
+  it("never sends a private storage URL in place of the bytes (§21)", async () => {
+    net.replies = arkReplies();
+
+    await generateClip(
+      request({ modelId: "tal/3.0", referenceImages: [reference()] }),
+      USAGE,
+    );
+
+    /**
+     * Tally's stills live in a private MinIO bucket the vendor cannot reach. The vendor
+     * also accepts a fetchable URL here, which is exactly the wrong choice: it would
+     * mean either publishing the bucket or putting a signed storage URL in a third
+     * party's request body, which is a credential by another name.
+     */
+    const serialised = JSON.stringify((net.calls[0] as Call).body);
+    expect(serialised).not.toContain("http://");
+    expect(serialised).not.toContain("https://");
+    expect(serialised).not.toContain("X-Amz-Signature");
+    expect(serialised).not.toContain("storageKey");
+    expect(serialised).not.toContain("localhost");
+    expect(serialised).not.toContain("9000");
+  });
+
+  it("omits the images and the naming entirely when a scene has no references", async () => {
+    net.replies = arkReplies();
+
+    await generateClip(request({ modelId: "tal/3.0" }), USAGE);
+
+    // The ordinary path: most scenes have no stored stills, and this request must stay
+    // byte-identical to what a text-to-video submit always was.
+    expect(content()).toHaveLength(1);
+    expect(content()[0]?.["type"]).toBe("text");
+    expect(content()[0]?.["text"]).not.toContain("Image 1");
+    expect(JSON.stringify((net.calls[0] as Call).body)).not.toContain("reference_image");
+  });
+
+  it("caps the set at four and keeps the continuity engine's priority order", async () => {
+    net.replies = arkReplies();
+
+    /**
+     * `referencesForScene` emits characters, then the environment, then props, and this
+     * adapter must not reorder them: the cap is a prefix of that list, so the least
+     * important reference is the one dropped. Six distinguishable stills go in; the
+     * first four come out, in the same order.
+     */
+    await generateClip(
+      request({
+        modelId: "tal/3.0",
+        referenceImages: ["a", "b", "c", "d", "e", "f"].map((id) =>
+          reference({ entityId: id, bytes: Buffer.from(`still-${id}`) }),
+        ),
+      }),
+      USAGE,
+    );
+
+    const images = sent();
+    expect(images).toHaveLength(4);
+    const decoded = images.map((image) =>
+      Buffer.from(image.image_url.url.split(",")[1]!, "base64").toString(),
+    );
+    expect(decoded).toEqual(["still-a", "still-b", "still-c", "still-d"]);
+  });
+
+  it("skips a still the vendor would reject rather than failing the scene", async () => {
+    net.replies = arkReplies();
+
+    const clip = await generateClip(
+      request({
+        modelId: "tal/3.0",
+        referenceImages: [
+          reference(),
+          // Documented formats are jpeg/png/webp/bmp/tiff/gif; a TIFF is accepted by the
+          // vendor but nothing in this repository writes one, so it is not in the list.
+          reference({ entityId: "svg", mimeType: "image/svg+xml" }),
+          // Empty bytes: a stored asset that failed to download.
+          reference({ entityId: "empty", bytes: Buffer.alloc(0) }),
+          // Over the size ceiling, which sits under the vendor's 30 MB so that base64
+          // inflation cannot carry a passing image over the real limit.
+          reference({ entityId: "huge", bytes: Buffer.alloc(23 * 1_048_576, 1) }),
+        ],
+      }),
+      USAGE,
+    );
+
+    // One usable still sent, three skipped, and the scene still rendered — the same
+    // degradation as having no still at all, rather than losing the clip and the credits.
+    expect(sent()).toHaveLength(1);
+    expect(content()[0]?.["text"]).toContain("Image 1");
+    expect(content()[0]?.["text"]).not.toContain("Image 2");
+    expect(clip.modelId).toBe("tal/3.0");
+  });
+
+  it("accepts a webp still and canonicalises an image/jpg label", async () => {
+    net.replies = arkReplies();
+
+    await generateClip(
+      request({
+        modelId: "tal/3.0",
+        referenceImages: [
+          reference({ entityId: "w", mimeType: "image/webp" }),
+          // A vendor image endpoint that labelled its output `image/jpg`. The documented
+          // data URI takes a lower-case media type, and `image/jpg` is not one.
+          reference({ entityId: "j", mimeType: "IMAGE/JPG" }),
+        ],
+      }),
+      USAGE,
+    );
+
+    const urls = sent().map((image) => image.image_url.url.split(";")[0]);
+    expect(urls).toEqual(["data:image/webp", "data:image/jpeg"]);
+  });
+
+  it("drops references when the configured model version cannot use them", async () => {
+    /**
+     * Omni reference-to-video arrived with the Seedance 2.0 series. A deployment still
+     * pinned to a 1.0 model must not have its requests carry a role that version never
+     * documented — the capability is declared on the model, which describes Tal 3.0
+     * rather than one deployment's env, and enforced against the configured id here.
+     */
+    for (const videoModel of [
+      "doubao-seedance-1-0-pro-250528",
+      "doubao-seedance-1-0-lite-t2v-250428",
+    ]) {
+      configure({ ...ALL_KEYS, SEEDANCE_VIDEO_MODEL: videoModel });
+      net.calls = [];
+      net.replies = arkReplies();
+
+      const clip = await generateClip(
+        request({ modelId: "tal/3.0", referenceImages: [reference()] }),
+        USAGE,
+      );
+
+      const serialised = JSON.stringify((net.calls[0] as Call).body);
+      expect(serialised, videoModel).not.toContain("reference_image");
+      expect(serialised, videoModel).not.toContain("still-bytes-for-maya");
+      expect(content()[0]?.["text"], videoModel).not.toContain("Image 1");
+      // And the scene still renders, on textual continuity.
+      expect(clip.modelId, videoModel).toBe("tal/3.0");
+    }
+  });
+
+  it("sends them on any 2.0-series id an operator configures", async () => {
+    for (const videoModel of [
+      "dreamina-seedance-2-0-fast-260128",
+      "dreamina-seedance-2-0-260128",
+      "dreamina-seedance-2-0-mini-260615",
+    ]) {
+      configure({ ...ALL_KEYS, SEEDANCE_VIDEO_MODEL: videoModel });
+      net.calls = [];
+      net.replies = arkReplies();
+
+      await generateClip(
+        request({ modelId: "tal/3.0", referenceImages: [reference()] }),
+        USAGE,
+      );
+
+      expect(sent(), videoModel).toHaveLength(1);
+      expect((net.calls[0] as Call).body, videoModel).toMatchObject({ model: videoModel });
+    }
+  });
+
+  it("keeps the vendor's name and the still's storage identity out of the prompt (§3)", async () => {
+    net.replies = arkReplies();
+
+    await generateClip(
+      request({ modelId: "tal/3.0", referenceImages: [reference()] }),
+      USAGE,
+    );
+
+    // The naming sentence is generated text that reaches a vendor, and it is built from
+    // the array rather than from entity ids — a prompt naming "maya" would leak a
+    // workspace's internal identifiers into a third party's logs.
+    const text = content()[0]?.["text"] as string;
+    expect(text).not.toContain("maya");
+    for (const forbidden of FORBIDDEN_NAMES) expect(text).not.toMatch(forbidden);
+  });
+
+  it("charges the same for a scene whether or not stills were sent", async () => {
+    // References constrain the generation; they are not a billable extra. Same duration
+    // and model, so `creditCostFor` reads identical inputs either way.
+    net.replies = arkReplies();
+    const plain = await generateClip(request({ modelId: "tal/3.0" }), USAGE);
+
+    net.replies = arkReplies();
+    const constrained = await generateClip(
+      request({ modelId: "tal/3.0", referenceImages: [reference()] }),
       USAGE,
     );
 
@@ -2187,12 +2551,21 @@ describe("reference-image registry integrity (§6, §19)", () => {
     );
     expect(declaring.length).toBeGreaterThan(0);
 
+    // The two adapters that have signed for it. Named explicitly rather than derived
+    // from the flags, so adding a third model without an adapter fails here as well as
+    // at module load — a list computed from the thing under test asserts nothing.
+    const signed = new Map([
+      ["tal/3.0", "seedance"],
+      ["tal/3.1", "veo"],
+    ]);
+    expect(declaring.map((model) => model.id).sort()).toEqual([...signed.keys()].sort());
+
     for (const model of declaring) {
       const { provider } = resolveModel(model.id);
       // The adapter's signature is not readable from outside the module, so the
       // observable consequence is asserted instead: a declaring model's provider must
       // put the bytes in its request body. `resolveModel` proves the pairing exists.
-      expect(provider, model.id).toBe("veo");
+      expect(provider, model.id).toBe(signed.get(model.id));
     }
   });
 

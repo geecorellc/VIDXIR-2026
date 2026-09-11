@@ -43,6 +43,7 @@ import {
 import type { LevelCapabilities } from "@/lib/continuity/config";
 import {
   changesBefore,
+  establishingScenes,
   type IndexedSceneState,
   type SceneState,
   type SceneStateGraph,
@@ -67,6 +68,7 @@ export interface ContinuityPromptInput {
   sceneIndex: number;
   /** Every scene's state, for accumulated changes. */
   allStates: readonly IndexedSceneState[];
+  /** Read for `establishedBy`: which entities here an earlier scene already showed. */
   graph: SceneStateGraph;
   capabilities: LevelCapabilities;
 }
@@ -160,9 +162,24 @@ export function buildContinuityPrompt(input: ContinuityPromptInput): string {
           .join("; ")}.`,
       });
     }
+  }
 
-    // Accumulated state, oldest first. A change established in scene four is still
-    // true in scene nine, so the whole prefix is carried rather than the last one.
+  /**
+   * Accumulated state, oldest first. A change established in scene four is still
+   * true in scene nine, so the whole prefix is carried rather than the last one.
+   *
+   * Gated on the world, not on props, which is a correction: these changes were only
+   * ever reaching `character` and `episodic` prompts because they shared a branch with
+   * the prop clause. But "the workshop is flooded" is a fact about the *location*, and
+   * `world` is precisely the level that holds locations across scenes while tracking no
+   * props and no cast — so a documentary returning to a room it had already flooded was
+   * being told nothing about it, and drew it dry.
+   *
+   * Still excluded at `style` and below. That level's contract is the look alone
+   * (`STYLE_ONLY_STYLES`: "one look to hold and no recurring cast"), and a listicle has
+   * no world for a change to be true in.
+   */
+  if (input.capabilities.environments || input.capabilities.props) {
     const changes = changesBefore(input.allStates, input.sceneIndex);
     if (changes.length > 0) {
       clauses.push({
@@ -172,9 +189,84 @@ export function buildContinuityPrompt(input: ContinuityPromptInput): string {
     }
   }
 
+  /**
+   * Which of this scene's entities the viewer has already seen.
+   *
+   * The graph's one job in this module, and the reason the field is on the input at
+   * all: `establishedBy` is the only thing that knows whether this scene *introduces*
+   * Mara or *returns* to her. The facts above are identical either way, but the
+   * instruction is not — an establishing shot may interpret a description freely,
+   * while a return has a specific earlier frame it has to agree with, and a generator
+   * with no memory of that frame will otherwise draw a second plausible Mara.
+   *
+   * Named without scene numbers deliberately. "First seen in scene 3" is true and
+   * useless to a model that cannot see scene 3; "you have drawn this before, match it"
+   * is the actionable half of the same fact.
+   *
+   * Lowest weight, so it is the first clause truncation drops. It is a framing of the
+   * facts rather than a fact, and losing it costs less than losing the wardrobe it
+   * refers to.
+   */
+  const returning = returningEntities(input);
+  if (returning.length > 0) {
+    clauses.push({
+      weight: 50,
+      text:
+        `Already shown earlier in this video: ${joinFacts(returning)}. ` +
+        "Reproduce them exactly as described above rather than reinterpreting them.",
+    });
+  }
+
   if (clauses.length === 0) return "";
 
   return fit(clauses, MAX_CONTINUITY_CHARS);
+}
+
+/**
+ * The names of entities in this scene that an earlier scene established.
+ *
+ * Three filters, each load-bearing:
+ *
+ *  - **Earlier only.** An entity whose origin is this scene is being introduced here,
+ *    and telling a model to match something it has not drawn yet is an instruction it
+ *    can only invent an answer to.
+ *  - **Capability-gated**, the same way the fact clauses above are. A `world`-level
+ *    prompt names the place and not the cast, so the reminder cannot name a cast the
+ *    rest of the block never described.
+ *  - **In the bible.** A name is what makes the reminder usable; a planner-invented id
+ *    with no entry would put `mara_2` in front of a generator.
+ */
+function returningEntities(input: ContinuityPromptInput): string[] {
+  const origins = establishingScenes(input.graph, input.state);
+  const names: string[] = [];
+
+  const returning = (id: string): boolean => {
+    const origin = origins.get(id);
+    return origin !== undefined && origin < input.sceneIndex;
+  };
+
+  if (input.capabilities.characters) {
+    for (const id of input.state.characters) {
+      const character = returning(id) ? findCharacter(input.bible, id) : undefined;
+      if (character) names.push(character.name);
+    }
+  }
+
+  if (input.capabilities.environments && input.state.environment) {
+    const environment = returning(input.state.environment)
+      ? findEnvironment(input.bible, input.state.environment)
+      : undefined;
+    if (environment) names.push(environment.name);
+  }
+
+  if (input.capabilities.props) {
+    for (const id of input.state.props) {
+      const prop = returning(id) ? findProp(input.bible, id) : undefined;
+      if (prop) names.push(prop.name);
+    }
+  }
+
+  return dedupe(names);
 }
 
 /**

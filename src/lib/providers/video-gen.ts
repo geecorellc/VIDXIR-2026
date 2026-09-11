@@ -1014,6 +1014,117 @@ interface ArkImage {
   error?: { code?: string | null; message?: string | null } | null;
 }
 
+/**
+ * Largest reference still this adapter will inline, before base64 (§6).
+ *
+ * A quoted vendor limit, unlike Veo's equivalent: the API reference states "Single image
+ * is less than 30 MB". Held one megabyte under it because the number the vendor measures
+ * is the encoded payload and base64 inflates by about a third — a 30 MB file becomes a
+ * 40 MB string, so a check against the raw byte count at exactly 30 would pass here and
+ * be rejected there, after the scene's credits were committed.
+ */
+const SEEDANCE_MAX_REFERENCE_BYTES = 22 * 1_048_576;
+
+/**
+ * Reference images this adapter will send in one request.
+ *
+ * The vendor documents 1–9 for the Seedance 2.0 series. Tally's own ceiling is lower and
+ * deliberately so: `referencesForScene` emits characters, then the environment, then
+ * props, and the whole set is base64-inlined into a single body the vendor caps at 64 MB.
+ * Four covers a cast of three in their location, which is what a scene prompt describes;
+ * beyond that the marginal still buys less than the request-size risk it adds.
+ */
+const SEEDANCE_MAX_REFERENCE_IMAGES = 4;
+
+/**
+ * Image types the reference input accepts.
+ *
+ * The vendor lists jpeg, png, webp, bmp, tiff, gif and (on this family) heic/heif. Only
+ * the three Tally's own image stages actually produce are listed: a still arrives here
+ * from `assets.mimeType` after being drawn by Seedream or Imagen, and accepting formats
+ * nothing in this repository writes would be untested breadth.
+ */
+const SEEDANCE_REFERENCE_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+] as const;
+
+/**
+ * Whether the *configured* Seedance model version accepts reference images.
+ *
+ * The same arrangement as `veoReferenceModel`, and for the same reason: the capability
+ * is gated at the vendor on the model version, and `SEEDANCE_VIDEO_MODEL` is operator-
+ * configurable. Omni reference-to-video arrived with the Dreamina Seedance 2.0 series —
+ * the 1.0 pro/fast models this repository defaulted to until now document `first_frame`
+ * and `last_frame` only, and would reject or ignore a `reference_image` role.
+ *
+ * So the flag is declared statically on the model (the matrix describes Tal 3.0, not one
+ * deployment's env) and enforced dynamically here. A deployment still pinned to 1.0 gets
+ * textual continuity, which is exactly what it gets today.
+ */
+function seedanceReferenceModel(model: string): boolean {
+  const id = model.toLowerCase();
+  return id.includes("seedance-2-") || id.includes("seedance-2.");
+}
+
+/** One reference item of Ark's `content` array, in the shape the API reference documents. */
+interface ArkReferenceImage {
+  type: "image_url";
+  /** A `data:` URI. The vendor takes a fetchable URL, base64 or an asset id here. */
+  image_url: { url: string };
+  /**
+   * Omni reference-to-video. A sibling of `image_url`, not a field inside it — the
+   * documented examples put it at the item level and the SDK types it there.
+   */
+  role: "reference_image";
+}
+
+/**
+ * Map continuity stills onto Ark's multimodal `content` array (§6).
+ *
+ * Base64 data URIs rather than links, which the vendor documents as an accepted form of
+ * `image_url.url` alongside a public URL and an uploaded asset id. That choice is what
+ * makes this work at all here: Tally's stills live in a private bucket reached through
+ * `getObjectBuffer`, MinIO is not addressable from the vendor's network, and the
+ * alternative would be either publishing the bucket or handing a third party a signed
+ * URL to object storage — a credential in a request body by another name (§21).
+ *
+ * Unusable stills are skipped rather than failing the scene: the clip still renders with
+ * its textual continuity, which is the same degradation as having no still at all, and a
+ * scene that failed outright would lose the operator both the video and the credits.
+ */
+function seedanceReferenceImages(
+  references: readonly ReferenceImageInput[],
+): { images: ArkReferenceImage[]; skipped: number } {
+  const usable = references.filter(
+    (reference) =>
+      (SEEDANCE_REFERENCE_MIME_TYPES as readonly string[]).includes(
+        reference.mimeType.toLowerCase(),
+      ) &&
+      reference.bytes.byteLength > 0 &&
+      reference.bytes.byteLength <= SEEDANCE_MAX_REFERENCE_BYTES,
+  );
+
+  const images = usable
+    .slice(0, SEEDANCE_MAX_REFERENCE_IMAGES)
+    .map((reference): ArkReferenceImage => {
+      // Lowercase and canonical: the vendor documents the data URI as
+      // `data:image/<format>;base64,<encoding>` with the format in lower case.
+      const mime = reference.mimeType.toLowerCase() === "image/jpg"
+        ? "image/jpeg"
+        : reference.mimeType.toLowerCase();
+      return {
+        type: "image_url",
+        image_url: { url: `data:${mime};base64,${reference.bytes.toString("base64")}` },
+        role: "reference_image",
+      };
+    });
+
+  return { images, skipped: references.length - images.length };
+}
+
 const TAL_3: VideoGenModel = {
   id: "tal/3.0",
   provider: "seedance",
@@ -1022,16 +1133,19 @@ const TAL_3: VideoGenModel = {
   bestFor: "Storytelling, children's animation, cinematic content",
   strengths: [
     "Best camera control and motion coherence of the standard tiers",
-    "Clips up to twelve seconds, so a whole scene often fits one generation",
+    "Clips up to fifteen seconds, so a whole scene often fits one generation",
     "Holds a character's appearance across a shot",
+    "Reuses up to four continuity reference stills so a cast keeps one face",
     "Generates all three aspect ratios",
     "Also generates reference stills for the continuity engine",
   ],
   limitations: [
     "Slower than Tal 1.0 and Tal 2.0",
     "No generated audio",
+    "Tops out at 720p, so Tal 3.1 is the choice for a 1080p master",
+    "Clips are at least four seconds",
   ],
-  maxClipSeconds: 12,
+  maxClipSeconds: 15,
   formats: ["landscape", "portrait", "square"],
   premium: false,
   legacy: false,
@@ -1043,7 +1157,26 @@ const TAL_3: VideoGenModel = {
     // project on Tal 3.0 makes its continuity references with the model it already
     // selected instead of borrowing another one's look.
     imageGeneration: true,
-    referenceImages: false,
+    /**
+     * Omni reference-to-video, on the Dreamina Seedance 2.0 series (§6).
+     *
+     * Paired with `seedance.acceptsReferenceImages`; `assertRegistryIntegrity` fails the
+     * module load if either is set without the other, so this cannot become a claim the
+     * adapter does not honour. Version-gated at the vendor, which
+     * `seedanceReferenceModel()` checks against the configured `SEEDANCE_VIDEO_MODEL` at
+     * request time rather than assuming — a deployment pinned to Seedance 1.0 falls back
+     * to textual continuity.
+     */
+    referenceImages: true,
+    /**
+     * False despite the vendor generating audio on this family.
+     *
+     * `generate_audio` defaults to *true* at the vendor and the adapter sends it off
+     * explicitly. Tally composes narration, music and captions itself, so a vendor
+     * soundtrack arriving inside the clip would fight the voice track the renderer lays
+     * over it — and this flag is what the rest of the pipeline reads to decide whether a
+     * clip already carries sound. Declaring it true would silence Tally's own narration.
+     */
     audio: false,
     /**
      * No draft tier for stills, unlike video.
@@ -1055,8 +1188,24 @@ const TAL_3: VideoGenModel = {
      * long edge is 2560.
      */
     imageQualities: ["720p", "1080p"],
-    qualities: ["draft", "720p", "1080p"],
-    durations: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    /**
+     * 480p and 720p only — no 1080p, unlike the 1.0 family this model replaced.
+     *
+     * The Seedance 2.0 *fast* tier documents 8-bit 480p and 720p; 1080p and 4K are the
+     * standard and mini tiers' range. Declaring 1080p here would be a capability the
+     * vendor rejects, and `assertQuality` is what turns a stored `1080p` on an existing
+     * project into an honest refusal naming the supported tiers rather than a failed
+     * generation after credits are committed.
+     */
+    qualities: ["draft", "720p"],
+    /**
+     * 4–15 seconds, the documented range for this family.
+     *
+     * Starts at four rather than three: the vendor's minimum is four, and `nearest()`
+     * rounds a three-second scene up to it. `maxClipSeconds` must equal the largest of
+     * these or the module refuses to load.
+     */
+    durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
   },
 };
 
@@ -1069,11 +1218,15 @@ const seedance: GenerationProvider = {
     "ByteDance serves Seedance through Volcengine Ark, which is ByteDance's own " +
     "platform rather than a third-party aggregator. SEEDANCE_VIDEO_MODEL selects " +
     "the model version, so a newer Seedance release is a configuration change " +
-    "rather than a code change. Generation parameters are passed as text commands " +
-    "appended to the prompt, which is Ark's documented convention for this family. " +
-    "Stills come from the Seedream family on the same host and key, selected by " +
-    "SEEDANCE_IMAGE_MODEL, through an OpenAI-shaped route that takes ordinary JSON.",
+    "rather than a code change — but reference-image continuity needs the Dreamina " +
+    "Seedance 2.0 series, and a deployment pinned to 1.0 falls back to textual " +
+    "continuity. Generation parameters are passed in the request body, which the " +
+    "vendor documents as the validated form; continuity stills travel in the same " +
+    "multimodal content array as the prompt. Stills come from the Seedream family " +
+    "on the same host and key, selected by SEEDANCE_IMAGE_MODEL, through an " +
+    "OpenAI-shaped route that takes ordinary JSON.",
   models: [TAL_3],
+  acceptsReferenceImages: true,
   missingEnvVars() {
     return env().SEEDANCE_API_KEY ? [] : ["SEEDANCE_API_KEY"];
   },
@@ -1089,20 +1242,56 @@ const seedance: GenerationProvider = {
     const headers = { authorization: `Bearer ${key}` };
 
     /**
-     * Ark takes generation parameters as `--flag value` commands inside the text.
+     * Continuity stills, when this deployment's model version can use them (§6).
      *
-     * Unusual, and it is why the prompt is trimmed to leave room: the commands are
-     * appended after the prompt and a truncated `--duration` would either be
-     * ignored or read as part of the scene description.
+     * The capability is declared on the model and `generateClip` has already refused to
+     * pass references to a model that does not declare it, so an empty list here is the
+     * ordinary case — most scenes have no stored stills.
      */
-    const commands = [
-      `--resolution ${arkResolution(quality)}`,
-      `--duration ${seconds}`,
-      `--ratio ${frame.ratio}`,
-      // No recognisable people: a generated likeness in a published video is a
-      // rights problem, and the scene director never asks for one.
-      "--watermark false",
-    ].join(" ");
+    const videoModel = env().SEEDANCE_VIDEO_MODEL;
+    const requested = request.referenceImages ?? [];
+    const supportsReferences = seedanceReferenceModel(videoModel);
+    const { images: referenceImages, skipped } = supportsReferences
+      ? seedanceReferenceImages(requested)
+      : { images: [] as ArkReferenceImage[], skipped: requested.length };
+
+    if (skipped > 0) {
+      /**
+       * Loud, because the scene still renders (§19).
+       *
+       * A skipped still is a continuity constraint the operator paid to generate and did
+       * not get. The clip is fine, so nothing downstream reports it — this line is the
+       * only trace, and it names the reason rather than just the count.
+       */
+      log.warn("some continuity references were not sent to the vendor", {
+        modelId: TAL_3.id,
+        videoModel,
+        sceneIndex: request.sceneIndex,
+        requested: requested.length,
+        sent: referenceImages.length,
+        skipped,
+        versionUnsupported: !supportsReferences,
+      });
+    }
+
+    /**
+     * The prompt, with the references named if any were sent.
+     *
+     * The vendor resolves an omni reference by *position*: "Image n" in the prompt means
+     * the nth `image_url` item in the content array. A body carrying stills whose prompt
+     * never names them is a documented no-op — the images are accepted and ignored — so
+     * this sentence is what makes the reuse actually take effect, and it is generated
+     * from the array that was just built rather than assumed by the prompt builder.
+     * Nothing is appended when there are no references, which keeps every existing
+     * text-to-video request byte-identical to what it was.
+     */
+    const naming = referenceImages.length > 0
+      ? ` Keep the appearance of ${referenceImages
+          .map((_, index) => `Image ${index + 1}`)
+          .join(", ")} exactly consistent with the reference${
+          referenceImages.length === 1 ? "" : "s"
+        } provided.`
+      : "";
 
     const submitted = await providerJson<ArkTask>({
       provider: TAL_3.label,
@@ -1110,10 +1299,36 @@ const seedance: GenerationProvider = {
       method: "POST",
       headers,
       body: {
-        model: env().SEEDANCE_VIDEO_MODEL,
+        model: videoModel,
+        /**
+         * Parameters in the body, not as `--flag` text commands.
+         *
+         * Both forms exist at the vendor and they are not equivalent: the body is
+         * documented as strictly validated, while a flag in the text is "ignored or
+         * causes an error". The 2.0 series also renamed the flags (`--rs`, `--rt`,
+         * `--dur`), so the long-form commands this adapter used for the 1.0 family
+         * would now be silently dropped — a request that quietly generates at the
+         * wrong resolution and duration after the credits are committed.
+         */
         content: [
-          { type: "text", text: `${request.prompt.slice(0, 1_200)} ${commands}` },
+          { type: "text", text: `${request.prompt.slice(0, 1_200)}${naming}` },
+          ...referenceImages,
         ],
+        resolution: arkResolution(quality),
+        duration: seconds,
+        ratio: frame.ratio,
+        // No recognisable people: a generated likeness in a published video is a
+        // rights problem, and the scene director never asks for one.
+        watermark: false,
+        /**
+         * Off explicitly, because the vendor's default is on.
+         *
+         * Tally lays its own narration, music and captions over the clip. A vendor
+         * soundtrack inside the video would play underneath the voice track with no way
+         * to separate them again, and `TAL_3.capabilities.audio` tells the rest of the
+         * pipeline this clip is silent.
+         */
+        generate_audio: false,
       },
     });
 
@@ -1242,8 +1457,16 @@ function arkImageSize(format: VideoFormat, quality: VideoQuality): string {
 }
 
 /** Ark's resolution token. It has no 2K tier for this family. */
+/**
+ * Tally's resolution vocabulary in the vendor's tokens.
+ *
+ * Only two tiers, matching `TAL_3.capabilities.qualities`: the Seedance 2.0 fast model
+ * serves 8-bit 480p and 720p, and 1080p belongs to the standard and mini tiers. There is
+ * no 1080p branch on purpose — `assertQuality` refuses the tier before this is reached,
+ * so a fallback here would be an unreachable claim that the model does more than it does.
+ */
 function arkResolution(quality: VideoQuality): string {
-  return quality === "draft" ? "480p" : quality === "720p" ? "720p" : "1080p";
+  return quality === "draft" ? "480p" : "720p";
 }
 
 /** Poll an Ark generation task and return its video URL. */

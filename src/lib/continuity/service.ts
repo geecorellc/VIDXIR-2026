@@ -610,24 +610,36 @@ export function sceneVoicesFor(args: {
   return out;
 }
 
-/** The prompt for a scene being regenerated, carrying the failures that caused it. */
+/**
+ * The prompt for a scene being regenerated, carrying the failures that caused it.
+ *
+ * Returns the block alongside the prompt, the same shape as `continuityContextFor`
+ * and for the same reason: the caller has to store the constraints the scene was
+ * regenerated under, and the next check reads that row back to decide whether the
+ * scene carried them. Returning only the assembled string would leave the caller to
+ * rebuild the block itself to record it — a second computation of the same thing,
+ * and the one thing that must not differ from what was actually sent.
+ */
 export function regenerationPromptFor(args: {
   context: ContinuityContext;
   report: ContinuityReport;
   sceneIndex: number;
   visualPrompt: string;
-}): string {
+}): { block: string; prompt: string } {
   const scene = continuityContextFor({
     context: args.context,
     sceneIndex: args.sceneIndex,
     visualPrompt: args.visualPrompt,
   });
 
-  return regenerationPrompt({
-    visualPrompt: args.visualPrompt,
-    continuity: scene.block,
-    issues: issuesForScene(args.report, args.sceneIndex),
-  });
+  return {
+    block: scene.block,
+    prompt: regenerationPrompt({
+      visualPrompt: args.visualPrompt,
+      continuity: scene.block,
+      issues: issuesForScene(args.report, args.sceneIndex),
+    }),
+  };
 }
 
 /** Record the block a scene was actually generated with, for the check. */

@@ -213,8 +213,16 @@ const schema = z.object({
   SEEDANCE_API_KEY: z.string().optional(),
   /** Ark API host. */
   SEEDANCE_BASE_URL: z.string().default("https://ark.ap-southeast.volces.com/api/v3"),
-  /** Seedance model id. Ark versions these, so it is configurable. */
-  SEEDANCE_VIDEO_MODEL: z.string().default("doubao-seedance-1-0-pro-250528"),
+  /**
+   * Seedance model id. Ark versions these, so it is configurable.
+   *
+   * The Dreamina Seedance 2.0 fast model, which is the version that accepts continuity
+   * reference images (§6) — the 1.0 family this defaulted to previously documents only
+   * first/last-frame image input, so a deployment pinned back to it keeps working and
+   * silently falls back to textual continuity. The 2.0 fast tier also caps at 720p and
+   * takes 4–15 second clips, which is what `TAL_3.capabilities` declares.
+   */
+  SEEDANCE_VIDEO_MODEL: z.string().default("dreamina-seedance-2-0-fast-260128"),
   /**
    * Ark text-to-image model id, used for continuity reference stills (§5).
    *

@@ -16,11 +16,18 @@
  * nothing to poll (the check runs once, after the render), and keeping it on the server
  * means the bible never has to cross into a client bundle.
  */
-import { AlertTriangle, Check, Info, Mic, Users } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Image as ImageIcon,
+  Info,
+  Mic,
+  Users,
+} from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { color, font, radius } from "@/lib/design/tokens";
 import { hasCanonicalVoice, type Character } from "@/lib/continuity/bible";
-import type { ContinuityView } from "@/lib/continuity/read";
+import type { ContinuityReferenceView, ContinuityView } from "@/lib/continuity/read";
 
 export interface ContinuityPanelProps {
   view: ContinuityView;
@@ -193,6 +200,39 @@ export function ContinuityPanel({ view }: ContinuityPanelProps) {
         </ul>
       )}
 
+      {/*
+        The stills already drawn for this bible.
+
+        Below the findings deliberately: a break in the prompts is what an operator came
+        to this panel for, and the cast's portraits are context. Rendered only when there
+        are some — stills are drawn on request, so most projects have none, and an empty
+        strip labelled "reference stills" would report that normal state as a gap.
+      */}
+      {view.references.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginBottom: 8,
+              fontSize: 11,
+              textTransform: "uppercase",
+              letterSpacing: 0.4,
+              color: color.textFaint,
+            }}
+          >
+            <ImageIcon size={12} aria-hidden="true" />
+            Reference stills
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {view.references.map((reference) => (
+              <ReferenceStill key={reference.assetId} reference={reference} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {regenerated.length > 0 && (
         <p
           style={{
@@ -298,6 +338,71 @@ function CastChip({ character }: { character: Character }) {
         {voice}
       </span>
     </span>
+  );
+}
+
+/**
+ * One reference still.
+ *
+ * A thumbnail and the entity's name, and nothing that could be mistaken for a claim
+ * about the video: this is what the *bible* looks like, not what the scenes look like.
+ * Whether a scene was actually drawn from one depends on the project's selected model —
+ * only Tal 3.1 is handed the stills, every other model gets the same facts as text — and
+ * this panel does not know which model a project uses. So the caption says "reference"
+ * and the panel claims no scene was drawn from it, which is true either way.
+ *
+ * A still whose URL could not be signed keeps its name and loses its picture. It exists,
+ * so hiding it would misreport the cast as undrawn.
+ */
+function ReferenceStill({ reference }: { reference: ContinuityReferenceView }) {
+  return (
+    <figure
+      style={{
+        margin: 0,
+        width: 84,
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
+      <div
+        style={{
+          width: 84,
+          aspectRatio: "1/1",
+          borderRadius: radius.sm,
+          border: `1px solid ${color.border}`,
+          background: color.inputBg,
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {reference.url ? (
+          // eslint-disable-next-line @next/next/no-img-element -- signed, short-lived storage URL
+          <img
+            src={reference.url}
+            alt={`Reference still for ${reference.name}`}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+          />
+        ) : (
+          <ImageIcon size={16} color={color.textFaint} aria-hidden="true" />
+        )}
+      </div>
+      <figcaption
+        style={{
+          fontSize: 10.5,
+          color: color.textDim,
+          lineHeight: 1.35,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+        title={`${reference.name} — ${reference.kind}`}
+      >
+        {reference.name}
+      </figcaption>
+    </figure>
   );
 }
 

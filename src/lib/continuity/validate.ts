@@ -240,8 +240,9 @@ export function validateContinuity(input: ValidateInput): ContinuityReport {
    * bills for work that cannot help is worse than one that reports and waits.
    *
    * The findings themselves are untouched and still `fail`, so the panel, the verdict
-   * and the score all treat a wrong voice as the break it is. What changes is only
-   * what gets automatically re-billed: the operator re-runs the voiceover stage.
+   * and the score all treat a wrong voice as the break it is. What changes is only what
+   * gets automatically re-billed; each voice finding's `detail` names the action that
+   * does fix it, which is a rebuild.
    */
   const affectedScenes = [
     ...new Set(
@@ -286,10 +287,17 @@ type VisualIndex = ReadonlyMap<number, SceneVisual>;
  *
  * A prefix test rather than a list of three, so a voice finding added later is
  * excluded from the regeneration set by default rather than by remembering to.
+ *
+ * Exported because the exclusion has to hold in two places, and only one of them is
+ * in this module. `affectedScenes` and `issuesForScene` decide what a *fresh* report
+ * regenerates; `executeSceneRegeneration` re-reads the findings back out of
+ * `quality_checks` and rebuilds a prompt from them, so it needs the same predicate.
+ * A second copy of "starts with continuity.voice." in the pipeline would be the
+ * obvious way for the two to drift apart.
  */
-const VOICE_CODE_PREFIX = "continuity.voice.";
+export const VOICE_CODE_PREFIX = "continuity.voice.";
 
-function isVoiceCode(code: string): boolean {
+export function isVoiceCode(code: string): boolean {
   return code.startsWith(VOICE_CODE_PREFIX);
 }
 
@@ -404,9 +412,16 @@ function checkCharacters(
  *
  * A `fail` here is deliberately **not** a regeneration trigger the way a visual
  * failure is: `executeSceneRegeneration` regenerates a scene's *visual* and never
- * re-synthesises audio, so the honest outcome is a recorded finding the operator
- * acts on by re-running the voiceover stage. See `scenesToRegenerate`, which filters
- * on the scenes a visual regeneration can fix.
+ * re-synthesises audio. See `scenesToRegenerate`, which filters on the scenes a visual
+ * regeneration can fix, and `isVoiceCode`, which keeps these codes out of the prompt a
+ * regeneration is built from.
+ *
+ * So the outcome is a recorded finding, and the action each one names is a **rebuild**.
+ * Not a voiceover re-run: the voiceover stage chains into visuals, and its segment
+ * durations are what the timeline, the captions and the render are built from, so there
+ * is no audio-only path to offer and the findings do not pretend there is. A rebuild is
+ * a real fix rather than a shrug, because `sceneVoicesFor` resolves the assignment from
+ * the bible deterministically on every run — correcting the bible is enough.
  */
 function checkVoices(input: ValidateInput, issues: ContinuityIssue[]): Tally {
   if (!input.capabilities.characters) return { expected: 0, misses: 0 };
@@ -543,9 +558,23 @@ function checkVoices(input: ValidateInput, issues: ContinuityIssue[]): Tally {
         message:
           `Scene ${entry.sceneIndex} was narrated in a different voice from the one ` +
           `the story bible assigns to ${assignment.characterName}.`,
+        /**
+         * The action named here is the one that exists.
+         *
+         * This said "re-run the voiceover stage", which no surface offers: the voiceover
+         * stage chains into visuals, so re-running it regenerates every scene's clip at
+         * full provider cost, and its new durations invalidate the timeline, the captions
+         * and the render. There is therefore no narrower audio-only path today, and a
+         * finding that instructs an operator to take one is a finding they cannot act on.
+         *
+         * Rebuilding is what actually fixes it, and it fixes it for the stated reason:
+         * the voice assignment is resolved from the bible on every run, so the corrected
+         * bible is obeyed by the next build without anything else being changed.
+         */
         detail:
-          "Re-run the voiceover stage to narrate this scene in the character's " +
-          "canonical voice.",
+          "Rebuilding this video will narrate the scene in the character's canonical " +
+          "voice — the assignment is read from the story bible on every build. There is " +
+          "no way to re-narrate one scene on its own.",
         sceneIndex: entry.sceneIndex,
         entityId: assignment.characterId,
       });
@@ -558,9 +587,12 @@ function checkVoices(input: ValidateInput, issues: ContinuityIssue[]): Tally {
         message:
           `${assignment.characterName} is narrated in a different voice in scene ` +
           `${entry.sceneIndex} than in scene ${established.sceneIndex}.`,
+        // Same correction as the mismatch above: the fix is a rebuild, and the reason it
+        // works is that the assignment is deterministic given the bible, so one rebuild
+        // re-narrates every scene from the same contract.
         detail:
-          "The same character sounds like two different people in one video. Re-run " +
-          "the voiceover stage to narrate every scene in one voice.",
+          "The same character sounds like two different people in one video. Rebuilding " +
+          "will narrate every scene from the story bible's single assignment.",
         sceneIndex: entry.sceneIndex,
         entityId: assignment.characterId,
       });
@@ -996,3 +1028,71 @@ export function toQualityFindings(report: ContinuityReport): Array<{
     })),
   ];
 }
+
+/**
+ * The scene a stored finding is about, read back out of its `detail`.
+ *
+ * The inverse of the `scene N` field `toQualityFindings` writes above, and it lives
+ * here for that reason: the format is one decision, and a reader that re-derives it
+ * by hand is how `scene 1` comes to match `scene 19`.
+ *
+ * Anchored, and only ever the *leading* field — which is where `toQualityFindings`
+ * puts it whenever there is one. The alternative, searching the whole string, would
+ * match a scene number that happened to appear in a finding's own free text.
+ *
+ * Returns null for a finding with no scene: the summary row, a whole-video style
+ * failure, an unused voice. Null means "not about a scene", never "scene 0".
+ */
+export function sceneOfFinding(detail: string | undefined | null): number | null {
+  if (!detail) return null;
+  const match = SCENE_DETAIL_RE.exec(detail);
+  if (!match?.[1]) return null;
+  const index = Number.parseInt(match[1], 10);
+  return Number.isSafeInteger(index) ? index : null;
+}
+
+/**
+ * The stored findings a scene's regeneration should be told to correct.
+ *
+ * `issuesForScene` is the same decision made against a live `ContinuityReport`; this is
+ * it made against the rows read back out of `quality_checks`, which is what the
+ * regeneration stage actually has — the report that failed the scene belongs to a job
+ * that has already finished. The two are separate functions because their inputs are
+ * different shapes, and they are in one module because they must not disagree.
+ *
+ * Three filters, and each one prevents a specific way of paying for a wrong instruction:
+ *
+ *  - **`fail` only.** A warning is recorded and shown; regenerating for one would make
+ *    the middle band cost the same as a failure.
+ *  - **No voice codes.** "Narrated in a different voice" is true and useless to an image
+ *    model, and a scene with a wrong coat *and* a wrong voice must not have the second
+ *    steering the redraw.
+ *  - **`sceneOfFinding`, not a substring search.** `detail.includes("scene 1")` also
+ *    matched scenes 10–19 and 100–119, so near `MAX_SCENES` a redraw of scene 1 was
+ *    handed twenty other shots' failures to correct.
+ */
+export function storedIssuesForScene(
+  findings: readonly {
+    code: string;
+    severity: FindingSeverity;
+    message: string;
+    detail?: string;
+  }[],
+  sceneIndex: number,
+): string[] {
+  return findings
+    .filter(
+      (finding) =>
+        finding.severity === "fail" &&
+        !isVoiceCode(finding.code) &&
+        sceneOfFinding(finding.detail) === sceneIndex,
+    )
+    .map((finding) => finding.message);
+}
+
+/**
+ * `scene 12` at the start of a detail, terminated by the end of the string or the
+ * separator `toQualityFindings` joins its fields with. The terminator is what makes
+ * this exact: without it, `scene 1` is a prefix of `scene 12`.
+ */
+const SCENE_DETAIL_RE = /^scene (\d+)(?: ·|$)/;

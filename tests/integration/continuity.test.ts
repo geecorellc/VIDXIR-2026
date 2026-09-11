@@ -252,6 +252,30 @@ async function insertScenes(
   );
 }
 
+/**
+ * Every scene's recorded continuity prompt, by index.
+ *
+ * Read straight from the column rather than through `getSceneStates`, which returns the
+ * state and not the prompt. The prompt is what the *check* reads back to decide whether a
+ * scene carried its constraints, so a test about what was recorded has to look at the row
+ * the check will look at.
+ */
+async function sceneRows(
+  userId: string,
+  projectId: string,
+): Promise<Map<number, string | null>> {
+  const { db } = await import("@/lib/db");
+  const { scenes } = await import("@/lib/db/schema");
+  const { and, eq } = await import("drizzle-orm");
+
+  const rows = await db
+    .select({ index: scenes.index, prompt: scenes.continuityPrompt })
+    .from(scenes)
+    .where(and(eq(scenes.projectId, projectId), eq(scenes.userId, userId)));
+
+  return new Map(rows.map((row) => [row.index, row.prompt]));
+}
+
 /** The `ContinuityProject` struct the service takes, for a studio-tier project. */
 function continuityProject(projectId: string, channelId: string) {
   return {
@@ -1080,6 +1104,165 @@ suite("continuity layer (integration)", () => {
       expect(scenes).toContain(1);
     });
 
+    /**
+     * The prompt a regeneration was actually built from, over the row the visuals
+     * stage left behind.
+     *
+     * The check reads `scenes.continuity_prompt` to decide whether a scene carried its
+     * constraints, so a regenerated scene whose row still holds the *original* block has
+     * the next check validating a prompt nothing was generated from. It can pass a scene
+     * that failed and fail one that was fixed.
+     *
+     * The stage itself cannot be run here — it charges credits, resolves a real model and
+     * stores bytes, all of which `credit-charging.test.ts` already covers end to end. What
+     * this asserts is the pair the stage writes: that `regenerationPromptFor` returns the
+     * block embedded in the prompt it built, and that `recordScenePrompt` puts that same
+     * block on the row where the check will find it.
+     */
+    it("re-records the block a regenerated scene was actually built from", async () => {
+      const { getSceneStates, saveUserBible, saveSceneContinuity } = await import(
+        "@/lib/continuity/store"
+      );
+
+      const owner = await project("regen-prompt@tally.test");
+      await insertScenes(owner.user.id, owner.projectId, 2);
+      await saveUserBible({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        bible: bible("Mara"),
+        level: "character",
+      });
+      for (let index = 0; index < 2; index += 1) {
+        await saveSceneContinuity({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          sceneIndex: index,
+          state: sceneState(),
+          // What the visuals stage would have stored: a block from the bible as it
+          // was at build time.
+          continuityPrompt: "Mara: an outdated description from the first build.",
+        });
+      }
+
+      await withFlag(true, async () => {
+        const { loadContext, recordScenePrompt, regenerationPromptFor } = await import(
+          "@/lib/continuity/service"
+        );
+        const context = await loadContext(
+          owner.user.id,
+          continuityProject(owner.projectId, owner.channelId),
+        );
+        expect(context.active).toBe(true);
+
+        const regeneration = regenerationPromptFor({
+          context,
+          report: report({
+            score: 30,
+            status: "fail",
+            affectedScenes: [1],
+            issues: [
+              {
+                code: "continuity.character.missing_constraint",
+                severity: "fail",
+                message: "Scene 1's prompt did not describe Mara.",
+                sceneIndex: 1,
+                entityId: "mara",
+              },
+            ],
+          }),
+          sceneIndex: 1,
+          visualPrompt: SHOTS[1]!,
+        });
+
+        /**
+         * The block is what the prompt contains, not a second computation of it.
+         *
+         * This is why `regenerationPromptFor` returns both: recomputing the block at the
+         * call site to store it would put two derivations of the same thing one edit
+         * apart, and the one thing that must never differ is what was stored from what
+         * was sent.
+         */
+        expect(regeneration.block.length).toBeGreaterThan(0);
+        expect(regeneration.prompt).toContain(regeneration.block);
+        expect(regeneration.prompt).toContain(SHOTS[1]!);
+        // §13: the failure that caused the redraw travels with it.
+        expect(regeneration.prompt).toContain("Scene 1's prompt did not describe Mara.");
+
+        await recordScenePrompt({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          sceneIndex: 1,
+          state: context.states.find((s) => s.sceneIndex === 1) ?? null,
+          block: regeneration.block,
+        });
+
+        const states = await getSceneStates(owner.user.id, owner.projectId);
+        const scenes = await sceneRows(owner.user.id, owner.projectId);
+
+        // The regenerated scene's row is the prompt it was regenerated under.
+        expect(scenes.get(1)).toBe(regeneration.block);
+        expect(scenes.get(1)).not.toContain("outdated description");
+        // And only that scene's: a redraw of scene 1 must not rewrite scene 0's record.
+        expect(scenes.get(0)).toBe(
+          "Mara: an outdated description from the first build.",
+        );
+        // The state survives the write, because the check builds the graph from it.
+        expect(states.map((s) => s.sceneIndex)).toEqual([0, 1]);
+      });
+    });
+
+    it("leaves the recorded prompt alone when there is nothing to record", async () => {
+      /**
+       * §25's half of the same write. An inert context produces an empty block, and
+       * `recordScenePrompt` stores null for one rather than an empty string — so a
+       * project with the layer off does not acquire a continuity row that reads as "this
+       * scene was built with no constraints" when it was built before constraints
+       * existed.
+       */
+      const { saveSceneContinuity } = await import("@/lib/continuity/store");
+      const owner = await project("regen-prompt-inert@tally.test");
+      await insertScenes(owner.user.id, owner.projectId, 1);
+      await saveSceneContinuity({
+        userId: owner.user.id,
+        projectId: owner.projectId,
+        sceneIndex: 0,
+        state: sceneState(),
+        continuityPrompt: null,
+      });
+
+      await withFlag(false, async () => {
+        const { loadContext, recordScenePrompt, regenerationPromptFor } = await import(
+          "@/lib/continuity/service"
+        );
+        const context = await loadContext(
+          owner.user.id,
+          continuityProject(owner.projectId, owner.channelId),
+        );
+        expect(context.active).toBe(false);
+
+        const regeneration = regenerationPromptFor({
+          context,
+          report: report({ score: 20, status: "fail", affectedScenes: [0] }),
+          sceneIndex: 0,
+          visualPrompt: SHOTS[0]!,
+        });
+
+        // Byte-identical to the shot: an inert layer appends nothing.
+        expect(regeneration.block).toBe("");
+        expect(regeneration.prompt).toBe(SHOTS[0]!);
+
+        await recordScenePrompt({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          sceneIndex: 0,
+          state: null,
+          block: regeneration.block,
+        });
+
+        expect((await sceneRows(owner.user.id, owner.projectId)).get(0)).toBeNull();
+      });
+    });
+
     it("does not regenerate on a warn verdict", async () => {
       const { saveBible, saveSceneContinuity } = await import(
         "@/lib/continuity/store"
@@ -1574,6 +1757,187 @@ suite("continuity layer (integration)", () => {
       expect(stored[0]?.assetId).toBe(second);
       expect(stored[0]?.assetId).not.toBe(first);
       expect(stored[0]?.entityName).toBe("Mara Redrawn");
+    });
+
+    /**
+     * The stills as the panel receives them.
+     *
+     * `ContinuityPanel` itself cannot be render-tested in this repository — `vitest.config.ts`
+     * runs `environment: "node"`, includes only `*.test.ts`, and there is no jsdom or
+     * `@testing-library` dependency — so the assertions are on the data the component is a
+     * pure function of. What that leaves untested is the JSX; what it covers is everything
+     * that could be wrong about the stills a panel is given: which rows, whose rows, and
+     * whether each has a URL a browser can fetch.
+     */
+    describe("in the read model", () => {
+      it("signs each stored still for the panel, newest per entity", async () => {
+        const { continuityView } = await import("@/lib/continuity/read");
+        const { saveUserBible } = await import("@/lib/continuity/store");
+        const owner = await project("reference-view@tally.test");
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+
+        await storeReference({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          kind: "character",
+          entityId: "mara",
+          entityName: "Mara",
+        });
+        await storeReference({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          kind: "environment",
+          entityId: "workshop",
+          entityName: "The Workshop",
+        });
+        // Superseded by the next one: the panel must show the current still, not both.
+        await storeReference({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          kind: "character",
+          entityId: "mara",
+          entityName: "Mara Redrawn",
+        });
+
+        const view = await withFlag(true, () =>
+          continuityView(owner.user.id, owner.projectId, "studio"),
+        );
+
+        expect(view.references).toHaveLength(2);
+
+        const byEntity = new Map(view.references.map((r) => [r.entityId, r]));
+        expect(byEntity.get("mara")?.name).toBe("Mara Redrawn");
+        expect(byEntity.get("mara")?.kind).toBe("character");
+        expect(byEntity.get("workshop")?.kind).toBe("environment");
+
+        for (const reference of view.references) {
+          /**
+           * A real signed URL, which is the point of signing them here.
+           *
+           * The bucket is private, so a storage key rendered into an `<img src>` would be
+           * a broken image on every panel. The query has to carry a signature and an
+           * expiry — a bare object URL would 403.
+           */
+          expect(reference.url, reference.entityId).toBeTruthy();
+          expect(reference.assetId, reference.entityId).toBeTruthy();
+          expect(reference.url).toMatch(/X-Amz-Signature=/);
+          expect(reference.url).toMatch(/X-Amz-Expires=/);
+          // Signed for reading. A panel must never be handed an upload URL.
+          expect(reference.url).not.toContain("uploadId");
+        }
+      });
+
+      it("gives the panel an empty list rather than a failure when nothing is drawn", async () => {
+        // The ordinary case, and the reason the panel hides the section instead of
+        // showing an empty strip: stills are drawn on request, so most projects have none.
+        const { continuityView } = await import("@/lib/continuity/read");
+        const { saveUserBible } = await import("@/lib/continuity/store");
+        const owner = await project("reference-view-empty@tally.test");
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+
+        const view = await withFlag(true, () =>
+          continuityView(owner.user.id, owner.projectId, "studio"),
+        );
+
+        expect(view.references).toEqual([]);
+        // And the rest of the view is intact, so an absent still is not read as an
+        // absent bible.
+        expect(view.bible?.characters[0]?.name).toBe("Mara");
+      });
+
+      it("does not put one tenant's stills on another's panel", async () => {
+        const { continuityView } = await import("@/lib/continuity/read");
+        const { saveUserBible } = await import("@/lib/continuity/store");
+
+        const owner = await project("reference-view-owner@tally.test");
+        const intruder = await project("reference-view-intruder@tally.test");
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+        await storeReference({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          kind: "character",
+          entityId: "mara",
+          entityName: "Mara",
+        });
+
+        await withFlag(true, async () => {
+          expect(
+            (await continuityView(owner.user.id, owner.projectId, "studio")).references,
+          ).toHaveLength(1);
+
+          // The owner's project id with the intruder's user id — refused at
+          // `getProject`, before any still is read or signed.
+          await expect(
+            continuityView(intruder.user.id, owner.projectId, "studio"),
+          ).rejects.toMatchObject({ code: "forbidden" });
+
+          // And the intruder's own panel shows their own emptiness.
+          expect(
+            (await continuityView(intruder.user.id, intruder.projectId, "studio"))
+              .references,
+          ).toEqual([]);
+        });
+      });
+
+      it("keeps a still whose URL cannot be signed, without its picture", async () => {
+        /**
+         * A signing failure costs one still its thumbnail, not the panel its cast — and
+         * never the video screen its render. The still exists, so dropping it would tell
+         * an operator the character is undrawn and invite them to pay to draw it again.
+         */
+        const { continuityView } = await import("@/lib/continuity/read");
+        const { saveUserBible } = await import("@/lib/continuity/store");
+        const storage = await import("@/lib/storage");
+        const owner = await project("reference-view-unsignable@tally.test");
+
+        await saveUserBible({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          bible: bible("Mara"),
+          level: "character",
+        });
+        await storeReference({
+          userId: owner.user.id,
+          projectId: owner.projectId,
+          kind: "character",
+          entityId: "mara",
+          entityName: "Mara",
+        });
+
+        const spy = vi
+          .spyOn(storage, "signedReadUrl")
+          .mockRejectedValue(new Error("signing is unavailable"));
+
+        try {
+          const view = await withFlag(true, () =>
+            continuityView(owner.user.id, owner.projectId, "studio"),
+          );
+
+          expect(view.references).toHaveLength(1);
+          expect(view.references[0]?.name).toBe("Mara");
+          expect(view.references[0]?.url).toBeNull();
+        } finally {
+          spy.mockRestore();
+        }
+      });
     });
 
     it("plans every entity with visual facts, and nothing when the flag is off", async () => {

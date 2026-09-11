@@ -302,6 +302,61 @@ describe("buildContinuityPrompt", () => {
     expect(character).toContain("Brass Lamp");
   });
 
+  it("carries earlier world state at `world`, which tracks places and not props", () => {
+    /**
+     * Item 4, on its own and at the level that exposed it.
+     *
+     * A documentary returning to a room it had already flooded was told nothing about
+     * the flood and drew the room dry, because the accumulated-changes clause sat behind
+     * the *prop* gate — and `world` is exactly the level with `environments: true` and
+     * `props: false`. The clause has to be reachable without a single prop in the plan.
+     */
+    const states: IndexedSceneState[] = [
+      {
+        sceneIndex: 0,
+        state: parseSceneState({
+          environment: "workshop",
+          changes: ["the workshop floor is flooded"],
+        }),
+      },
+      { sceneIndex: 1, state: parseSceneState({ environment: "workshop" }) },
+    ];
+
+    const world = capabilitiesFor("world");
+    expect(world.environments).toBe(true);
+    expect(world.props).toBe(false);
+    expect(world.characters).toBe(false);
+
+    const text = buildContinuityPrompt(promptInput(states, 1, world));
+
+    expect(text).toContain("Already established: the workshop floor is flooded.");
+    // And still nothing the level does not track, so the fix widened one clause rather
+    // than the capability set.
+    expect(text).not.toContain("Objects present");
+    expect(text).not.toContain("Mara");
+  });
+
+  it("accumulates world state across every earlier scene, not just the previous one", () => {
+    // A change is not undone by the scenes that follow it, so scene 3 is owed both.
+    const states: IndexedSceneState[] = [
+      {
+        sceneIndex: 0,
+        state: parseSceneState({ environment: "workshop", changes: ["the window is broken"] }),
+      },
+      {
+        sceneIndex: 1,
+        state: parseSceneState({ environment: "workshop", changes: ["snow has come in"] }),
+      },
+      { sceneIndex: 2, state: parseSceneState({ environment: "workshop" }) },
+      { sceneIndex: 3, state: parseSceneState({ environment: "workshop" }) },
+    ];
+
+    const text = buildContinuityPrompt(promptInput(states, 3, capabilitiesFor("world")));
+
+    expect(text).toContain("the window is broken");
+    expect(text).toContain("snow has come in");
+  });
+
   it("is byte-identical across repeated calls and independent of state order", () => {
     const forwards = buildContinuityPrompt(promptInput(STATES, 2));
     const again = buildContinuityPrompt(promptInput(STATES, 2));
@@ -389,6 +444,148 @@ describe("buildContinuityPrompt", () => {
     expect(text.length).toBeLessThanOrEqual(MAX_CONTINUITY_CHARS);
     expect(text).toContain("Mara");
     expect(text).not.toContain("Objects present");
+  });
+
+  /**
+   * The `graph` field, which used to be accepted and never read.
+   *
+   * `establishedBy` is the only thing in the input that distinguishes "this scene
+   * introduces Mara" from "this scene returns to her". The facts rendered are identical
+   * either way; the instruction is not, and a generator with no memory of the earlier
+   * frame will draw a second plausible Mara unless told the first one is binding.
+   */
+  describe("the established-earlier reminder", () => {
+    const returning: IndexedSceneState[] = [
+      {
+        sceneIndex: 0,
+        state: parseSceneState({ characters: ["mara"], environment: "workshop" }),
+      },
+      {
+        sceneIndex: 1,
+        state: parseSceneState({
+          characters: ["mara", "ben"],
+          environment: "workshop",
+          props: ["lamp"],
+        }),
+      },
+      {
+        sceneIndex: 2,
+        state: parseSceneState({
+          characters: ["mara", "ben"],
+          environment: "workshop",
+          props: ["lamp"],
+        }),
+      },
+    ];
+
+    it("is absent from the scene that introduces everything", () => {
+      // Scene 0 establishes Mara and the workshop, so there is no earlier frame to
+      // match — and an instruction to match one would be an instruction to invent it.
+      const text = buildContinuityPrompt(promptInput(returning, 0));
+
+      expect(text).toContain("Mara");
+      expect(text).not.toContain("Already shown earlier");
+    });
+
+    it("names the entities an earlier scene established, and only those", () => {
+      /**
+       * Scene 1 returns to Mara and the workshop and introduces Ben and the lamp, all
+       * in one scene — the case a per-entity check gets right and a per-scene flag
+       * cannot. Ben must not be listed: scene 1 is where he first appears.
+       */
+      const text = buildContinuityPrompt(promptInput(returning, 1));
+
+      expect(text).toContain("Already shown earlier in this video:");
+      const reminder = text.slice(text.indexOf("Already shown earlier"));
+      expect(reminder).toContain("Mara");
+      expect(reminder).toContain("The Workshop");
+      expect(reminder).not.toContain("Ben");
+      expect(reminder).not.toContain("Brass Lamp");
+      // The actionable half of the fact, not the scene number, which a model cannot see.
+      expect(reminder).toContain("Reproduce them exactly as described above");
+      expect(reminder).not.toMatch(/scene \d/i);
+    });
+
+    it("names all four once every one of them has been established", () => {
+      const text = buildContinuityPrompt(promptInput(returning, 2));
+      const reminder = text.slice(text.indexOf("Already shown earlier"));
+
+      for (const name of ["Mara", "Ben", "The Workshop", "Brass Lamp"]) {
+        expect(reminder, name).toContain(name);
+      }
+    });
+
+    it("never names a kind the level does not track", () => {
+      // Otherwise a `world`-level prompt would tell a model to reproduce a cast the
+      // rest of the block never described.
+      const world = buildContinuityPrompt(promptInput(returning, 2, capabilitiesFor("world")));
+      expect(world).toContain("Already shown earlier in this video: The Workshop.");
+      expect(world).not.toContain("Mara");
+      expect(world).not.toContain("Brass Lamp");
+
+      // And nothing at all at `style`, which tracks no entities to have established.
+      expect(
+        buildContinuityPrompt(promptInput(returning, 2, capabilitiesFor("style"))),
+      ).not.toContain("Already shown earlier");
+    });
+
+    it("omits an id the bible does not define rather than printing the slug", () => {
+      // A planner can invent `mara_2`. A name is what makes the reminder usable, so an
+      // entity with no entry is dropped instead of put in front of a generator raw.
+      const states: IndexedSceneState[] = [
+        { sceneIndex: 0, state: parseSceneState({ characters: ["mara", "ghost"] }) },
+        { sceneIndex: 1, state: parseSceneState({ characters: ["mara", "ghost"] }) },
+      ];
+
+      const text = buildContinuityPrompt(promptInput(states, 1));
+      const reminder = text.slice(text.indexOf("Already shown earlier"));
+
+      expect(reminder).toContain("Mara");
+      expect(reminder).not.toContain("ghost");
+    });
+
+    it("loses to every real fact when the budget bites", () => {
+      /**
+       * Weight 50, below props at 60 and everything above them, because it is a framing
+       * of the facts rather than a fact: losing "match the earlier one" costs less than
+       * losing the wardrobe it points at, and a model given the wardrobe will draw
+       * something close to the earlier frame anyway.
+       *
+       * The fixture is sized so the cast alone plus a style leaves room for the small
+       * prop clause and not for the reminder — so this asserts the priority, not merely
+       * that a big prompt truncates.
+       */
+      const long = "z".repeat(110);
+      const bible = parseStoryBible({
+        characters: [
+          { id: "mara", name: "Mara", appearance: [long, long, long, long, long, long] },
+        ],
+        props: [{ id: "lamp", name: "Brass Lamp", description: ["dented shade"] }],
+        style: { medium: long },
+      });
+      const states: IndexedSceneState[] = [
+        { sceneIndex: 0, state: parseSceneState({ characters: ["mara"], props: ["lamp"] }) },
+        { sceneIndex: 1, state: parseSceneState({ characters: ["mara"], props: ["lamp"] }) },
+      ];
+
+      const text = buildContinuityPrompt(
+        promptInput(states, 1, capabilitiesFor("episodic"), bible),
+      );
+
+      expect(text.length).toBeLessThanOrEqual(MAX_CONTINUITY_CHARS);
+      expect(text).toContain("Mara");
+      expect(text).toContain("Objects present: Brass Lamp (dented shade).");
+      expect(text).not.toContain("Already shown earlier");
+    });
+
+    it("does not depend on the order the states arrive in", () => {
+      const forwards = buildContinuityPrompt(promptInput(returning, 2));
+      const shuffled = buildContinuityPrompt(
+        promptInput([returning[2]!, returning[0]!, returning[1]!], 2),
+      );
+
+      expect(shuffled).toBe(forwards);
+    });
   });
 
   it("strips trailing punctuation from facts so no clause reads '..'", () => {

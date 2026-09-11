@@ -77,6 +77,7 @@ import {
   referenceAssetMeta,
   type StoredReference,
 } from "@/lib/continuity/store";
+import { storedIssuesForScene } from "@/lib/continuity/validate";
 import type { ReferenceKind } from "@/lib/continuity/prompt";
 import {
   chargeCredits,
@@ -2113,14 +2114,20 @@ export async function executeSceneRegeneration(
       );
     }
 
+    /**
+     * The failures this scene is being redrawn for.
+     *
+     * Selected by `storedIssuesForScene` rather than filtered here, because the report
+     * that failed this scene belongs to a job that has already finished: what this stage
+     * has is the rows in `quality_checks`, and reading a scene index back out of a stored
+     * detail is a decision that belongs beside the code that wrote it. The predicate it
+     * replaced was `detail.includes("scene N")`, which also matched scenes 10–19 and
+     * 100–119 — so on a long project, redrawing scene 1 was told to correct twenty other
+     * shots' problems, at full provider price. It also excludes voice findings, which no
+     * redraw can fix.
+     */
     const check = await latestContinuityCheck(input.userId, input.projectId);
-    const issues = (check?.findings ?? [])
-      .filter(
-        (finding) =>
-          finding.severity === "fail" &&
-          (finding.detail ?? "").includes(`scene ${input.sceneIndex}`),
-      )
-      .map((finding) => finding.message);
+    const issues = storedIssuesForScene(check?.findings ?? [], input.sceneIndex);
 
     /**
      * Counted before the provider call, not after.
@@ -2161,7 +2168,7 @@ export async function executeSceneRegeneration(
       `Regenerating scene ${input.sceneIndex + 1} for continuity`,
     );
 
-    const prompt = regenerationPromptFor({
+    const regeneration = regenerationPromptFor({
       context,
       report: {
         // Only `issues` is read by `regenerationPromptFor`, via `issuesForScene`.
@@ -2213,7 +2220,7 @@ export async function executeSceneRegeneration(
       plan,
       modelId: plan.model.id,
       scene: { index: scene.index },
-      prompt,
+      prompt: regeneration.prompt,
       durationMs,
       /**
        * Offset by one, because the visuals stage already used 1.
@@ -2267,6 +2274,27 @@ export async function executeSceneRegeneration(
           eq(scenesTable.index, scene.index),
         ),
       );
+
+    /**
+     * The constraints this redraw actually carried, recorded over the originals.
+     *
+     * The check reads `scenes.continuity_prompt` to decide whether a scene carried its
+     * constraints, so leaving the visuals stage's row in place would have the next check
+     * validate a prompt that is no longer the one this scene was made from. That row and
+     * the asset above are now the same generation.
+     *
+     * The regeneration block can legitimately differ from the original — the bible may
+     * have been edited between the two — which is exactly why it is stored rather than
+     * assumed unchanged. `recordScenePrompt` swallows its own failures: a scene that was
+     * regenerated and paid for must not be lost to a bookkeeping write.
+     */
+    await recordScenePrompt({
+      userId: input.userId,
+      projectId: input.projectId,
+      sceneIndex: scene.index,
+      state: context.states.find((s) => s.sceneIndex === scene.index) ?? null,
+      block: regeneration.block,
+    });
 
     log.info("scene regenerated for continuity", {
       userId: input.userId,

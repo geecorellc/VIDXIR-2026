@@ -7,21 +7,26 @@
  * feature less trustworthy than showing nothing.
  *
  * Nothing here plans, generates or spends. It resolves the level the pipeline would
- * resolve, then performs four indexed reads. A page refresh costs four queries (§21).
+ * resolve, then performs five indexed reads and signs a URL per stored reference still.
+ * Signing is a local HMAC, not a request, so a page refresh costs five queries (§21).
  */
 
 import { getProject } from "@/lib/projects/service";
 import { isGenerationMode } from "@/lib/providers/video-gen";
+import { signedReadUrl } from "@/lib/storage";
+import { logger } from "@/lib/logger";
 import type { PlanTier } from "@/lib/plans";
 import type { ContinuityLevel, ContinuityThresholds } from "@/lib/continuity/config";
 import { resolveFor } from "@/lib/continuity/service";
 import {
   getBible,
+  getReferenceImages,
   getSceneStates,
   latestContinuityCheck,
   regenerationCounts,
 } from "@/lib/continuity/store";
 import type { StoryBible } from "@/lib/continuity/bible";
+import type { ReferenceKind } from "@/lib/continuity/prompt";
 import type { SceneState } from "@/lib/continuity/scene-state";
 import type { FindingSeverity } from "@/lib/continuity/validate";
 
@@ -43,6 +48,29 @@ export interface ContinuityCheckView {
   createdAt: Date;
 }
 
+/**
+ * A stored reference still, ready to render.
+ *
+ * The same rows `GET /api/video/continuity/references` returns and the same shape, minus
+ * the fields a thumbnail has no use for. Deliberately not a second store or a second
+ * generator: `executeReferenceImages` writes these assets, `getReferenceImages` is the
+ * one reader, and this view signs what it finds. Nothing here draws anything.
+ */
+export interface ContinuityReferenceView {
+  assetId: string;
+  kind: ReferenceKind;
+  entityId: string;
+  name: string;
+  /**
+   * A short-lived signed URL, or null when signing failed.
+   *
+   * Nullable rather than omitted, because the still genuinely exists in either case and
+   * a panel that dropped it would tell the operator the cast has no reference when it
+   * has one that could not be signed this second.
+   */
+  url: string | null;
+}
+
 export interface ContinuityView {
   projectId: string;
   /** The resolved level. `off` is a normal, correct answer. */
@@ -57,6 +85,14 @@ export interface ContinuityView {
   editedByUser: boolean;
   bibleUpdatedAt: Date | null;
   scenes: ContinuitySceneView[];
+  /**
+   * The reference stills already drawn for this bible, newest per entity.
+   *
+   * Empty is the ordinary case and not a defect: stills are drawn on request rather than
+   * during a build, so most projects have none. A panel showing an empty row would
+   * report an absence as a failure.
+   */
+  references: ContinuityReferenceView[];
   check: ContinuityCheckView | null;
   /**
    * The score from the latest check, or null.
@@ -70,6 +106,8 @@ export interface ContinuityView {
 }
 
 const SCORE_RE = /^Continuity score (\d+)\/100/;
+
+const log = logger.child({ component: "continuity-read" });
 
 /**
  * Assemble one project's continuity view.
@@ -95,11 +133,12 @@ export async function continuityView(
     tier,
   });
 
-  const [stored, states, check, counts] = await Promise.all([
+  const [stored, states, check, counts, references] = await Promise.all([
     getBible(userId, projectId),
     getSceneStates(userId, projectId),
     latestContinuityCheck(userId, projectId),
     regenerationCounts(userId, projectId),
+    getReferenceImages(userId, projectId),
   ]);
 
   return {
@@ -117,9 +156,45 @@ export async function continuityView(
       state: entry.state,
       regenerations: counts.get(entry.sceneIndex) ?? 0,
     })),
+    references: await signReferences(references),
     check,
     score: scoreOf(check),
   };
+}
+
+/**
+ * Sign each stored still for display.
+ *
+ * In parallel and individually caught, the same arrangement the references route uses:
+ * the bucket is private so a storage key is not viewable on its own, and one key that
+ * cannot be signed costs that still its thumbnail rather than costing the panel its
+ * cast. `Promise.all` over a mapped `catch` never rejects, so this cannot be the reason
+ * the video screen fails to render.
+ */
+async function signReferences(
+  stored: readonly {
+    assetId: string;
+    kind: ReferenceKind;
+    entityId: string;
+    entityName: string;
+    storageKey: string;
+  }[],
+): Promise<ContinuityReferenceView[]> {
+  return Promise.all(
+    stored.map(async (reference) => ({
+      assetId: reference.assetId,
+      kind: reference.kind,
+      entityId: reference.entityId,
+      name: reference.entityName,
+      url: await signedReadUrl(reference.storageKey).catch((error: unknown) => {
+        log.warn("could not sign a continuity reference still", {
+          assetId: reference.assetId,
+          error,
+        });
+        return null;
+      }),
+    })),
+  );
 }
 
 /** The score out of the summary finding, or null when this check is not a continuity one. */
