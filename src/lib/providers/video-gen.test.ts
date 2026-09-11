@@ -708,10 +708,10 @@ describe("capability matrix (§4, §16, §18 cases 4–7)", () => {
     );
     expect(qualities.get("tal/1.0")).toEqual(["draft", "720p", "1080p"]);
     expect(qualities.get("tal/2.0")).toEqual(["720p", "1080p"]);
-    // No 1080p on Tal 3.0: the Seedance 2.0 fast tier serves 8-bit 480p and 720p, and
-    // 1080p belongs to the standard and mini tiers. Declaring it would be a capability
-    // the vendor rejects after the scene's credits are committed.
-    expect(qualities.get("tal/3.0")).toEqual(["draft", "720p"]);
+    // Tal 3.0 keeps 1080p across the 1.0 → 2.0 move. `SEEDANCE_VIDEO_MODEL` defaults to
+    // the Seedance 2.0 *standard* tier, which serves it; the cheaper `-fast-` tier caps
+    // at 720p and pinning it is a deployment choosing to lose a resolution.
+    expect(qualities.get("tal/3.0")).toEqual(["draft", "720p", "1080p"]);
     expect(qualities.get("tal/3.1")).toEqual(["720p", "1080p"]);
     // Nothing claims 2K video: §19 forbids fabricating a capability, and no vendor
     // integrated here serves 2K on these model families.
@@ -1345,8 +1345,10 @@ describe("Tal 3.0 on its vendor API", () => {
      * commands would still produce a video — at the wrong resolution and duration.
      */
     const body = arkBody();
-    expect(body.model).toBe("dreamina-seedance-2-0-fast-260128");
-    expect(body.resolution).toBe("720p");
+    expect(body.model).toBe("dreamina-seedance-2-0-260128");
+    // `request()` names no quality, so `assertQuality` resolves the global 1080p default,
+    // which this model supports on the standard tier it is configured with.
+    expect(body.resolution).toBe("1080p");
     expect(body.duration).toBe(6);
     expect(body.ratio).toBe("16:9");
     expect(body.watermark).toBe(false);
@@ -1429,12 +1431,23 @@ describe("Tal 3.0 on its vendor API", () => {
     expect(arkBody().resolution).toBe("480p");
   });
 
-  it("refuses 1080p rather than generating at a tier this model has not got", async () => {
-    // The fast tier tops out at 720p. Refused before a request is made, so the failure
-    // is an honest message naming the supported tiers instead of a vendor rejection
-    // after the scene's credits are committed.
+  it("sends 1080p through, which the default standard tier serves", async () => {
+    net.replies = [
+      { id: "ark-hd" },
+      { status: "succeeded", content: { video_url: "https://tos.volces.com/h.mp4" } },
+    ];
+    // The tier Tal 3.0 has advertised since it was catalogued. `SEEDANCE_VIDEO_MODEL`
+    // defaults to the standard Seedance 2.0 model rather than `-fast-` precisely so this
+    // holds: enabling reference-image continuity must not quietly cost a resolution.
+    await generateClip(request({ modelId: "tal/3.0", quality: "1080p" }), USAGE);
+    expect(arkBody().resolution).toBe("1080p");
+  });
+
+  it("refuses 2K rather than generating at a tier no Ark model has", async () => {
+    // Refused before a request is made, so the failure is an honest message naming the
+    // supported tiers instead of a vendor rejection after credits are committed.
     await expect(
-      generateClip(request({ modelId: "tal/3.0", quality: "1080p" }), USAGE),
+      generateClip(request({ modelId: "tal/3.0", quality: "2k" }), USAGE),
     ).rejects.toMatchObject({ retryable: false, status: 400 });
     expect(net.calls).toHaveLength(0);
   });

@@ -545,12 +545,12 @@ describe("generationPlanFor — the stored choice (§10 over time)", () => {
     });
 
     /**
-     * 720p, not the global 1080p default: this model tops out there, and `assertQuality`
-     * resolves an absent choice to the nearest supported tier preferring the lower one.
-     * That is the point of the fallback — a stored row cannot name a resolution its
-     * model does not have, so an old project renders instead of failing.
+     * The global 1080p default, which this model supports — so the fallback is not
+     * exercised here, it is simply not needed. The fallback itself (nearest supported
+     * tier, preferring the lower) is what stops a stored row naming a resolution its
+     * model has not got, and Tal 3.1's refusal of `draft` is where that is tested.
      */
-    expect(plan.quality).toBe("720p");
+    expect(plan.quality).toBe("1080p");
   });
 
   it("re-checks the stored quality against the model, not just its spelling (§4)", () => {
@@ -927,24 +927,19 @@ describe("generationOptions — the cost preview (§20)", () => {
     const byId = new Map(generationOptions("scale").models.map((m) => [m.id, m]));
 
     /*
-     * The literal figures at 1080p, on the three models that reach it.
+     * The literal figures at 1080p, on all four branded models.
      *
      * Fixed rather than derived: this is the customer-visible price list, and a change
      * to it is a pricing decision that should have to be made deliberately in two
-     * places. 5 → 10 → 40, the rates in `credits/pricing` multiplied by 1080p's 1.0.
+     * places. 5 → 10 → 20 → 40, the rates in `credits/pricing` multiplied by 1080p's 1.0,
+     * so the price ordering matches the version numbering §3 promises means something.
      */
     expect(byId.get("tal/1.0")?.qualities.find((q) => q.quality === "1080p")?.sceneCredits).toBe(5);
     expect(byId.get("tal/2.0")?.qualities.find((q) => q.quality === "1080p")?.sceneCredits).toBe(10);
+    expect(byId.get("tal/3.0")?.qualities.find((q) => q.quality === "1080p")?.sceneCredits).toBe(20);
     expect(byId.get("tal/3.1")?.qualities.find((q) => q.quality === "1080p")?.sceneCredits).toBe(40);
 
-    /*
-     * Tal 3.0 has no 1080p row to quote: its vendor's fast variant serves 480p and 720p.
-     * Absent rather than priced, because a row the picker cannot select is a price for
-     * something nobody can buy. Its ceiling is 15 — the 20-credit rate at 720p's 0.75 —
-     * which still sits between Tal 2.0's 10 and Tal 3.1's 40, so the numbering keeps
-     * meaning what §3 promises it means.
-     */
-    expect(byId.get("tal/3.0")?.qualities.find((q) => q.quality === "1080p")).toBeUndefined();
+    // Tal 3.0's lower tiers, at 720p's 0.75 and draft's 0.5 against the same 20 rate.
     expect(byId.get("tal/3.0")?.qualities.find((q) => q.quality === "720p")?.sceneCredits).toBe(15);
     expect(byId.get("tal/3.0")?.qualities.find((q) => q.quality === "draft")?.sceneCredits).toBe(10);
 
@@ -957,7 +952,7 @@ describe("generationOptions — the cost preview (§20)", () => {
     expect(new Set(ceilings).size).toBe(ceilings.length);
 
     // The multiplier, which is the whole reason the resolution row shows a price: draft
-    // is half of 1080p on the one model that offers all three.
+    // is half of 1080p, and 720p three quarters of it, on a model offering all three.
     expect(byId.get("tal/1.0")?.qualities.find((q) => q.quality === "draft")?.sceneCredits).toBe(3);
     expect(byId.get("tal/1.0")?.qualities.find((q) => q.quality === "720p")?.sceneCredits).toBe(4);
   });

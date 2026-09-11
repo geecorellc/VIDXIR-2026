@@ -216,13 +216,20 @@ const schema = z.object({
   /**
    * Seedance model id. Ark versions these, so it is configurable.
    *
-   * The Dreamina Seedance 2.0 fast model, which is the version that accepts continuity
-   * reference images (§6) — the 1.0 family this defaulted to previously documents only
-   * first/last-frame image input, so a deployment pinned back to it keeps working and
-   * silently falls back to textual continuity. The 2.0 fast tier also caps at 720p and
-   * takes 4–15 second clips, which is what `TAL_3.capabilities` declares.
+   * The Dreamina Seedance 2.0 *standard* model, which is the version that accepts
+   * continuity reference images (§6) — the 1.0 family this defaulted to previously
+   * documents only first/last-frame image input, so a deployment pinned back to it keeps
+   * working and silently falls back to textual continuity.
+   *
+   * Standard rather than the cheaper `-fast-` sibling deliberately: fast caps at 720p,
+   * and Tal 3.0 has offered a 1080p master since it was catalogued. Dropping a resolution
+   * tier a customer may already have selected is a product decision, not a side effect of
+   * enabling continuity, so the tier that keeps the existing capability is the default and
+   * `TAL_3.capabilities.qualities` still declares 1080p. A deployment that wants the
+   * cheaper tier sets this to `dreamina-seedance-2-0-fast-260128` and must accept that a
+   * 1080p project will then be refused by `assertQuality`.
    */
-  SEEDANCE_VIDEO_MODEL: z.string().default("dreamina-seedance-2-0-fast-260128"),
+  SEEDANCE_VIDEO_MODEL: z.string().default("dreamina-seedance-2-0-260128"),
   /**
    * Ark text-to-image model id, used for continuity reference stills (§5).
    *

@@ -1147,7 +1147,6 @@ const TAL_3: VideoGenModel = {
   limitations: [
     "Slower than Tal 1.0 and Tal 2.0",
     "No generated audio",
-    "Tops out at 720p, so Tal 3.1 is the choice for a 1080p master",
     "Clips are at least four seconds",
   ],
   maxClipSeconds: 15,
@@ -1194,15 +1193,21 @@ const TAL_3: VideoGenModel = {
      */
     imageQualities: ["720p", "1080p"],
     /**
-     * 480p and 720p only — no 1080p, unlike the 1.0 family this model replaced.
+     * Unchanged across the 1.0 → 2.0 move: 480p, 720p and 1080p.
      *
-     * The Seedance 2.0 *fast* tier documents 8-bit 480p and 720p; 1080p and 4K are the
-     * standard and mini tiers' range. Declaring 1080p here would be a capability the
-     * vendor rejects, and `assertQuality` is what turns a stored `1080p` on an existing
-     * project into an honest refusal naming the supported tiers rather than a failed
-     * generation after credits are committed.
+     * Which of these the vendor honours depends on the configured version, and the tiers
+     * diverge — the Seedance 2.0 *standard* and mini models serve 1080p, the *fast* tier
+     * caps at 720p. `SEEDANCE_VIDEO_MODEL` defaults to standard precisely so this list
+     * stays true: Tal 3.0 has offered a 1080p master since it was catalogued, and a
+     * project that selected it keeps generating it.
+     *
+     * A deployment that pins the fast tier is choosing to lose 1080p. That is a
+     * misconfiguration this matrix cannot express — capabilities describe the model
+     * Tally catalogues, not one environment's env file — so it surfaces as the vendor
+     * refusing the resolution rather than as a silent downgrade, which is the same
+     * failure mode as pinning a version that takes no reference images.
      */
-    qualities: ["draft", "720p"],
+    qualities: ["draft", "720p", "1080p"],
     /**
      * 4–15 seconds, the documented range for this family.
      *
@@ -1461,17 +1466,17 @@ function arkImageSize(format: VideoFormat, quality: VideoQuality): string {
   return `${width}x${height}`;
 }
 
-/** Ark's resolution token. It has no 2K tier for this family. */
 /**
  * Tally's resolution vocabulary in the vendor's tokens.
  *
- * Only two tiers, matching `TAL_3.capabilities.qualities`: the Seedance 2.0 fast model
- * serves 8-bit 480p and 720p, and 1080p belongs to the standard and mini tiers. There is
- * no 1080p branch on purpose — `assertQuality` refuses the tier before this is reached,
- * so a fallback here would be an unreachable claim that the model does more than it does.
+ * Three tiers, matching `TAL_3.capabilities.qualities`. No 2K branch: Ark does not
+ * document one for this family, and `assertQuality` refuses the tier before this is
+ * reached, so a fallback for it would be an unreachable claim that the model does more
+ * than it does. 1080p maps straight through — the default `SEEDANCE_VIDEO_MODEL` is the
+ * standard tier, which serves it.
  */
 function arkResolution(quality: VideoQuality): string {
-  return quality === "draft" ? "480p" : "720p";
+  return quality === "draft" ? "480p" : quality === "720p" ? "720p" : "1080p";
 }
 
 /** Poll an Ark generation task and return its video URL. */
