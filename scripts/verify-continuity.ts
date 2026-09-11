@@ -32,17 +32,20 @@
  *   9. each regeneration produced a new asset from the resolved provider, repointed
  *      its scene, and incremented that scene's counter; scene 0 was left alone
  *  10. the project never left VIDEO_READY: continuity cannot fail a paid render
- *  11. the same video checked twice scores identically (§12's determinism, end to end)
- *  12. the regeneration ceiling refuses a further attempt and spends nothing
- *  13. another tenant can neither read the bible, the states and the check, nor
+ *  11. a re-check reads the constraints the redraw actually carried, so the three
+ *      repaired scenes now pass and the score rises — and nothing is re-billed
+ *  12. a further re-run, with no regeneration between, scores identically (§12's
+ *      determinism, end to end, on inputs that genuinely did not move)
+ *  13. the regeneration ceiling refuses a further attempt and spends nothing
+ *  14. another tenant can neither read the bible, the states and the check, nor
  *      overwrite them through the upsert
- *  14. the reference-still stage draws one image per bible entity with visual facts
- *  15. those stills are real landscape PNGs under the `reference/` prefix, found again
+ *  15. the reference-still stage draws one image per bible entity with visual facts
+ *  16. those stills are real landscape PNGs under the `reference/` prefix, found again
  *      by the reader, not re-drawn by a second run, and selected per scene by the
  *      entities that scene commits to
- *  16. with `TALLY_CONTINUITY_ENGINE_ENABLED=false` the stage is a no-op that records
+ *  17. with `TALLY_CONTINUITY_ENGINE_ENABLED=false` the stage is a no-op that records
  *      nothing
- *  17. every provider call this run made was the mock — asserted from `api_usage`
+ *  18. every provider call this run made was the mock — asserted from `api_usage`
  *
  * ## Cost and safety
  *
@@ -858,29 +861,45 @@ async function main(): Promise<void> {
       "verdict and three regenerations — no failure recorded",
   );
 
-  // ---- 11. the same video scores the same ---------------------------------
+  // ---- 11. a re-check sees the repair, and re-bills nothing ---------------
 
   /**
-   * §12's determinism, asserted end to end rather than over the pure function.
+   * The loop actually closing, which is what §13 is for.
    *
-   * A regeneration replaces a scene's *asset*; it does not rewrite `visual_prompt`
-   * or `continuity_prompt`, so the validator's inputs are byte-identical and the
-   * score must be too. A second run also proves the stage is safe to re-run, which
-   * is what a retried render does.
+   * This step used to assert the opposite — that a second check scored *identically* —
+   * and it passed for the wrong reason. `executeSceneRegeneration` replaced a scene's
+   * asset but left `scenes.continuity_prompt` holding the block from the original
+   * visuals stage, so the validator kept re-reading the constraints the *first* attempt
+   * carried and kept failing scenes that had already been fixed. Every check queued
+   * three more paid redraws, forever, until the ceiling stopped it. The identical score
+   * was the symptom.
+   *
+   * A regeneration now records the block it actually sent, so the three repaired scenes
+   * carry their constraints and pass. The score has to *rise*, and the second pass has
+   * to queue nothing — that is the difference between a quality feature that converges
+   * and one that bills in a loop (§22).
+   *
+   * §12's determinism is not weakened by this and is not what this step covers: the
+   * validator is still a pure function of its inputs, and `validate.test.ts` pins that
+   * over fixed structs. What changed is an *input*, deliberately. The re-run below is
+   * the end-to-end determinism check, on inputs that genuinely did not move.
    */
   const secondCheckId = await queueContinuityCheck();
   await drain();
   await requireSucceeded(secondCheckId, "second continuity check");
 
   const secondResult = await jobResult(secondCheckId);
+  const secondScore = secondResult["score"];
   assert(
-    secondResult["score"] === firstScore && secondResult["status"] === "fail",
-    `the same video scored ${String(secondResult["score"])} the second time, not ` +
-      `${String(firstScore)}`,
+    typeof secondScore === "number" && secondScore > (firstScore as number),
+    `the re-check scored ${String(secondScore)}, not above the first pass's ` +
+      `${String(firstScore)} — a redraw that recorded its constraints must clear the ` +
+      `findings that caused it`,
   );
   assert(
-    secondResult["regenerating"] === 3,
-    `the second pass queued ${String(secondResult["regenerating"])} regenerations`,
+    secondResult["regenerating"] === 0,
+    `the second pass queued ${String(secondResult["regenerating"])} regeneration(s); ` +
+      `the repaired scenes must not be re-billed`,
   );
 
   const secondRegen = await db
@@ -890,21 +909,40 @@ async function main(): Promise<void> {
       and(eq(schema.jobs.projectId, projectId), eq(schema.jobs.name, SCENE_REGEN_JOB)),
     );
   const fresh = secondRegen.filter((row) => !regenJobs.some((old) => old.id === row.id));
-  for (const row of fresh) {
-    await requireSucceeded(row.id, `scene ${String(row.payload?.["sceneIndex"])} re-run`);
-    const result = await jobResult(row.id);
-    assert(
-      result["attempt"] === 2,
-      `a second regeneration recorded attempt ${String(result["attempt"])}`,
-    );
-    generations += 1;
-  }
+  assert(
+    fresh.length === 0,
+    `${fresh.length} new regeneration job(s) were queued for scenes that were ` +
+      `already repaired, at full provider price`,
+  );
   ok(
-    `re-checked: score ${String(secondResult["score"])} again, and the counter ` +
-      `advanced to attempt 2 on ${fresh.length} scenes rather than resetting`,
+    `re-checked: score rose ${String(firstScore)} → ${String(secondScore)} and no ` +
+      `scene was queued again — the redraws' own constraints were read back`,
   );
 
-  // ---- 12. the ceiling refuses a further attempt -------------------------
+  /**
+   * And now the determinism, on inputs that really are unchanged.
+   *
+   * A third check with nothing between it and the second: no regeneration ran, so no
+   * prompt moved, and the score must be byte-identical. This is the assertion the old
+   * step 11 was reaching for, in the one place where its premise actually holds.
+   */
+  const thirdCheckId = await queueContinuityCheck();
+  await drain();
+  await requireSucceeded(thirdCheckId, "third continuity check");
+
+  const thirdResult = await jobResult(thirdCheckId);
+  assert(
+    thirdResult["score"] === secondScore &&
+      thirdResult["status"] === secondResult["status"],
+    `an unchanged video scored ${String(thirdResult["score"])} then ` +
+      `${String(secondScore)} — §12 requires the validator to be deterministic`,
+  );
+  ok(
+    `and an unchanged re-run scored ${String(thirdResult["score"])} again — ` +
+      `§12's determinism, end to end`,
+  );
+
+  // ---- 13. the ceiling refuses a further attempt -------------------------
 
   const ceiling = context.thresholds.maxRegenerations;
   await db
@@ -961,7 +999,7 @@ async function main(): Promise<void> {
       "nothing: no new asset, and the count still incremented",
   );
 
-  // ---- 13. another tenant sees nothing, and cannot overwrite -------------
+  // ---- 14. another tenant sees nothing, and cannot overwrite -------------
 
   const { ForbiddenError } = await import("@/lib/errors");
 
@@ -1053,7 +1091,7 @@ async function main(): Promise<void> {
       "from the view, and its writes through both upserts changed nothing",
   );
 
-  // ---- 14. the reference-still stage draws the cast, once -----------------
+  // ---- 15. the reference-still stage draws the cast, once -----------------
 
   /**
    * §5 and §6's intersection, on real infrastructure.
@@ -1112,7 +1150,7 @@ async function main(): Promise<void> {
       planBefore.wanted.map((entry) => entry.entityId).join(", "),
   );
 
-  // ---- 15. the stills are real objects, found again, and not re-drawn -----
+  // ---- 16. the stills are real objects, found again, and not re-drawn -----
 
   const referenceRows = await store.getReferenceImages(userId, projectId);
   assert(
@@ -1256,7 +1294,7 @@ async function main(): Promise<void> {
       "not re-drawn on a second run, and selected per scene by committed entity",
   );
 
-  // ---- 16. the flag off makes the stage a no-op ---------------------------
+  // ---- 17. the flag off makes the stage a no-op ---------------------------
 
   const checksBefore = await db
     .select({ id: schema.qualityChecks.id })
@@ -1315,7 +1353,7 @@ async function main(): Promise<void> {
       "nothing and queues nothing — the pre-continuity behaviour exactly",
   );
 
-  // ---- 17. every provider call was the mock ------------------------------
+  // ---- 18. every provider call was the mock ------------------------------
 
   /**
    * The cost claim in the header, audited rather than asserted in prose.
