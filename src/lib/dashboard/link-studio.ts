@@ -1,24 +1,31 @@
 /**
- * "Create from YouTube" screen data (Phase 11 §5, §6, §7, §18).
+ * Channel-less studio screen data (Phase 11 §5, §6, §7, §18; §1C).
  *
- * The link-mode counterpart of `dashboard/research.ts`. That module is scoped by
- * channel in every predicate — `eq(researchRuns.channelId, channelId)` — which is
- * correct for channel mode and unusable here, because a link-mode run has no
- * channel at all (§4). So this is a second *loader*, not a second pipeline: it
- * reads the same `research_runs`, `research_results` and `ideas` tables, keyed by
- * the project the pasted link created instead.
+ * The counterpart of `dashboard/research.ts` for the two entry paths that have no
+ * channel. That module is scoped by channel in every predicate —
+ * `eq(researchRuns.channelId, channelId)` — which is correct for channel mode and
+ * unusable here, because neither a link-mode nor a description-mode run has a
+ * channel at all (§4, §1C). So this is a second *loader*, not a second pipeline: it
+ * reads the same `research_runs`, `research_results` and `ideas` tables, keyed by the
+ * project instead.
+ *
+ * Named for link mode because that is what it was written for. It serves both
+ * channel-less paths rather than being copied for the second one, for the same reason
+ * `/api/projects/link-status` does: the question the two screens ask is identical, and
+ * only the key onto the run differs.
  *
  * Everything the screen shows is persisted. §18 requires progress to come from
  * Tally's own job records, and §42 forbids inventing what has not happened, so a
  * run that is still queued yields empty result and angle lists rather than
  * placeholders — the caller renders "researching", not fabricated rows.
  */
-import { and, desc, eq, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { ideas, projects, researchResults, researchRuns } from "@/lib/db/schema";
 import { getActiveProjectJobs, type JobView } from "@/lib/queue/jobs";
-import type { ProjectRecord } from "@/lib/projects/service";
+import type { ProjectOrigin, ProjectRecord } from "@/lib/projects/service";
 import { getProject } from "@/lib/projects/service";
+import { channelLessRunKeys } from "@/lib/research/run-key";
 
 /**
  * The source video, read back out of the stored analysis (§5).
@@ -89,6 +96,14 @@ export interface LinkRunView {
   niche: string | null;
   keywords: string[];
   sources: string[];
+  /**
+   * What the user said they wanted to make, for a description-mode run (§1C).
+   *
+   * Null in link mode. Read back from the run row rather than from the project title,
+   * which `configureProject` overwrites with the chosen angle — this is the only place
+   * the user's own words survive verbatim.
+   */
+  description: string | null;
   error: string | null;
   errorCode: string | null;
   createdAt: Date;
@@ -113,7 +128,7 @@ export interface LinkStudioData {
 }
 
 /**
- * Load one link-mode project's screen.
+ * Load one channel-less project's screen.
  *
  * `getProject` throws `ForbiddenError` for a project that is not the caller's, so
  * ownership is established before any of the reads below run — and each of those
@@ -125,40 +140,66 @@ export async function getLinkStudioData(
 ): Promise<LinkStudioData> {
   const project = await getProject(userId, projectId);
 
-  // The run is found through the source video rather than through a foreign key:
-  // `research_runs` has no `projectId` column, and adding one would be a schema
-  // change to express something the two rows already agree on. Restricted to
-  // channel-less runs so a channel-mode run for the same video cannot be picked up.
-  const runRows = project.sourceVideoId
-    ? await db
-        .select({
-          id: researchRuns.id,
-          status: researchRuns.status,
-          niche: researchRuns.niche,
-          keywords: researchRuns.keywords,
-          sources: researchRuns.sources,
-          sourceAnalysis: researchRuns.sourceAnalysis,
-          sourceTitle: researchRuns.sourceTitle,
-          sourceChannelTitle: researchRuns.sourceChannelTitle,
-          sourceVideoId: researchRuns.sourceVideoId,
-          error: researchRuns.error,
-          errorCode: researchRuns.errorCode,
-          createdAt: researchRuns.createdAt,
-          completedAt: researchRuns.completedAt,
-        })
-        .from(researchRuns)
-        .where(
-          and(
-            eq(researchRuns.userId, userId),
-            eq(researchRuns.sourceVideoId, project.sourceVideoId),
-            isNull(researchRuns.channelId),
-          ),
-        )
-        .orderBy(desc(researchRuns.createdAt))
-        .limit(1)
-    : [];
+  /**
+   * The run this project is waiting on.
+   *
+   * Keyed through `channelLessRunKeys`, the same shared helper
+   * `/api/projects/link-status` uses, so the polled status and the rendered page can
+   * never disagree about which run they mean. The keys are tried in order, and every
+   * one of them is restricted to this user's channel-less runs here, so none can pick
+   * up a trending-mode run belonging to one of their channels.
+   */
+  let runRow:
+    | {
+        id: string;
+        status: LinkRunView["status"];
+        niche: string | null;
+        keywords: string[];
+        sources: string[];
+        description: string | null;
+        sourceAnalysis: Record<string, unknown> | null;
+        sourceTitle: string | null;
+        sourceChannelTitle: string | null;
+        sourceVideoId: string | null;
+        error: string | null;
+        errorCode: string | null;
+        createdAt: Date;
+        completedAt: Date | null;
+      }
+    | undefined;
 
-  const runRow = runRows[0];
+  for (const runKey of channelLessRunKeys(projectId, project.sourceVideoId)) {
+    const runRows = await db
+      .select({
+        id: researchRuns.id,
+        status: researchRuns.status,
+        niche: researchRuns.niche,
+        keywords: researchRuns.keywords,
+        sources: researchRuns.sources,
+        description: researchRuns.description,
+        sourceAnalysis: researchRuns.sourceAnalysis,
+        sourceTitle: researchRuns.sourceTitle,
+        sourceChannelTitle: researchRuns.sourceChannelTitle,
+        sourceVideoId: researchRuns.sourceVideoId,
+        error: researchRuns.error,
+        errorCode: researchRuns.errorCode,
+        createdAt: researchRuns.createdAt,
+        completedAt: researchRuns.completedAt,
+      })
+      .from(researchRuns)
+      .where(
+        and(
+          eq(researchRuns.userId, userId),
+          runKey,
+          isNull(researchRuns.channelId),
+        ),
+      )
+      .orderBy(desc(researchRuns.createdAt))
+      .limit(1);
+
+    runRow = runRows[0];
+    if (runRow) break;
+  }
 
   const [resultRows, angleRows, activeJobs] = await Promise.all([
     runRow
@@ -221,20 +262,48 @@ export async function getLinkStudioData(
           niche: runRow.niche,
           keywords: runRow.keywords,
           sources: runRow.sources,
+          description: runRow.description,
           error: runRow.error,
           errorCode: runRow.errorCode,
           createdAt: runRow.createdAt,
           completedAt: runRow.completedAt,
         }
       : null,
-    source: runRow
-      ? readSource(
-          runRow.sourceVideoId ?? project.sourceVideoId ?? "",
-          runRow.sourceAnalysis,
-          runRow.sourceTitle,
-          runRow.sourceChannelTitle,
-        )
-      : null,
+    /**
+     * The source video, only where it was actually read.
+     *
+     * A description-mode run has no source at all, and `readSource` on its null
+     * analysis would produce a `SourceView` whose every field is null — a card
+     * reading "not reported" about a video that does not exist (§42).
+     *
+     * A video id is not enough to make that card worth rendering, which is the
+     * correction here. `projects.source_video_id` is written the moment a link is
+     * pasted, whereas the analysis is written later by the worker, so a run that was
+     * cancelled or failed before it read the video leaves an id with nothing behind
+     * it. The card then rendered its own last resort — the bare eleven-character
+     * video id as the headline, "not reported" under every figure — which reads as
+     * though Tally analysed the video and understood nothing about it. The truthful
+     * answer at that point is that there is no analysis yet, and the panel's empty
+     * state already says exactly that.
+     *
+     * So the test is the metadata, not the id: an analysis, or one of the denormalised
+     * title columns the same worker step writes. Any of those means a real read
+     * happened and every "not reported" beside it is a fact about the video rather
+     * than an artefact of when the run stopped.
+     */
+    source:
+      runRow &&
+      (runRow.sourceVideoId ?? project.sourceVideoId) &&
+      (runRow.sourceAnalysis !== null ||
+        runRow.sourceTitle !== null ||
+        runRow.sourceChannelTitle !== null)
+        ? readSource(
+            runRow.sourceVideoId ?? project.sourceVideoId ?? "",
+            runRow.sourceAnalysis,
+            runRow.sourceTitle,
+            runRow.sourceChannelTitle,
+          )
+        : null,
     trends: resultRows.map((row) => ({
       id: row.id,
       title: row.title,
@@ -252,22 +321,33 @@ export async function getLinkStudioData(
 }
 
 /**
- * The most recent link-mode project, for the screen's default view.
+ * The most recent project started from one of the given origins, for a screen's
+ * default view when the URL names no project.
  *
- * `origin = 'youtube_link'` rather than "has a sourceVideoId": origin records how
- * the project was started, which is the question being asked, and a future
- * channel-mode feature could legitimately reference a source video too.
+ * Matched on `origin` rather than on "has a sourceVideoId": origin records how the
+ * project was started, which is the question being asked, and a future channel-mode
+ * feature could legitimately reference a source video too. Each screen passes its own
+ * origins, so the link screen never opens on a described idea and the description
+ * screen never opens on a pasted link.
+ *
+ * `PUBLISHED` is excluded because the default view is "what am I working on".
  */
 export async function latestLinkProjectId(
   userId: string,
+  origins: readonly ProjectOrigin[] = ["youtube_link"],
 ): Promise<string | null> {
+  // An empty list would compile to a predicate that matches nothing, which reads as
+  // "no project in progress" — a caller asking about no origins is a bug, not a user
+  // with nothing in flight.
+  if (origins.length === 0) return null;
+
   const rows = await db
     .select({ id: projects.id })
     .from(projects)
     .where(
       and(
         eq(projects.userId, userId),
-        eq(projects.origin, "youtube_link"),
+        inArray(projects.origin, [...origins]),
         ne(projects.status, "PUBLISHED"),
       ),
     )

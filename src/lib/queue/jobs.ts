@@ -456,3 +456,46 @@ export async function hasActiveJob(
     .limit(1);
   return rows.length > 0;
 }
+
+/**
+ * True when a job of this name is already queued or running for one scene.
+ *
+ * `hasActiveJob` locks a whole project, which is the right grain for a research run
+ * or a render — there is one of each per project. Scene regeneration is the first
+ * job where several instances of the *same name* are legitimately in flight at once:
+ * scenes 3 and 11 both failing continuity must both be rebuilt, while scene 3 twice
+ * is a paid duplicate.
+ *
+ * The scene therefore has to be part of the key, and it is read out of the payload
+ * rather than being encoded into the job name. A name like `video-scene-regenerate:3`
+ * would give the same lock for free, but `HANDLERS` is keyed by exact job name and
+ * the worker refuses an unregistered name — so a per-scene name would need either an
+ * unbounded registry or a prefix-matching lookup in the shared harness, in exchange
+ * for a guard this query already provides.
+ *
+ * Scoped by owner in the predicate like every other read here (§34).
+ */
+export async function hasActiveSceneJob(
+  userId: string,
+  projectId: string,
+  name: string,
+  sceneIndex: number,
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.userId, userId),
+        eq(jobs.projectId, projectId),
+        eq(jobs.name, name),
+        inArray(jobs.status, ["queued", "running"]),
+        // `->>` yields text, so the comparison is against the rendered number. A
+        // payload with no `sceneIndex` yields NULL and never matches, which is the
+        // correct outcome: it is not a job for this scene.
+        sql`${jobs.payload}->>'sceneIndex' = ${String(sceneIndex)}`,
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}

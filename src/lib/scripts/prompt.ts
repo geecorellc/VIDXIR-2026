@@ -23,6 +23,7 @@
  */
 import { z } from "zod";
 import { jsonSchema, stringArray } from "@/lib/providers/ai";
+import { isPlaceholderTitle } from "@/lib/projects/display-title";
 
 /**
  * Spoken words per minute.
@@ -325,7 +326,24 @@ export function buildScriptPrompt(brief: ScriptBrief): string {
     if (brief.idea.targetKeywords.length > 0) {
       lines.push(`- Search terms to serve: ${brief.idea.targetKeywords.join(", ")}`);
     }
-  } else {
+  } else if (!isPlaceholderTitle(brief.projectTitle)) {
+    /**
+     * Omitted rather than emitted empty when there is no real working title.
+     *
+     * A project seeded from a pasted link carries a system-generated placeholder until
+     * research names it, and passing that through told the model the video is about an
+     * eleven-character YouTube id. `- Working title:` with nothing after it would be no
+     * better: it reads as a title the brief failed to fill in, and the writer is
+     * entitled to treat it as a constraint. With the line absent, the model works from
+     * the niche, audience and duration — genuinely all that is known about a video
+     * nobody has named yet.
+     *
+     * Classified here as well as in `buildScriptBrief`, which already strips it. Not
+     * redundant: this is the boundary where a title reaches a provider, so it is the
+     * last place the check can be made — and a future caller assembling a brief without
+     * going through that function would otherwise bake the id into a generated script,
+     * where it is permanent rather than merely on screen.
+     */
     lines.push(`- Working title: ${brief.projectTitle}`);
   }
 

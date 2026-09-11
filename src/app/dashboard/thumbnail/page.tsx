@@ -18,6 +18,7 @@ import { db } from "@/lib/db";
 import { assets } from "@/lib/db/schema";
 import { getStageContext } from "@/lib/dashboard/stage";
 import { hasFeature } from "@/lib/plans/enforce";
+import { displayTitle } from "@/lib/projects/display-title";
 import { capabilityStatus } from "@/lib/providers/config";
 import { signedReadUrl } from "@/lib/storage";
 import { logger } from "@/lib/logger";
@@ -58,7 +59,14 @@ export default async function ThumbnailPage({
       <ThumbnailStudio
         projectId={context.project?.id ?? null}
         status={context.project?.status ?? null}
-        baseTitle={context.script?.title ?? context.project?.title ?? null}
+        /*
+          The script's title first, because that is the video's real headline once one
+          exists. The project title is a fallback only when it is a real title —
+          `displayTitle` returns null for the from-a-link placeholder, so a project whose
+          source was never analysed offers to design thumbnails "for this video" instead
+          of for a raw video id (§42).
+        */
+        baseTitle={context.script?.title ?? displayTitle(context.project?.title)}
         variants={variants}
         selectedVariantId={context.selectedThumbnailVariantId}
         abTestingAvailable={hasFeature(tier, "thumbnailAbTest")}

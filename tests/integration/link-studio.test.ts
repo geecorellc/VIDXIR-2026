@@ -52,6 +52,7 @@ import {
   jar,
   resetDatabase,
   setTier,
+  signIn,
   useDatabase,
 } from "./setup";
 
@@ -898,6 +899,342 @@ suite("YouTube link mode (integration)", () => {
       expect(JSON.stringify(job?.payload)).not.toContain("apiKey");
     });
 
+    it("attributes the run to the project it was started for", async () => {
+      const { db } = await import("@/lib/db");
+      const { researchRuns } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const { user, project } = await linkProject("attribution@tally.test");
+      const { startLinkResearchRun } = await import("@/lib/research/service");
+
+      const { runId } = await startLinkResearchRun({
+        userId: user.id,
+        videoId: SOURCE_ID,
+        tier: "starter",
+        projectId: project.id,
+        linkForm: "watch",
+      });
+
+      const [run] = await db
+        .select({ projectId: researchRuns.projectId })
+        .from(researchRuns)
+        .where(eq(researchRuns.id, runId));
+
+      /**
+       * The run says which project it was researched for.
+       *
+       * Not decoration: `sourceVideoId` is the only other key onto a link-mode run,
+       * and it is not unique per project — the same video can legitimately be pasted
+       * twice, and the test below shows what goes wrong when the run cannot be told
+       * apart from another project's.
+       */
+      expect(run?.projectId).toBe(project.id);
+    });
+
+    it("keeps two projects from the same link on their own runs", async () => {
+      const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
+      const { createProject } = await import("@/lib/projects/service");
+
+      const { user, project: first } = await linkProject("samelink@tally.test");
+
+      // The first project researches the link and finishes.
+      const firstRun = await runLinkResearch(user.id, first.id);
+      expect(firstRun.error).toBeNull();
+
+      /**
+       * The same video, pasted again into a new project.
+       *
+       * A real thing to do — a user who published the first video and wants a second
+       * angle on the same source — and `/api/projects/from-youtube` permits it: the
+       * duplicate guard is scoped to the project, not to the video id.
+       */
+      const second = await createProject({
+        userId: user.id,
+        channelId: null,
+        title: `New video from a YouTube link (${SOURCE_ID})`,
+        origin: "youtube_link",
+        sourceVideoId: SOURCE_ID,
+        maxVideosPerMonth: null,
+      });
+
+      const secondRun = await runLinkResearch(user.id, second.id);
+      expect(secondRun.error).toBeNull();
+
+      /**
+       * Each screen shows its own project's run.
+       *
+       * Keyed on the source video alone, both screens resolve to whichever run is
+       * newest — so the first project's page would show the second's research, its
+       * angle list, and a "succeeded" status belonging to a run it never started.
+       * The project id is what disambiguates them.
+       */
+      const firstView = await getLinkStudioData(user.id, first.id);
+      const secondView = await getLinkStudioData(user.id, second.id);
+
+      expect(firstView.run?.id).toBe(firstRun.runId);
+      expect(secondView.run?.id).toBe(secondRun.runId);
+      expect(firstView.run?.id).not.toBe(secondView.run?.id);
+
+      // And the evidence and angles follow the run, so neither screen borrows the
+      // other's proposals.
+      expect(firstView.angles.length).toBeGreaterThan(0);
+      expect(secondView.angles.length).toBeGreaterThan(0);
+      const firstAngleIds = firstView.angles.map((a) => a.id);
+      for (const angle of secondView.angles) {
+        expect(firstAngleIds).not.toContain(angle.id);
+      }
+    });
+
+    it("still finds a run started before the project was recorded on it", async () => {
+      const { db } = await import("@/lib/db");
+      const { researchRuns } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+      const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
+
+      const { user, project } = await linkProject("legacyrun@tally.test");
+      const { runId } = await runLinkResearch(user.id, project.id);
+
+      /**
+       * A run as it existed before `research_runs.project_id` was written in link
+       * mode: keyed only by the video it was seeded from.
+       *
+       * Simulated by clearing the column rather than by inserting a hand-built row,
+       * so what is under test is the read path against a row the real pipeline wrote.
+       * Without the fallback key, every project researched before this fix would show
+       * an empty studio screen and look as though its research had been lost.
+       */
+      await db
+        .update(researchRuns)
+        .set({ projectId: null })
+        .where(eq(researchRuns.id, runId));
+
+      const view = await getLinkStudioData(user.id, project.id);
+
+      expect(view.run?.id).toBe(runId);
+      expect(view.angles.length).toBeGreaterThan(0);
+      expect(view.source?.videoId).toBe(SOURCE_ID);
+    });
+
+    it("shows no source card for a run that stopped before reading the video", async () => {
+      const { db } = await import("@/lib/db");
+      const { researchRuns } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+      const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
+
+      const { user, project } = await linkProject("nosource@tally.test");
+      const { runId } = await runLinkResearch(user.id, project.id);
+
+      /**
+       * A run that failed before the worker read the source video.
+       *
+       * `projects.source_video_id` is written when the link is pasted, but the analysis
+       * and the two denormalised title columns are written later by the worker — so
+       * clearing exactly those three reproduces the real row a cancelled or failed run
+       * leaves behind, without hand-building one.
+       *
+       * The bug this pins: an id with no analysis behind it still produced a
+       * `SourceView`, and the card fell back to the bare video id as its headline with
+       * "not reported" under every figure. On screen that is indistinguishable from
+       * Tally having read the video and understood nothing about it (§42) — so the
+       * panel has to be empty here, and say why.
+       */
+      await db
+        .update(researchRuns)
+        .set({
+          status: "failed",
+          sourceAnalysis: null,
+          sourceTitle: null,
+          sourceChannelTitle: null,
+        })
+        .where(eq(researchRuns.id, runId));
+
+      const view = await getLinkStudioData(user.id, project.id);
+
+      // The run itself is still found and still reports its outcome; only the
+      // fabricated analysis is gone.
+      expect(view.run?.id).toBe(runId);
+      expect(view.run?.status).toBe("failed");
+      expect(view.project.sourceVideoId).toBe(SOURCE_ID);
+      expect(view.source).toBeNull();
+    });
+
+    it("shows the source card once any metadata was read, even if the run then failed", async () => {
+      const { db } = await import("@/lib/db");
+      const { researchRuns } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+      const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
+
+      const { user, project } = await linkProject("partialsource@tally.test");
+      const { runId } = await runLinkResearch(user.id, project.id);
+
+      /**
+       * The other half of the rule, so the fix cannot over-correct.
+       *
+       * A run that read the video and then failed further along — writing the titles
+       * but not the full analysis — has genuinely learnt something about the source,
+       * and hiding it would throw away real information. Any one of the three metadata
+       * columns is enough to render the card.
+       */
+      await db
+        .update(researchRuns)
+        .set({ status: "failed", sourceAnalysis: null })
+        .where(eq(researchRuns.id, runId));
+
+      const view = await getLinkStudioData(user.id, project.id);
+
+      expect(view.source).not.toBeNull();
+      expect(view.source?.title).toBe(SOURCE_TITLE);
+      // Read from the denormalised column, not from an analysis that is not there.
+      expect(view.source?.videoId).toBe(SOURCE_ID);
+    });
+
+    /**
+     * The abandoned-project surfaces, end to end.
+     *
+     * A project whose research never read the source keeps its placeholder title, and
+     * every stage screen used to read `project.title` raw — so the raw source video id
+     * was the video's name on the script screen, the thumbnail screen and the editor,
+     * and was sent to the AI as `Working title`. These assert the whole loaded shape a
+     * screen renders from, rather than any one component, because the exposure was in the
+     * loaders and the props rather than in the markup.
+     */
+    describe("a project whose source was never analysed", () => {
+      /**
+       * The state the real abandoned project is in: link pasted, research failed.
+       *
+       * The run is executed and then reduced rather than inserted by hand, so the project,
+       * job and queue bookkeeping around it is the real thing. What is reduced is
+       * everything the worker writes *after* it reads the source — the analysis, the
+       * titles, the niche, and the trend and angle rows — because a run that never read
+       * the video never produced any of them. The real project confirms it: zero
+       * `research_results` and zero `ideas`.
+       *
+       * Leaving those rows in place, as an earlier version of this helper did, invents a
+       * state production cannot reach: a run holding analysed competitor videos while
+       * claiming it never analysed anything. The loader shows those trends, and it is
+       * right to — a run that failed *after* finding real videos should still show them.
+       * The bug under test is the opposite case, so the fixture has to be the opposite
+       * case.
+       */
+      async function abandoned(email: string) {
+        const { db } = await import("@/lib/db");
+        const { ideas, researchResults, researchRuns } = await import("@/lib/db/schema");
+        const { eq } = await import("drizzle-orm");
+
+        const { user, project } = await linkProject(email);
+        const { runId } = await runLinkResearch(user.id, project.id);
+
+        await db
+          .update(researchRuns)
+          .set({
+            status: "failed",
+            errorCode: "dev_reset",
+            sourceAnalysis: null,
+            sourceTitle: null,
+            sourceChannelTitle: null,
+            niche: null,
+          })
+          .where(eq(researchRuns.id, runId));
+
+        // Ideas first: they reference the run's results.
+        await db.delete(ideas).where(eq(ideas.runId, runId));
+        await db.delete(researchResults).where(eq(researchResults.runId, runId));
+
+        return { user, project, runId };
+      }
+
+      it("hands no title to the script screen, so it cannot print the video id", async () => {
+        const { getStageContext } = await import("@/lib/dashboard/stage");
+        const { displayTitle } = await import("@/lib/projects/display-title");
+
+        const { user, project } = await abandoned("noscript@tally.test");
+        const context = await getStageContext(user.id, project.id);
+
+        // No script exists, so the screen's empty state is what renders.
+        expect(context.script).toBeNull();
+        // The stored title still holds the id — the row is not rewritten, only the read.
+        expect(context.project?.title).toContain(SOURCE_ID);
+        // And the prop the component receives is null, so it says "this video".
+        expect(displayTitle(context.project?.title)).toBeNull();
+      });
+
+      it("hands no base title to the thumbnail screen", async () => {
+        const { getStageContext } = await import("@/lib/dashboard/stage");
+        const { displayTitle } = await import("@/lib/projects/display-title");
+
+        const { user, project } = await abandoned("nothumb@tally.test");
+        const context = await getStageContext(user.id, project.id);
+
+        expect(context.thumbnailVariants).toEqual([]);
+        // Exactly the expression `dashboard/thumbnail/page.tsx` evaluates.
+        expect(context.script?.title ?? displayTitle(context.project?.title)).toBeNull();
+      });
+
+      it("never sends the video id to the AI as a working title", async () => {
+        const { buildBrief } = await import("@/lib/scripts/service");
+        const { buildScriptPrompt } = await import("@/lib/scripts/prompt");
+
+        const { user, project } = await abandoned("noprompt@tally.test");
+
+        /**
+         * The brief and the rendered prompt, because this is the one path where the bug
+         * would have reached a provider — and a generated script naming an eleven-
+         * character video id is permanent in a way a screen is not.
+         */
+        const brief = await buildBrief(user.id, project.id);
+        expect(brief.projectTitle).not.toContain(SOURCE_ID);
+
+        const prompt = buildScriptPrompt(brief);
+        expect(prompt).not.toContain(SOURCE_ID);
+        expect(prompt).not.toContain("Working title");
+      });
+
+      it("shows the research run as failed without naming the id as its subject", async () => {
+        const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
+
+        const { user, project, runId } = await abandoned("noresearch@tally.test");
+        const view = await getLinkStudioData(user.id, project.id);
+
+        // The failure history is preserved rather than cleared — it is why the screen
+        // is empty, and the operator needs it.
+        expect(view.run?.id).toBe(runId);
+        expect(view.run?.status).toBe("failed");
+        expect(view.run?.errorCode).toBe("dev_reset");
+
+        // But nothing presents the source as understood: no card, and no niche standing
+        // in as the researched subject.
+        expect(view.source).toBeNull();
+        expect(view.run?.niche).toBeNull();
+        expect(view.trends).toEqual([]);
+        expect(view.angles).toEqual([]);
+      });
+
+      it("exposes the id nowhere in the studio payload except as provenance", async () => {
+        const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
+        const { displayTitle } = await import("@/lib/projects/display-title");
+
+        const { user, project } = await abandoned("nopayload@tally.test");
+        const view = await getLinkStudioData(user.id, project.id);
+
+        /**
+         * Every string in the payload, checked at once.
+         *
+         * The two legitimate carriers are excluded by name: `project.sourceVideoId` is
+         * provenance §22 requires Tally to keep, and `project.title` is the stored row,
+         * which is not rewritten — the fix is that no screen renders it raw, which
+         * `displayTitle` proves here. Anything *else* containing the id is a leak, and
+         * scanning the whole object is how a field added later gets caught without
+         * anyone remembering to extend this test.
+         */
+        const scrubbed = {
+          ...view,
+          project: { ...view.project, sourceVideoId: null, title: null },
+        };
+        expect(JSON.stringify(scrubbed)).not.toContain(SOURCE_ID);
+        expect(displayTitle(view.project.title)).toBeNull();
+      });
+    });
+
     it("refuses a second research run on the same project (§23 case 22)", async () => {
       const { user, project } = await linkProject("dupe@tally.test");
       const { startLinkResearchRun } = await import("@/lib/research/service");
@@ -956,6 +1293,386 @@ suite("YouTube link mode (integration)", () => {
         linkForm: "watch",
       });
       expect(other.jobId).toBeTruthy();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // The two routes the paste screen calls (PART 1B)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Request-level tests for `/api/youtube/analyze` and
+   * `/api/projects/from-youtube`.
+   *
+   * The blocks above exercise the pipeline through the service functions, which is
+   * the right seam for asserting what lands in Postgres — but it steps over the
+   * handlers entirely, and the handlers are where the ordering claims live: parse
+   * before the rate limit is charged, validate the selection before the allowance is
+   * charged, refuse an unauthenticated caller before anything else. Each of those is
+   * a claim about what a *refused* request costs, and only a real request can show it.
+   */
+  describe("the paste routes (PART 1B)", () => {
+    const ORIGIN = "http://localhost:3000";
+
+    async function call(path: "youtube/analyze" | "projects/from-youtube", body: unknown) {
+      const { NextRequest } = await import("next/server");
+      const { POST } =
+        path === "youtube/analyze"
+          ? await import("@/app/api/youtube/analyze/route")
+          : await import("@/app/api/projects/from-youtube/route");
+
+      const request = new NextRequest(`${ORIGIN}/api/${path}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json", origin: ORIGIN },
+      });
+
+      const response = await POST(request as never);
+      return {
+        status: response.status,
+        body: (await response.json()) as {
+          data?: Record<string, unknown>;
+          error?: { code?: string; message?: string };
+        },
+      };
+    }
+
+    it("analyses a pasted link without creating anything", async () => {
+      const { db } = await import("@/lib/db");
+      const { projects, researchRuns } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const user = await linkUser("analyzeroute@tally.test");
+      await signIn(user);
+
+      const result = await call("youtube/analyze", { url: SOURCE_URL });
+
+      expect(result.status).toBe(200);
+      expect(result.body.data?.["state"]).toBe("ok");
+      expect(result.body.data?.["videoId"]).toBe(SOURCE_ID);
+      // Regenerated from the id, never echoed from the paste.
+      expect(result.body.data?.["canonicalUrl"]).toBe(SOURCE_URL);
+      expect(result.body.data?.["linkForm"]).toBe("watch");
+
+      /**
+       * The point of the route: it answers "what is this video?" and changes nothing.
+       *
+       * A user must be able to look before committing a video from their monthly
+       * allowance, so an analysis that created a project or a run would make the
+       * "look first" step cost the same as the "start it" step.
+       */
+      const projectRows = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(eq(projects.userId, user.id));
+      const runRows = await db
+        .select({ id: researchRuns.id })
+        .from(researchRuns)
+        .where(eq(researchRuns.userId, user.id));
+      expect(projectRows).toHaveLength(0);
+      expect(runRows).toHaveLength(0);
+    });
+
+    it("reports a private or deleted video as a named state at 200", async () => {
+      const user = await linkUser("analyzegone@tally.test");
+      await signIn(user);
+
+      // YouTube's empty `items` array: deleted, private, region-blocked or never
+      // existed all look identical on the wire.
+      google.fetchVideoDetailAs.mockResolvedValueOnce(null);
+
+      const result = await call("youtube/analyze", { url: SOURCE_URL });
+
+      /**
+       * 200, not 404 (§5).
+       *
+       * "That video is private" is a successful answer to the question asked, and the
+       * screen renders it beside the paste field with the link still in it. A 4xx
+       * would make the browser client treat it as a failed request and collapse the
+       * six states into one error.
+       */
+      expect(result.status).toBe(200);
+      expect(result.body.data?.["state"]).toBe("not_found");
+      expect(result.body.data?.["analysis"]).toBeNull();
+      expect(result.body.data?.["retryable"]).toBe(false);
+      expect(String(result.body.data?.["message"])).toMatch(/private|deleted/i);
+    });
+
+    it("names the variable when the API key is not configured (§48)", async () => {
+      const user = await linkUser("analyzenokey@tally.test");
+      await signIn(user);
+
+      google.isYouTubePublicReadConfigured.mockReturnValueOnce(false);
+
+      const result = await call("youtube/analyze", { url: SOURCE_URL });
+
+      expect(result.status).toBe(200);
+      expect(result.body.data?.["state"]).toBe("not_configured");
+      // Variable *names* only. §20 forbids a value ever being sent.
+      expect(result.body.data?.["missingEnvVars"]).toEqual(["YOUTUBE_API_KEY"]);
+      expect(JSON.stringify(result.body)).not.toContain("integration-placeholder");
+    });
+
+    it("names what a near-miss link actually is", async () => {
+      const user = await linkUser("analyzebad@tally.test");
+      await signIn(user);
+
+      // A user who pasted a playlist, a channel or a search page has made an
+      // understandable mistake, and §4's refusals say which one it was.
+      const cases: Array<[string, RegExp]> = [
+        ["https://www.youtube.com/playlist?list=PLabc123", /playlist/i],
+        ["https://www.youtube.com/@somecreator", /channel/i],
+        ["https://www.youtube.com/results?search_query=sensors", /search/i],
+        [`https://www.youtube.com/watch?v=${SOURCE_ID}xx`, /video id/i],
+      ];
+
+      for (const [url, expected] of cases) {
+        const result = await call("youtube/analyze", { url });
+        expect(result.status, url).toBe(400);
+        expect(result.body.error?.message ?? "", url).toMatch(expected);
+      }
+
+      // Refused by the parser, so nothing reached YouTube.
+      expect(google.fetchVideoDetailAs).not.toHaveBeenCalled();
+    });
+
+    it("does not charge the research window for a link it never read", async () => {
+      const user = await linkUser("analyzefree@tally.test");
+      await signIn(user);
+
+      /**
+       * `rules().research` allows ten reads per ten minutes, and the route parses
+       * *before* it calls `enforce`.
+       *
+       * Twelve malformed pastes is more than the whole window, so if any of them were
+       * charged the valid link below would be rate-limited. Asserting the ordering
+       * this way rather than by mock inspection is the only version of the test that
+       * would notice the two lines being swapped back: the mistyped pastes cost no
+       * quota, and locking a user out of the feature for ten minutes for typos is the
+       * failure the ordering exists to prevent.
+       */
+      for (let i = 0; i < 12; i += 1) {
+        const refused = await call("youtube/analyze", { url: "not a youtube link" });
+        expect(refused.status).toBe(400);
+      }
+
+      const result = await call("youtube/analyze", { url: SOURCE_URL });
+      expect(result.status).toBe(200);
+      expect(result.body.data?.["state"]).toBe("ok");
+    });
+
+    it("refuses a lookalike host — the failure a suffix check would allow", async () => {
+      const user = await linkUser("analyzeevil@tally.test");
+      await signIn(user);
+
+      const result = await call("youtube/analyze", {
+        url: `https://youtu.be.evil.invalid/${SOURCE_ID}`,
+      });
+
+      expect(result.status).toBe(400);
+      expect(google.fetchVideoDetailAs).not.toHaveBeenCalled();
+    });
+
+    it("refuses an unauthenticated caller on both routes", async () => {
+      jar.clear();
+      expect((await call("youtube/analyze", { url: SOURCE_URL })).status).toBe(401);
+      jar.clear();
+      expect((await call("projects/from-youtube", { url: SOURCE_URL })).status).toBe(
+        401,
+      );
+    });
+
+    it("creates a channel-less project and enqueues the run", async () => {
+      const { db } = await import("@/lib/db");
+      const { projects, researchRuns } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const user = await linkUser("startroute@tally.test");
+      await signIn(user);
+
+      const result = await call("projects/from-youtube", { url: SOURCE_URL });
+
+      expect(result.status).toBe(200);
+      const project = result.body.data?.["project"] as { id: string } | undefined;
+      expect(project?.id).toBeTruthy();
+      expect(result.body.data?.["runId"]).toBeTruthy();
+      expect(result.body.data?.["jobId"]).toBeTruthy();
+      expect(result.body.data?.["status"]).toBe("queued");
+      expect(result.body.data?.["sourceVideoId"]).toBe(SOURCE_ID);
+
+      const [row] = await db
+        .select()
+        .from(projects)
+        .where(eq(projects.id, project?.id as string));
+
+      // §4: no channel, and none required.
+      expect(row?.channelId).toBeNull();
+      expect(row?.origin).toBe("youtube_link");
+      expect(row?.sourceVideoId).toBe(SOURCE_ID);
+      /**
+       * Not the source video's title (§22).
+       *
+       * Naming a new project after somebody else's video is the first step of the
+       * copying the spec forbids, and it would be wrong on screen the moment an
+       * original angle is chosen.
+       */
+      expect(row?.title).not.toContain(SOURCE_TITLE);
+
+      const [run] = await db
+        .select()
+        .from(researchRuns)
+        .where(eq(researchRuns.userId, user.id));
+      expect(run?.trigger).toBe("youtube_link");
+      expect(run?.sourceVideoId).toBe(SOURCE_ID);
+      expect(run?.projectId).toBe(project?.id);
+      // Nothing was researched inside the request: the worker has not run yet, so a
+      // slow or unreachable YouTube shows up as a job rather than a hung request.
+      expect(run?.status).toBe("queued");
+      expect(google.searchVideosAs).not.toHaveBeenCalled();
+      expect(ai.generateJson).not.toHaveBeenCalled();
+    });
+
+    it("accepts every link form the parser does, storing the same id", async () => {
+      const { db } = await import("@/lib/db");
+      const { projects } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const user = await linkUser("startforms@tally.test");
+      // Unlimited videos: the four starts below would otherwise exhaust starter's
+      // four-a-month allowance and the last one would 402 for the wrong reason.
+      await setTier(user.id, "scale");
+      await signIn(user);
+
+      // A Short, the share form, the mobile front end and a bare id. All four are
+      // the same video, and PART 1B's "universal" claim is that all four work.
+      const forms = [
+        `https://www.youtube.com/shorts/${SOURCE_ID}`,
+        `https://youtu.be/${SOURCE_ID}?t=42`,
+        `m.youtube.com/watch?v=${SOURCE_ID}&list=PLabc&index=2`,
+        SOURCE_ID,
+      ];
+
+      for (const url of forms) {
+        const result = await call("projects/from-youtube", { url });
+        expect(result.status, url).toBe(200);
+        expect(result.body.data?.["sourceVideoId"], url).toBe(SOURCE_ID);
+        expect(result.body.data?.["canonicalUrl"], url).toBe(SOURCE_URL);
+      }
+
+      const rows = await db
+        .select({ sourceVideoId: projects.sourceVideoId })
+        .from(projects)
+        .where(eq(projects.userId, user.id));
+      expect(rows).toHaveLength(forms.length);
+      for (const row of rows) expect(row.sourceVideoId).toBe(SOURCE_ID);
+    });
+
+    it("refuses a model name the client invented, storing nothing", async () => {
+      const { db } = await import("@/lib/db");
+      const { projects } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const user = await linkUser("startbadmodel@tally.test");
+      // Scale, so the refusal is about the model rather than the entitlement.
+      await setTier(user.id, "scale");
+      await signIn(user);
+
+      const result = await call("projects/from-youtube", {
+        url: SOURCE_URL,
+        mode: "AI_VIDEO",
+        model: "totally/made-up-model",
+      });
+
+      expect(result.status).toBe(400);
+      // Validated before any row exists, so an invented model cannot consume the
+      // monthly allowance on its way to being refused (§10, §21).
+      const rows = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(eq(projects.userId, user.id));
+      expect(rows).toHaveLength(0);
+    });
+
+    it("refuses AI video on a plan that does not include it (§19)", async () => {
+      const { db } = await import("@/lib/db");
+      const { projects } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+
+      // Starter by default, and a real Tal model id: the refusal is the entitlement,
+      // not the name.
+      const user = await linkUser("startstarterai@tally.test");
+      await signIn(user);
+
+      const result = await call("projects/from-youtube", {
+        url: SOURCE_URL,
+        mode: "AI_VIDEO",
+        model: "tal/1.0",
+      });
+
+      expect(result.status).toBe(402);
+      const rows = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(eq(projects.userId, user.id));
+      expect(rows).toHaveLength(0);
+    });
+
+    it("refuses a real model whose provider this deployment has not configured (§21)", async () => {
+      const user = await linkUser("startunconfigured@tally.test");
+      await setTier(user.id, "scale");
+      await signIn(user);
+
+      /**
+       * `tal/1.0` exists and this caller is on `scale`, so neither the name nor the
+       * entitlement is what stops it.
+       *
+       * What stops it is that the suite runs with `TALLY_USE_MOCK_PROVIDERS=true`, so
+       * `DASHSCOPE_API_KEY` is not configured and the provider behind the model is not
+       * one this deployment offers. No amount of request manipulation gets past that.
+       */
+      const result = await call("projects/from-youtube", {
+        url: SOURCE_URL,
+        mode: "AI_VIDEO",
+        model: "tal/1.0",
+      });
+
+      expect(result.status).toBe(400);
+    });
+
+    it("stops at the monthly allowance rather than starting a fifth video", async () => {
+      const { db } = await import("@/lib/db");
+      const { projects } = await import("@/lib/db/schema");
+      const { eq } = await import("drizzle-orm");
+
+      // Starter includes four videos a month.
+      const user = await linkUser("startallowance@tally.test");
+      await signIn(user);
+
+      for (let i = 0; i < 4; i += 1) {
+        expect((await call("projects/from-youtube", { url: SOURCE_URL })).status).toBe(
+          200,
+        );
+      }
+
+      const refused = await call("projects/from-youtube", { url: SOURCE_URL });
+      expect(refused.status).toBe(402);
+      /**
+       * `plan_limit_reached`, not `feature_not_in_plan` and not
+       * `insufficient_credits`.
+       *
+       * All three are 402 and each has a different remedy — upgrade, upgrade, top up —
+       * so the code is the only part of the response the UI can branch on to offer the
+       * right one.
+       */
+      expect(refused.body.error?.code).toBe("plan_limit_reached");
+
+      // The refusal did not create a fifth row: the counter claim and the insert are
+      // one transaction, so a rejected claim rolls back the project too.
+      const rows = await db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(eq(projects.userId, user.id));
+      expect(rows).toHaveLength(4);
     });
   });
 
@@ -1382,12 +2099,17 @@ suite("YouTube link mode (integration)", () => {
         mode: "AI_VIDEO",
         model: "mock/placeholder",
         format: "portrait",
+        // §4: a resolution the user chose, not the model's default, so the assertion
+        // below distinguishes "stored what was asked for" from "stored a default
+        // that happens to match".
+        quality: "720p",
         tier: "scale",
       });
       expect(selection).toMatchObject({
         generationMode: "AI_VIDEO",
         generationModel: "mock/placeholder",
         videoFormat: "portrait",
+        videoQuality: "720p",
       });
 
       await configureProject({
@@ -1396,6 +2118,7 @@ suite("YouTube link mode (integration)", () => {
         generationMode: selection.generationMode,
         generationModel: selection.generationModel,
         videoFormat: selection.videoFormat,
+        videoQuality: selection.videoQuality,
       });
 
       const [stored] = await db
@@ -1403,6 +2126,7 @@ suite("YouTube link mode (integration)", () => {
           generationMode: projects.generationMode,
           generationModel: projects.generationModel,
           videoFormat: projects.videoFormat,
+          videoQuality: projects.videoQuality,
         })
         .from(projects)
         .where(eq(projects.id, project.id));
@@ -1410,6 +2134,7 @@ suite("YouTube link mode (integration)", () => {
         generationMode: "AI_VIDEO",
         generationModel: "mock/placeholder",
         videoFormat: "portrait",
+        videoQuality: "720p",
       });
 
       await writeScript(user.id, project.id, "scale");
@@ -1481,17 +2206,20 @@ suite("YouTube link mode (integration)", () => {
       // A client cannot conjure a provider by naming one, and cannot reach an
       // unconfigured one by manipulating the request.
       expect(() =>
-        validateSelection({ mode: "AI_VIDEO", model: "fal/seedance-99-ultra", tier: "scale" }),
+        validateSelection({ mode: "AI_VIDEO", model: "tal/9.9-ultra", tier: "scale" }),
       ).toThrowError(expect.objectContaining({ status: 400 }));
-      expect(() =>
-        validateSelection({ mode: "AI_VIDEO", model: "veo/3.1", tier: "scale" }),
-      ).toThrowError(expect.objectContaining({ status: 400 }));
-      // A real catalogue model, refused here for the same reason: this harness
-      // enables the mock provider only, so fal.ai is not on offer however the
-      // request is spelled.
-      expect(() =>
-        validateSelection({ mode: "AI_VIDEO", model: "fal/kling-v2-master", tier: "scale" }),
-      ).toThrowError(expect.objectContaining({ status: 400 }));
+      /**
+       * Real branded models, refused here for a different reason: this harness
+       * enables the mock provider only, so nothing else is on offer however the
+       * request is spelled. `fal/kling-v2-master` is a retired id that still
+       * *resolves* — to Tal 3.0 — which is why it must be refused on availability
+       * rather than accepted as a live selection (Phase 12 §14, §17).
+       */
+      for (const model of ["tal/3.0", "tal/3.1", "fal/kling-v2-master"]) {
+        expect(() =>
+          validateSelection({ mode: "AI_VIDEO", model, tier: "scale" }),
+        ).toThrowError(expect.objectContaining({ status: 400 }));
+      }
     });
   });
 

@@ -1,11 +1,15 @@
 /**
- * GET /api/projects/link-status — live status of a link-mode project
- * (Phase 11 §4, §6, §18).
+ * GET /api/projects/link-status — live status of a channel-less project
+ * (Phase 11 §4, §6, §18; §1C).
  *
- * What the "Create from YouTube" screen polls while research, scripting or a build
- * is in flight. It is the channel-less counterpart of `/api/research/runs`, which
- * cannot serve this because it requires a `channelId` and re-queries the channel for
- * ownership — a link-mode project has neither (§4).
+ * What the "Create from YouTube" and "Describe your idea" screens poll while
+ * research, scripting or a build is in flight. It is the channel-less counterpart of
+ * `/api/research/runs`, which cannot serve this because it requires a `channelId` and
+ * re-queries the channel for ownership — neither path's project has one (§4, §1C).
+ *
+ * Named for link mode because that is what it was added for; it serves both
+ * channel-less paths now rather than being duplicated for the second one, since the
+ * question they ask is identical and only the key onto the run differs.
  *
  * §18: "show job progress using Tally's existing job/worker system. Do not create
  * fake progress." Every number here comes from a `jobs` row written by a worker at a
@@ -29,6 +33,7 @@ import { enforce, rules } from "@/lib/api/rate-limit";
 import { db } from "@/lib/db";
 import { ideas, projects, researchResults, researchRuns } from "@/lib/db/schema";
 import { getActiveProjectJobs } from "@/lib/queue/jobs";
+import { channelLessRunKeys } from "@/lib/research/run-key";
 
 const QuerySchema = z.object({
   projectId: z.string().uuid(),
@@ -78,38 +83,63 @@ export async function GET(request: NextRequest) {
       return { project: null, run: null, activeJob: null };
     }
 
-    // Matched through the source video, restricted to channel-less runs: the same
-    // key `getLinkStudioData` uses, so the poll and the render agree on the run.
-    const runRows = project.sourceVideoId
-      ? await db
-          .select({
-            id: researchRuns.id,
-            status: researchRuns.status,
-            niche: researchRuns.niche,
-            error: researchRuns.error,
-            errorCode: researchRuns.errorCode,
-            completedAt: researchRuns.completedAt,
-            resultCount: sql<number>`(
-              SELECT COUNT(*)::int FROM ${researchResults}
-              WHERE ${researchResults.runId} = ${researchRuns.id}
-            )`,
-            angleCount: sql<number>`(
-              SELECT COUNT(*)::int FROM ${ideas}
-              WHERE ${ideas.runId} = ${researchRuns.id}
-                AND ${ideas.state} <> 'rejected'
-            )`,
-          })
-          .from(researchRuns)
-          .where(
-            and(
-              eq(researchRuns.userId, user.id),
-              eq(researchRuns.sourceVideoId, project.sourceVideoId),
-              isNull(researchRuns.channelId),
-            ),
-          )
-          .orderBy(desc(researchRuns.createdAt))
-          .limit(1)
-      : [];
+    /**
+     * The run this project is waiting on, if either channel-less path produced one.
+     *
+     * Keyed through `channelLessRunKeys`, which both channel-less paths and
+     * `getLinkStudioData` share, so the poll and the render always agree about which
+     * run they mean. Each key is restricted here to this user's channel-less runs, so
+     * none can reach a trending-mode run belonging to one of their channels.
+     */
+    let run: {
+      id: string;
+      status: string;
+      niche: string | null;
+      description: string | null;
+      error: string | null;
+      errorCode: string | null;
+      completedAt: Date | null;
+      resultCount: number;
+      angleCount: number;
+    } | null = null;
+
+    for (const runKey of channelLessRunKeys(
+      query.projectId,
+      project.sourceVideoId,
+    )) {
+      const runRows = await db
+        .select({
+          id: researchRuns.id,
+          status: researchRuns.status,
+          niche: researchRuns.niche,
+          description: researchRuns.description,
+          error: researchRuns.error,
+          errorCode: researchRuns.errorCode,
+          completedAt: researchRuns.completedAt,
+          resultCount: sql<number>`(
+            SELECT COUNT(*)::int FROM ${researchResults}
+            WHERE ${researchResults.runId} = ${researchRuns.id}
+          )`,
+          angleCount: sql<number>`(
+            SELECT COUNT(*)::int FROM ${ideas}
+            WHERE ${ideas.runId} = ${researchRuns.id}
+              AND ${ideas.state} <> 'rejected'
+          )`,
+        })
+        .from(researchRuns)
+        .where(
+          and(
+            eq(researchRuns.userId, user.id),
+            runKey,
+            isNull(researchRuns.channelId),
+          ),
+        )
+        .orderBy(desc(researchRuns.createdAt))
+        .limit(1);
+
+      run = runRows[0] ?? null;
+      if (run) break;
+    }
 
     /**
      * Live jobs for this project, newest first.
@@ -135,7 +165,7 @@ export async function GET(request: NextRequest) {
         errorCode: project.errorCode,
         updatedAt: project.updatedAt,
       },
-      run: runRows[0] ?? null,
+      run,
       /**
        * The job the user is waiting on.
        *

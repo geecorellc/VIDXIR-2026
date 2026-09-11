@@ -15,6 +15,11 @@ import { channels, subscriptions, usageCounters } from "@/lib/db/schema";
 import { FeatureNotInPlanError, PlanLimitError } from "@/lib/errors";
 import { isPlanTier, planByTier, type FeatureKey, type PlanTier } from "@/lib/plans";
 import { currentPeriod } from "@/lib/projects/service";
+/**
+ * One-way by construction: `credits/service` re-implements `currentTier`'s predicate
+ * rather than importing it, precisely so this direction stays acyclic.
+ */
+import { creditBalanceFor } from "@/lib/credits/service";
 
 /**
  * The user's authoritative plan tier, read from the database (§23, §24).
@@ -45,6 +50,8 @@ export interface Entitlements {
   planName: string;
   maxChannels: number | null;
   maxVideosPerMonth: number | null;
+  /** Generation credits the plan includes each period (§7). */
+  monthlyCredits: number;
   features: Record<FeatureKey, boolean>;
   queuePriority: number;
   usage: {
@@ -52,6 +59,23 @@ export interface Entitlements {
     channelsConnected: number;
     videosStartedThisMonth: number;
     videosPublishedThisMonth: number;
+  };
+  /**
+   * The live credit balance (§8).
+   *
+   * Carried on entitlements rather than fetched separately by the UI because it is
+   * the same kind of fact as the video allowance — what this account may do right now
+   * — and because a second endpoint would be a second chance for the two to disagree.
+   * A charge is still authorised by `chargeCredits` against the locked row; this is
+   * for display, and is stale the moment it is read.
+   */
+  credits: {
+    available: number;
+    granted: number;
+    purchased: number;
+    spent: number;
+    /** The tier the standing grant was issued for, which may lag `tier`. */
+    grantedForTier: PlanTier;
   };
 }
 
@@ -63,7 +87,7 @@ export async function entitlementsFor(
   const plan = planByTier(tier);
   const period = currentPeriod();
 
-  const [connected, counter] = await Promise.all([
+  const [connected, counter, credits] = await Promise.all([
     db
       .select({ id: channels.id })
       .from(channels)
@@ -78,6 +102,16 @@ export async function entitlementsFor(
         and(eq(usageCounters.userId, userId), eq(usageCounters.period, period)),
       )
       .limit(1),
+    /**
+     * Read, never granted.
+     *
+     * `creditBalanceFor` is deliberately the read-only half of the credit service: a
+     * page load must not be able to mint credits, or a bug in the period comparison
+     * would become a bug that gives away money on every request. An account between
+     * signup and its first grant reads as zero here and is granted by its first
+     * charge.
+     */
+    creditBalanceFor(userId),
   ]);
 
   return {
@@ -85,6 +119,7 @@ export async function entitlementsFor(
     planName: plan.name,
     maxChannels: plan.maxChannels,
     maxVideosPerMonth: plan.maxVideosPerMonth,
+    monthlyCredits: plan.monthlyCredits,
     features: plan.features,
     queuePriority: plan.queuePriority,
     usage: {
@@ -92,6 +127,13 @@ export async function entitlementsFor(
       channelsConnected: connected.length,
       videosStartedThisMonth: counter[0]?.videosStarted ?? 0,
       videosPublishedThisMonth: counter[0]?.videosPublished ?? 0,
+    },
+    credits: {
+      available: credits.available,
+      granted: credits.granted,
+      purchased: credits.purchased,
+      spent: credits.spent,
+      grantedForTier: credits.grantedForTier,
     },
   };
 }

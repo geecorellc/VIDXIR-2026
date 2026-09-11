@@ -16,6 +16,7 @@ import { VideoEditor } from "@/components/video/editor/VideoEditor";
 import { EmptyCTA, SectionHeader } from "@/components/ui/SectionHeader";
 import { getSession } from "@/lib/auth/session";
 import { getStageContext } from "@/lib/dashboard/stage";
+import { displayTitle } from "@/lib/projects/display-title";
 
 export const metadata = { title: "Edit video — Tally" };
 
@@ -60,7 +61,12 @@ export default async function VideoEditPage({
       />
       <VideoEditor
         projectId={project.id}
-        projectTitle={context.script?.title ?? project.title}
+        /*
+          Null rather than the from-a-link placeholder, so the editor heading falls
+          through to its own "Untitled video" instead of showing the raw source video id
+          as the name of the user's cut.
+        */
+        projectTitle={context.script?.title ?? displayTitle(project.title)}
       />
     </div>
   );

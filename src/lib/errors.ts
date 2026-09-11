@@ -22,6 +22,7 @@ export type ErrorCode =
   | "rate_limited"
   | "plan_limit_reached"
   | "feature_not_in_plan"
+  | "insufficient_credits"
   | "provider_not_configured"
   | "provider_auth_failed"
   | "provider_out_of_credit"
@@ -158,6 +159,43 @@ export class FeatureNotInPlanError extends AppError {
       message: `Your ${tier} plan does not include this feature.`,
       status: 402,
       details: { feature, tier },
+    });
+  }
+}
+
+/**
+ * The account cannot pay for a generation it asked for (§10).
+ *
+ * A distinct code from `plan_limit_reached`, because the two have different remedies
+ * and the UI has to offer the right one. A plan limit is fixed by upgrading; an empty
+ * credit balance is fixed by *topping up*, which every tier can do including Scale —
+ * telling a Scale customer to upgrade would be telling them to buy the plan they
+ * already have.
+ *
+ * `retryable: false` deliberately. This is thrown inside worker stages as well as
+ * routes, and `shouldRetry` must not replay it: the balance will not refill by itself,
+ * so retrying spends the job's whole budget on an outcome that cannot change.
+ *
+ * `details` carries the shortfall rather than just the requirement, because "you need
+ * 40 credits and have 12" is actionable and "insufficient credits" is not. All three
+ * numbers are the customer's own balance figures, so there is nothing to redact.
+ */
+export class InsufficientCreditsError extends AppError {
+  constructor(details: {
+    required: number;
+    available: number;
+    operation: string;
+    modelId?: string;
+  }) {
+    const shortfall = Math.max(0, details.required - details.available);
+    super({
+      code: "insufficient_credits",
+      message:
+        `This needs ${details.required} credits and you have ${details.available}. ` +
+        `Top up ${shortfall} more credits, or choose a lower quality or a faster model.`,
+      status: 402,
+      retryable: false,
+      details: { ...details, shortfall },
     });
   }
 }

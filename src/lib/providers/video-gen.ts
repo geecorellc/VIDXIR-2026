@@ -1,41 +1,54 @@
 /**
- * VideoGenerationProvider — one interface, several ways to get a clip
- * (Phase 11 §9-§14).
+ * The generation provider registry — Tally's branded models, and the vendor APIs
+ * underneath them (Phase 12 §2, §3, §4, §5, §14, §16).
  *
- * A scene needs a moving image. Before Phase 11 there was exactly one answer:
- * search a stock library, and if that fails ask Runway. §9 makes the answer a
- * user choice — stock footage, or an AI model that generates the shot — and §14
- * requires that adding a fourth or fifth model later does not mean rewriting the
- * workflow. So the shape here is:
+ * Phase 11 reached six vendors through one aggregator (fal.ai) and named them in
+ * the picker. §2 removes that: the four models a customer chooses from are Tally's
+ * own, each reaching **one vendor's first-party API directly**, and the vendor is
+ * never part of the customer-facing name.
  *
- *   mode STOCK    -> the existing `acquireVisual()` path, unchanged
- *   mode AI_VIDEO -> one of the providers in this registry, chosen by model id
+ *   Tal 1.0 — Fast Model        → Alibaba DashScope (Wan)      DASHSCOPE_API_KEY
+ *   Tal 2.0 — Creators Model    → MiniMax                      MINIMAX_API_KEY
+ *   Tal 3.0 — Cinematic Model   → Volcengine Ark (Seedance)    SEEDANCE_API_KEY
+ *   Tal 3.1 — Ultra Model       → Google Veo / Imagen          GEMINI_API_KEY
  *
- * Four rules this module exists to enforce, all of them from the spec and none of
- * them enforceable in the UI:
+ * That mapping is the only place it exists. Nothing else in the application knows
+ * which vendor serves which model — not the router, not the plan layer, not the
+ * continuity engine (§6: "the continuity layer must not call provider APIs
+ * directly"), and not the browser (§3: the backend names must not appear in the
+ * normal customer-facing UI, which `publicModels()` enforces by construction).
  *
- *  1. **The server decides what exists** (§10). `availableModels()` is computed
- *     from `VIDEO_GEN_PROVIDERS` plus the credential check. A model absent from
- *     that list cannot be selected by any request, however the request is
- *     manipulated — `resolveModel()` throws for anything it does not recognise.
- *  2. **No fabricated APIs** (§11, §12). Seedance is reached through fal.ai's
- *     documented queue API; Veo through Google's documented
- *     `predictLongRunning` + operation-polling endpoints. Where a service
- *     requirement exists rather than a direct public API — ByteDance publishes no
- *     first-party Seedance API Tally can integrate against — that is recorded in
- *     the provider's own `serviceNote` rather than papered over.
- *  3. **Unconfigured means unavailable, never fake** (§42). A provider whose key
- *     is unset reports `not_configured` and generation throws
- *     `NotConfiguredError`. There is no placeholder clip and no silent fallback to
- *     stock: falling back would mean a user who paid for AI video got stock
- *     footage and was told it was AI video.
- *  4. **No keys leave the server.** `availableModels()` returns names, labels and
- *     states. Every credential read happens inside a generate call.
+ * Six rules this module exists to enforce, none of them enforceable in the UI:
  *
- * A generated clip is short — Seedance tops out at 12 seconds, Veo at 8 — and a
- * scene is often longer. That is expected and handled elsewhere: §17 leaves final
- * assembly to the existing FFmpeg pipeline, which holds or loops a clip to fill
- * its slot. Nothing here tries to generate a whole video.
+ *  1. **The server decides what exists** (§2, §19). `availableModels()` is computed
+ *     from `VIDEO_GEN_PROVIDERS` plus the credential check. A model absent from that
+ *     list cannot be selected by any request, however the request is manipulated.
+ *  2. **No fabricated APIs** (§19, "do not fabricate provider capabilities"). Every
+ *     adapter below submits to an endpoint its vendor documents, in that vendor's
+ *     own request shape. Where a vendor has a capability Tally has not integrated,
+ *     the capability matrix says `false` and says why in a comment — it does not
+ *     claim the capability and fail at runtime.
+ *  3. **Capabilities are declared, not assumed** (§4, §16). Each model carries the
+ *     resolutions, durations, aspect ratios, image support, reference-image support
+ *     and audio support it actually has. §4's "do not show an option that the
+ *     underlying model does not support" is then a filter over data rather than a
+ *     rule someone has to remember, and `assertQuality`/`resolveImageModel` refuse
+ *     an unsupported request server-side.
+ *  4. **Unconfigured means unavailable, never fake.** A provider whose key is unset
+ *     reports `not_configured` and generation throws `NotConfiguredError`. There is
+ *     no placeholder clip and no silent fallback to stock: falling back would mean a
+ *     user who spent credits on AI video got stock footage and was told otherwise.
+ *  5. **No keys leave the server.** The status and model reports contain variable
+ *     *names* and states. Every credential read happens inside a generate call.
+ *  6. **One registry for video and images** (§5). Image generation is a *capability
+ *     of the same models*, not a second architecture: the same provider objects, the
+ *     same credential checks, the same `withUsage` accounting, the same allow-listed
+ *     download path. Only the models whose vendor publishes an image API declare it.
+ *
+ * A generated clip is short — the longest here is 12 seconds — and a scene is often
+ * longer. That is expected and handled elsewhere: final assembly stays with the
+ * existing FFmpeg pipeline, which holds or loops a clip to fill its slot. Nothing
+ * here tries to generate a whole video.
  */
 import { env, usingMockProviders } from "@/lib/env";
 import { NotConfiguredError, ProviderError } from "@/lib/errors";
@@ -45,14 +58,20 @@ import { fetchRemoteAsset } from "@/lib/providers/fetch";
 import { providerJson } from "@/lib/providers/http";
 import { withUsage, type UsageContext } from "@/lib/providers/usage";
 import { formatSpec, type VideoFormat } from "@/lib/video/format";
+import {
+  qualityFrame,
+  qualityRank,
+  qualitySpec,
+  type VideoQuality,
+} from "@/lib/video/quality";
 
 const log = logger.child({ component: "video-gen" });
 
 /**
- * How the visuals for a project are produced (§9).
+ * How the visuals for a project are produced (§1).
  *
  * Two modes are the stated minimum. `STOCK` is the existing behaviour and the
- * default, so a project that never touches Phase 11 is in `STOCK` mode and the
+ * default, so a project that never touches AI video is in `STOCK` mode and the
  * b-roll stage runs exactly as it did.
  */
 export type GenerationMode = "STOCK" | "AI_VIDEO";
@@ -67,56 +86,156 @@ export function isGenerationMode(value: unknown): value is GenerationMode {
 }
 
 /**
- * Provider ids that can serve `AI_VIDEO`.
+ * Backend provider ids.
  *
- * `fal` is one provider hosting many models — Seedance, Kling, MiniMax, Hunyuan,
- * Wan and Google's own Veo among them — because that is what it actually is: a
- * single queue API and a single credential, distinguished only by the model slug
- * in the URL. Giving each model its own provider id would mean four copies of the
- * same submit-poll-fetch code and four identical credential checks (§14).
+ * **These are internal.** They appear in `VIDEO_GEN_PROVIDERS`, in logs, in
+ * `api_usage.provider` and in the operator-facing configuration report. §3 keeps
+ * them out of the customer-facing UI, which is why `publicModels()` exists and why
+ * `/api/video/providers` no longer forwards them.
  *
- * `seedance` is retained as a deprecated alias of `fal` so an existing deployment
- * with `VIDEO_GEN_PROVIDERS=seedance` and a project holding `seedance/v1-pro`
- * keeps working. See `PROVIDER_ALIASES` and `MODEL_ALIASES`.
+ * `fal` is gone as a video route (§14). It is not a member of this union, so the
+ * type system now refuses a reintroduction; a stale `VIDEO_GEN_PROVIDERS=fal` is
+ * warned about and ignored rather than taking the deployment down.
  */
-export type VideoGenProviderId = "fal" | "veo" | "runway" | "mock";
+export type VideoGenProviderId =
+  | "qwen"
+  | "minimax"
+  | "seedance"
+  | "veo"
+  | "runway"
+  | "mock";
 
 /** Configuration state of one provider, mirroring `providers/config.ts`. */
 export type VideoGenState = "ready" | "mock" | "not_configured" | "disabled";
 
+/**
+ * What a model can actually do (§16).
+ *
+ * The centralised capability matrix. Every field is stated per model from that
+ * vendor's published documentation, and a capability Tally has not implemented is
+ * `false` even when the vendor offers it — a matrix that promises image-to-video
+ * because the vendor supports it, while no adapter here sends a first frame, is
+ * worse than one that says `false`.
+ *
+ * Aspect ratios live on `VideoGenModel.formats` rather than here, because two
+ * existing modules (`generation-plan.ts` and the picker) already read them from
+ * there and moving them would be churn for no gain. `formats` is the aspect-ratio
+ * axis of this matrix.
+ */
+export interface ModelCapabilities {
+  /** Generates video from a text prompt alone. True for every model here. */
+  textToVideo: boolean;
+  /** Accepts a starting frame and animates it. */
+  imageToVideo: boolean;
+  /** Generates still images (§5). */
+  imageGeneration: boolean;
+  /**
+   * Accepts reference images to constrain a character, environment or prop.
+   *
+   * §6: where this is false the continuity engine falls back to continuity-aware
+   * *textual* prompting, which is what it already does.
+   */
+  referenceImages: boolean;
+  /** Produces an audio track with the video. */
+  audio: boolean;
+  /** Video resolutions this model accepts, ascending (§4). */
+  qualities: readonly VideoQuality[];
+  /** Image resolutions this model accepts. Empty when `imageGeneration` is false. */
+  imageQualities: readonly VideoQuality[];
+  /**
+   * Clip lengths the endpoint accepts, in seconds.
+   *
+   * The scene's requested length is snapped to the nearest one rather than sent
+   * verbatim, because every vendor here rejects an unsupported value instead of
+   * clamping it.
+   */
+  durations: readonly number[];
+}
+
 export interface VideoGenModel {
-  /** Stable id the client sends back. Namespaced by provider. */
+  /** Stable id the client sends back, e.g. `tal/3.0`. */
   id: string;
+  /** Backend provider. Internal — never rendered in the customer UI (§3). */
   provider: VideoGenProviderId;
+  /** Customer-facing name, e.g. "Tal 3.0 — Cinematic Model" (§2). */
   label: string;
-  /** One line the picker shows under the label. */
+  /** One line under the label (§3). */
   description: string;
-  /** Longest clip this model produces, in seconds. */
+  /** The "Best for:" line (§3). */
+  bestFor: string;
+  /** Model strengths, shown as bullets (§4). */
+  strengths: readonly string[];
+  /** Generation limitations, shown as bullets (§4). Honest, not marketing. */
+  limitations: readonly string[];
+  /** Longest clip this model produces, in seconds. Derived from `capabilities`. */
   maxClipSeconds: number;
-  /** Formats the model can generate natively. */
+  /** Aspect ratios the model generates natively. */
   formats: readonly VideoFormat[];
   /**
-   * True when this model costs materially more than the others, so it can be
-   * gated behind the `premiumVideoModels` entitlement (§19).
+   * True when this model costs materially more than the others, so it can be gated
+   * behind the `premiumVideoModels` entitlement.
+   *
+   * Since §7 introduces credits, this is a *plan capability* gate rather than the
+   * cost control — per-generation cost is expressed in credits, which every plan
+   * spends from the same balance.
    */
   premium: boolean;
+  /**
+   * True for a model kept only so a project that stored its id still renders (§17).
+   *
+   * Absent from `availableModels()` and therefore from every picker, but still
+   * resolvable, which is the difference between "not offered any more" and "your
+   * saved project is now broken".
+   */
+  legacy: boolean;
+  capabilities: ModelCapabilities;
 }
 
 export interface VideoGenProviderStatus {
   provider: VideoGenProviderId;
+  /** Operator-facing vendor name. Not for the customer UI (§3). */
   label: string;
   state: VideoGenState;
-  /** Env var names only. Never a value (§20). */
+  /** Env var names only. Never a value. */
   requiredEnvVars: string[];
   missingEnvVars: string[];
   /** Where to get the credential, or what service is required. */
   hint: string;
   /**
-   * Stated when the provider depends on a specific third-party service rather
-   * than a first-party API (§11). Shown to operators, not hidden in a comment.
+   * Stated when the provider depends on a specific third-party service. Shown to
+   * operators, not to customers.
    */
   serviceNote: string | null;
   models: VideoGenModel[];
+}
+
+/**
+ * A stored reference still, offered to a model that can constrain generation with one.
+ *
+ * §6's other half. Reaches two adapters today — Tal 3.1 and Tal 3.0, whose vendors each
+ * document a reference-image input on the model Tally configures by default. Every other
+ * catalogued model gets the fallback instead: detailed textual prompting, which is what
+ * the continuity engine has always done and still does whenever a still cannot be used.
+ *
+ * Both vendors gate the input on the model *version*, not the family, so each adapter
+ * re-checks its configured model id before offering the stills. A deployment that has
+ * pinned an older version gets the same textual fallback as an uncapable model, without
+ * the capability matrix having to describe one deployment's environment.
+ *
+ * `generateClip` strips this field for a model that declares no support, so the
+ * capability flag is what gates the feature rather than each adapter remembering to
+ * ignore a field. Reading `request.referenceImages` in an adapter and flipping its
+ * model's flag is the whole change for the next backend that qualifies —
+ * `assertRegistryIntegrity` refuses to load a registry where only one of the two
+ * happened.
+ */
+export interface ReferenceImageInput {
+  /** What the still depicts. Same vocabulary as `ImagePurpose`'s continuity members. */
+  kind: "character" | "environment" | "prop";
+  /** The bible entity's slug, for the provider's own labelling where it takes one. */
+  entityId: string;
+  bytes: Buffer;
+  mimeType: string;
 }
 
 export interface GenerateClipRequest {
@@ -126,11 +245,24 @@ export interface GenerateClipRequest {
   modelId: string;
   format: VideoFormat;
   /**
-   * How long the scene runs. A provider clamps this to what it supports; the
-   * renderer fills any remainder (§17).
+   * Requested resolution. Null resolves to the default and is then checked against
+   * the model's declared support, so a legacy caller cannot request 2K on a model
+   * that tops out at 1080p.
+   */
+  quality?: VideoQuality | null;
+  /**
+   * How long the scene runs. A provider snaps this to a length it supports; the
+   * renderer fills any remainder.
    */
   durationMs: number;
   sceneIndex: number;
+  /**
+   * Continuity references for this scene's committed entities (§6).
+   *
+   * Refused by `generateClip` unless the model declares `referenceImages`. Absent is
+   * the normal case and means the continuity constraints are in `prompt`.
+   */
+  referenceImages?: readonly ReferenceImageInput[];
 }
 
 export interface GeneratedClip {
@@ -144,10 +276,60 @@ export interface GeneratedClip {
   durationMs: number | null;
   /** Provider-side id, for provenance and de-duplication. */
   providerAssetId: string | null;
-  /** Licence statement recorded on the asset row (§29). */
+  /** Licence statement recorded on the asset row. */
   license: string;
   attribution: string | null;
   /** The prompt that produced it, kept on `assets.meta`. */
+  matchedOn: string;
+}
+
+/**
+ * What a generated still is *for* (§5).
+ *
+ * Carried through to `assets.meta` so a continuity reference can be found again by
+ * purpose rather than by guessing from a filename. The set is the list §5 names.
+ */
+export type ImagePurpose =
+  | "character"
+  | "environment"
+  | "prop"
+  | "artwork"
+  | "scene"
+  | "thumbnail"
+  | "reference";
+
+export const IMAGE_PURPOSES = [
+  "character",
+  "environment",
+  "prop",
+  "artwork",
+  "scene",
+  "thumbnail",
+  "reference",
+] as const;
+
+export interface GenerateImageRequest {
+  prompt: string;
+  modelId: string;
+  format: VideoFormat;
+  quality?: VideoQuality | null;
+  purpose: ImagePurpose;
+  /** Ordinal for provenance — a scene index, or a position within a bible. */
+  index: number;
+}
+
+export interface GeneratedImage {
+  provider: VideoGenProviderId;
+  modelId: string;
+  purpose: ImagePurpose;
+  bytes: Buffer;
+  mimeType: string;
+  extension: string;
+  width: number | null;
+  height: number | null;
+  providerAssetId: string | null;
+  license: string;
+  attribution: string | null;
   matchedOn: string;
 }
 
@@ -156,14 +338,19 @@ export interface GenerateOptions {
 }
 
 /**
- * The provider contract (§9).
+ * The provider contract.
  *
- * `generate` is the only method that touches a credential. Everything the UI and
- * the authorisation layer need — which models exist, whether they are configured
- * — is answered without one, which is what lets the picker be rendered for a user
- * whose deployment has configured nothing.
+ * `generate` and `generateImage` are the only methods that touch a credential.
+ * Everything the UI and the authorisation layer need — which models exist, whether
+ * they are configured, what they can do — is answered without one, which is what
+ * lets the picker be rendered for a deployment that has configured nothing.
+ *
+ * `generateImage` is optional and must be present exactly when some model of this
+ * provider declares `capabilities.imageGeneration`. `assertRegistryIntegrity()`
+ * checks that at module load rather than trusting it. `acceptsReferenceImages` is the
+ * same arrangement for the other half of §6.
  */
-interface VideoGenerationProvider {
+interface GenerationProvider {
   id: VideoGenProviderId;
   label: string;
   requiredEnvVars: readonly string[];
@@ -173,462 +360,1188 @@ interface VideoGenerationProvider {
   /** Env vars from `requiredEnvVars` that are currently unset. */
   missingEnvVars(): string[];
   generate(request: GenerateClipRequest): Promise<GeneratedClip>;
+  generateImage?(request: GenerateImageRequest): Promise<GeneratedImage>;
+  /**
+   * The adapter's signed statement that its `generate` reads
+   * `request.referenceImages` and sends the bytes to the vendor (§6).
+   *
+   * Set on the two providers whose adapters do — Veo and Seedance — and absent on the
+   * rest. It exists because "reused by scene generation where the selected backend
+   * supports them" is a claim that has to be *checkable*: a capability flag alone can be
+   * flipped on a model in one line, and the reference stills would then be generated,
+   * charged and silently dropped on the floor by an adapter that never looks at the field.
+   *
+   * `assertRegistryIntegrity()` requires this and `capabilities.referenceImages` to
+   * agree in both directions, so flipping either one alone fails at module load.
+   * There is no way to declare the feature without the adapter, and no way to leave
+   * a stale declaration behind after removing one.
+   */
+  acceptsReferenceImages?: true;
 }
 
 // ---------------------------------------------------------------------------
-// fal.ai (§11, §14) — one queue API, many models
+// Shared limits
 // ---------------------------------------------------------------------------
 
-const FAL_QUEUE = "https://queue.fal.run";
-
-/** Models generate in seconds; a queue can hold a request for minutes. */
-const FAL_POLL_MS = 5_000;
-const FAL_MAX_WAIT_MS = 10 * 60_000;
+/**
+ * The hint attached to a configuration error that reaches a *user*.
+ *
+ * Deliberately vendor-free. Each provider's own `hint` names a vendor console and
+ * belongs in the operator report; a customer who hits an unconfigured model needs to
+ * know it is not their fault and not their fix, and nothing more (§3).
+ */
+const SETUP_HINT =
+  "This model is not available yet on this workspace. Choose another model, or " +
+  "contact support.";
 
 /** One generated clip. A 1080p 12-second clip is tens of megabytes. */
 const MAX_CLIP_BYTES = 120 * 1_048_576;
 
+/** One generated still. Generous for a 2K PNG, far below the clip ceiling. */
+const MAX_IMAGE_BYTES = 24 * 1_048_576;
+
 /**
- * fal.ai's media CDN.
+ * Alibaba's object storage, where both DashScope and MiniMax serve finished media.
  *
- * Named here and passed to `fetchRemoteAsset` as an extra allowed host rather
- * than added to the global `PROVIDER_HOSTS` list, so the SSRF allow-list only
- * widens for the one call that needs it. Both hosts are in use: `fal.media` is
- * the current CDN and `v3.fal.media` the versioned one older endpoints return.
+ * Named here and passed to `fetchRemoteAsset` as an extra allowed host rather than
+ * added to the global `PROVIDER_HOSTS` list, so the SSRF allow-list only widens for
+ * the calls that need it.
  */
-const FAL_MEDIA_HOSTS = ["fal.media", "v3.fal.media"] as const;
+const ALIYUN_MEDIA_HOSTS = ["aliyuncs.com"] as const;
 
-interface FalQueueSubmit {
-  request_id: string;
-  status?: string | null;
-  queue_position?: number | null;
+/** MiniMax's own hosts, for the file-retrieve step and its CDN. */
+const MINIMAX_MEDIA_HOSTS = ["minimaxi.chat", "minimax.chat", "minimax.io"] as const;
+
+/** Volcengine's object storage, where Ark serves finished Seedance clips. */
+const ARK_MEDIA_HOSTS = ["volces.com", "byteplusapi.com"] as const;
+
+/** Host Veo serves finished files from — same API host, authenticated download. */
+const GEMINI_MEDIA_HOST = "generativelanguage.googleapis.com";
+
+// ---------------------------------------------------------------------------
+// Tal 1.0 — Fast Model, on Alibaba Cloud Model Studio (DashScope / Wan)
+// ---------------------------------------------------------------------------
+
+/**
+ * DashScope's asynchronous job pattern.
+ *
+ * Both the video and the image endpoint work the same way: POST with
+ * `X-DashScope-Async: enable`, get a task id back, then poll `GET /tasks/{id}`
+ * until `task_status` leaves the pending states. One poller serves both.
+ */
+const DASHSCOPE_POLL_MS = 5_000;
+const DASHSCOPE_MAX_WAIT_MS = 12 * 60_000;
+
+interface DashScopeSubmit {
+  output?: { task_id?: string | null; task_status?: string | null } | null;
+  request_id?: string | null;
+  code?: string | null;
+  message?: string | null;
 }
 
-interface FalQueueStatus {
-  status: "IN_QUEUE" | "IN_PROGRESS" | "COMPLETED" | string;
-  queue_position?: number | null;
-  error?: string | null;
-  error_type?: string | null;
-}
-
-interface FalVideoResult {
-  video?: {
-    url?: string | null;
-    content_type?: string | null;
-    file_size?: number | null;
+interface DashScopeTask {
+  output?: {
+    task_id?: string | null;
+    task_status?: string | null;
+    video_url?: string | null;
+    results?: Array<{ url?: string | null; code?: string | null }> | null;
+    code?: string | null;
+    message?: string | null;
   } | null;
-  seed?: number | null;
 }
 
-/**
- * One fal.ai-hosted video model.
- *
- * The catalogue below is data, not code, which is the whole point (§5, §14):
- * adding a model fal.ai has published is one entry here, and nothing else in the
- * application changes — not the router, not the plan layer, not the picker.
- *
- * `endpoint` is the fal.ai model slug that goes into the queue URL. `durations`
- * are the clip lengths the endpoint accepts; the scene's requested length is
- * snapped to the nearest one rather than being sent verbatim, because fal.ai
- * rejects an unsupported value instead of clamping it.
- */
-interface FalModelSpec extends VideoGenModel {
-  /** fal.ai model slug, e.g. `fal-ai/kling-video/v2/master/text-to-video`. */
-  endpoint: string;
-  /** Clip lengths the endpoint accepts, in seconds. */
-  durations: readonly number[];
-  /**
-   * How this endpoint spells the frame.
-   *
-   *  - `aspect_ratio` — the reduced ratio, e.g. "16:9". What most take.
-   *  - `resolution_only` — no aspect field; the frame follows `resolution`.
-   *
-   * Stated per model because getting it wrong means either a rejected request or,
-   * worse, a silently letterboxed clip.
-   */
-  frameParam: "aspect_ratio" | "resolution_only";
-  /** Sent as `resolution` when the endpoint takes one. */
-  resolution: "1080p" | "720p" | "580p" | null;
-  /** Sent as `duration`: a string for most endpoints, a number for a few. */
-  durationParam: "string" | "number" | "none";
-}
-
-/**
- * The fal.ai video catalogue.
- *
- * Every entry is a text-to-video endpoint fal.ai publishes. Ordered roughly by
- * how much they cost, which is also the order the picker shows them in.
- *
- * `premium` marks the models that cost materially more per second and are gated
- * behind the `premiumVideoModels` entitlement (§19). The cheap-and-fast tiers are
- * deliberately non-premium so a Studio-plan user has real choices rather than one.
- *
- * Formats are declared from each model's documented aspect-ratio support. Where a
- * model does not offer 1:1 it is absent from `formats`, so `generationPlanFor`
- * refuses the pairing up front instead of generating a 16:9 clip and cropping the
- * subject out of the shot (§16).
- */
-const FAL_MODELS: readonly FalModelSpec[] = [
-  {
-    id: "fal/seedance-1-pro",
-    provider: "fal",
-    label: "Seedance 1 Pro",
-    description:
-      "ByteDance's flagship. Strong camera control and motion coherence, up to 12s.",
-    maxClipSeconds: 12,
-    formats: ["landscape", "portrait", "square"],
-    premium: true,
-    endpoint: "fal-ai/bytedance/seedance/v1/pro/text-to-video",
-    durations: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-    frameParam: "aspect_ratio",
-    resolution: "1080p",
-    durationParam: "string",
-  },
-  {
-    id: "fal/seedance-1-lite",
-    provider: "fal",
-    label: "Seedance 1 Lite",
-    description: "Cheaper, faster Seedance tier. Up to 12s at 720p.",
-    maxClipSeconds: 12,
-    formats: ["landscape", "portrait", "square"],
-    premium: false,
-    endpoint: "fal-ai/bytedance/seedance/v1/lite/text-to-video",
-    durations: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-    frameParam: "aspect_ratio",
-    resolution: "720p",
-    durationParam: "string",
-  },
-  {
-    id: "fal/kling-v2-master",
-    provider: "fal",
-    label: "Kling 2.1 Master",
-    description:
-      "Kuaishou's top tier. Cinematic motion and prompt adherence, 5s or 10s.",
-    maxClipSeconds: 10,
-    formats: ["landscape", "portrait", "square"],
-    premium: true,
-    endpoint: "fal-ai/kling-video/v2/master/text-to-video",
-    durations: [5, 10],
-    frameParam: "aspect_ratio",
-    resolution: null,
-    durationParam: "string",
-  },
-  {
-    id: "fal/kling-v2-5-turbo-pro",
-    provider: "fal",
-    label: "Kling 2.5 Turbo Pro",
-    description: "Newer Kling tier, faster and cheaper than Master. 5s or 10s.",
-    maxClipSeconds: 10,
-    formats: ["landscape", "portrait", "square"],
-    premium: false,
-    endpoint: "fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
-    durations: [5, 10],
-    frameParam: "aspect_ratio",
-    resolution: null,
-    durationParam: "string",
-  },
-  {
-    id: "fal/minimax-hailuo-02-pro",
-    provider: "fal",
-    label: "Hailuo 02 Pro (MiniMax)",
-    description:
-      "MiniMax Hailuo 02. Excellent physics and character motion, 6s at 1080p.",
-    maxClipSeconds: 6,
-    formats: ["landscape", "portrait"],
-    premium: true,
-    endpoint: "fal-ai/minimax/hailuo-02/pro/text-to-video",
-    durations: [6],
-    frameParam: "resolution_only",
-    resolution: "1080p",
-    durationParam: "none",
-  },
-  {
-    id: "fal/minimax-hailuo-02-standard",
-    provider: "fal",
-    label: "Hailuo 02 Standard (MiniMax)",
-    description: "Standard Hailuo 02 tier. 6s or 10s at 720p.",
-    maxClipSeconds: 10,
-    formats: ["landscape", "portrait"],
-    premium: false,
-    endpoint: "fal-ai/minimax/hailuo-02/standard/text-to-video",
-    durations: [6, 10],
-    frameParam: "resolution_only",
-    resolution: "720p",
-    durationParam: "string",
-  },
-  {
-    id: "fal/wan-v2-2-a14b",
-    provider: "fal",
-    label: "Wan 2.2 A14B",
-    description:
-      "Alibaba's open Wan 2.2. Good motion at low cost, 5s.",
-    maxClipSeconds: 5,
-    formats: ["landscape", "portrait", "square"],
-    premium: false,
-    endpoint: "fal-ai/wan/v2.2-a14b/text-to-video",
+const TAL_1: VideoGenModel = {
+  id: "tal/1.0",
+  provider: "qwen",
+  label: "Tal 1.0 — Fast Model",
+  description: "Fast generation • Great for high-volume content",
+  bestFor: "Shorts, simple scenes, rapid production",
+  strengths: [
+    "Fastest turnaround of the four models",
+    "Lowest credit cost per scene",
+    "Generates all three aspect ratios",
+    "Also generates reference stills for the continuity engine",
+  ],
+  limitations: [
+    "Five-second clips only — longer scenes are filled by the renderer",
+    "No generated audio",
+    "Less consistent motion than the cinematic tiers",
+  ],
+  maxClipSeconds: 5,
+  formats: ["landscape", "portrait", "square"],
+  premium: false,
+  legacy: false,
+  capabilities: {
+    textToVideo: true,
+    // Wan publishes an image-to-video endpoint, but no adapter here sends a first
+    // frame, so this stays false rather than promising a path that does not exist.
+    imageToVideo: false,
+    imageGeneration: true,
+    referenceImages: false,
+    audio: false,
+    qualities: ["draft", "720p", "1080p"],
+    imageQualities: ["draft", "720p", "1080p"],
     durations: [5],
-    frameParam: "aspect_ratio",
-    resolution: "720p",
-    durationParam: "none",
   },
-  {
-    id: "fal/hunyuan-video",
-    provider: "fal",
-    label: "Hunyuan Video",
-    description:
-      "Tencent's open Hunyuan. Distinctive cinematic look, ~5s clips.",
-    maxClipSeconds: 5,
-    formats: ["landscape", "portrait"],
-    premium: false,
-    endpoint: "fal-ai/hunyuan-video",
-    durations: [5],
-    frameParam: "aspect_ratio",
-    resolution: "720p",
-    durationParam: "none",
-  },
-  {
-    id: "fal/veo3",
-    provider: "fal",
-    label: "Veo 3 (via fal.ai)",
-    description:
-      "Google Veo 3 on fal.ai, billed through fal. Native audio, 4-8s.",
-    maxClipSeconds: 8,
-    formats: ["landscape", "portrait"],
-    premium: true,
-    endpoint: "fal-ai/veo3",
-    durations: [4, 6, 8],
-    frameParam: "aspect_ratio",
-    resolution: "1080p",
-    durationParam: "string",
-  },
-  {
-    id: "fal/veo3-fast",
-    provider: "fal",
-    label: "Veo 3 Fast (via fal.ai)",
-    description: "Faster, cheaper Veo 3 tier on fal.ai. 4-8s.",
-    maxClipSeconds: 8,
-    formats: ["landscape", "portrait"],
-    premium: false,
-    endpoint: "fal-ai/veo3/fast",
-    durations: [4, 6, 8],
-    frameParam: "aspect_ratio",
-    resolution: "1080p",
-    durationParam: "string",
-  },
-];
-
-/**
- * Model ids that moved, old → new.
- *
- * Phase 11 shipped a single-model `seedance` provider whose one id was
- * `seedance/v1-pro`. A project row may already hold that string, and §10 has the
- * visuals stage re-resolve a stored id at render time — so dropping the id would
- * turn a saved project into a failed render. Mapped rather than kept as a
- * duplicate catalogue entry, so the picker shows one Seedance Pro, not two.
- */
-const MODEL_ALIASES: Readonly<Record<string, string>> = {
-  "seedance/v1-pro": "fal/seedance-1-pro",
 };
 
-/**
- * Provider ids that moved, old → new.
- *
- * Same reasoning applied to `VIDEO_GEN_PROVIDERS`: an operator who wrote
- * `seedance` in their environment gets the fal provider rather than a warning and
- * a silently empty model list.
- */
-const PROVIDER_ALIASES: Readonly<Record<string, VideoGenProviderId>> = {
-  seedance: "fal",
-};
-
-/** Resolve a possibly-aliased model id to its current one. */
-function canonicalModelId(modelId: string): string {
-  return MODEL_ALIASES[modelId] ?? modelId;
-}
-
-/**
- * fal.ai — one provider, the whole catalogue above.
- *
- * A single credential and a single code path. `generate` looks the model up, reads
- * its `endpoint` and parameter spelling from the catalogue, and submits; adding a
- * model does not touch this function.
- */
-const fal: VideoGenerationProvider = {
-  id: "fal",
-  label: "fal.ai",
-  requiredEnvVars: ["FAL_KEY"],
-  hint: "Create a key at https://fal.ai/dashboard/keys",
+const qwen: GenerationProvider = {
+  id: "qwen",
+  label: "Alibaba Cloud Model Studio (Wan)",
+  requiredEnvVars: ["DASHSCOPE_API_KEY"],
+  hint: "Create a key at https://bailian.console.alibabacloud.com",
   serviceNote:
-    "fal.ai hosts video models from several vendors — ByteDance (Seedance), " +
-    "Kuaishou (Kling), MiniMax (Hailuo), Tencent (Hunyuan), Alibaba (Wan) and " +
-    "Google (Veo 3) — behind one queue API and one key. Most of those vendors " +
-    "publish no first-party public API that Tally could integrate against, so " +
-    "fal.ai is a service requirement for those models rather than an alternative " +
-    "to one. Everything is billed to the Tally account's fal.ai balance.",
-  models: FAL_MODELS,
+    "Alibaba's own first-party API for the Wan models — a vendor API, not an " +
+    "aggregator. DASHSCOPE_BASE_URL selects the regional endpoint; a key issued " +
+    "for the international estate is rejected by the mainland China host and vice " +
+    "versa. Also serves this model's text-to-image capability.",
+  models: [TAL_1],
   missingEnvVars() {
-    return env().FAL_KEY ? [] : ["FAL_KEY"];
+    return env().DASHSCOPE_API_KEY ? [] : ["DASHSCOPE_API_KEY"];
   },
   async generate(request) {
-    const key = env().FAL_KEY;
-    if (!key) {
-      throw new NotConfiguredError("fal.ai", ["FAL_KEY"], this.hint);
-    }
+    const key = requireKey("Tal 1.0", env().DASHSCOPE_API_KEY, [
+      "DASHSCOPE_API_KEY",
+    ], SETUP_HINT);
 
-    const spec = falModel(request.modelId);
-    const frame = formatSpec(request.format);
-    const seconds = nearest(
-      spec.durations,
-      Math.round(request.durationMs / 1000),
-    );
-    const headers = { authorization: `Key ${key}` };
-    const label = spec.label;
-
-    /**
-     * The request body, assembled from the model's declared spelling.
-     *
-     * Only fields the endpoint documents are sent: fal.ai rejects unknown input
-     * keys on some models rather than ignoring them, so a body built by spreading
-     * every possible field would fail on exactly the models it was meant to help.
-     */
-    const body: Record<string, unknown> = {
-      prompt: request.prompt.slice(0, 1_500),
-      // A content-policy refusal is a correct outcome surfaced as a permanent
-      // error. Disabling the check would move responsibility for a policy
-      // violation onto Tally's account.
-      enable_safety_checker: true,
+    const quality = assertQuality(TAL_1, request.quality);
+    const size = dashScopeSize(request.format, quality);
+    const seconds = nearest(TAL_1.capabilities.durations, secondsOf(request.durationMs));
+    const base = env().DASHSCOPE_BASE_URL.replace(/\/+$/, "");
+    const headers = {
+      authorization: `Bearer ${key}`,
+      "X-DashScope-Async": "enable",
     };
-    if (spec.frameParam === "aspect_ratio") body["aspect_ratio"] = frame.ratio;
-    if (spec.resolution) body["resolution"] = spec.resolution;
-    if (spec.durationParam === "string") body["duration"] = String(seconds);
-    if (spec.durationParam === "number") body["duration"] = seconds;
 
-    const submitted = await providerJson<FalQueueSubmit>({
-      provider: label,
-      url: `${FAL_QUEUE}/${spec.endpoint}`,
+    const submitted = await providerJson<DashScopeSubmit>({
+      provider: TAL_1.label,
+      url: `${base}/services/aigc/video-generation/video-synthesis`,
       method: "POST",
       headers,
-      body,
+      body: {
+        model: env().DASHSCOPE_VIDEO_MODEL,
+        input: { prompt: request.prompt.slice(0, 1_500) },
+        parameters: { size, duration: seconds, prompt_extend: true },
+      },
     });
 
-    const requestId = submitted.request_id;
-    if (!requestId) {
-      throw new ProviderError(label, "queue returned no request id", {
+    const taskId = submitted.output?.task_id;
+    if (!taskId) {
+      throw new ProviderError(TAL_1.label, "returned no task id", {
         retryable: true,
       });
     }
 
-    await awaitFalQueue(spec, requestId, headers);
-
-    const result = await providerJson<FalVideoResult>({
-      provider: label,
-      url: `${FAL_QUEUE}/${spec.endpoint}/requests/${encodeURIComponent(requestId)}`,
-      headers,
-    });
-
-    const url = result.video?.url;
+    const task = await awaitDashScopeTask(TAL_1.label, base, taskId, key);
+    const url = task.output?.video_url;
     if (!url) {
-      throw new ProviderError(label, "completed with no video URL", {
+      throw new ProviderError(TAL_1.label, "completed with no video URL", {
         retryable: false,
-        details: { requestId },
+        details: { taskId },
       });
     }
 
     const asset = await fetchRemoteAsset(url, {
-      provider: label,
+      provider: TAL_1.label,
       maxBytes: MAX_CLIP_BYTES,
-      extraHosts: [...FAL_MEDIA_HOSTS, ...env().ASSET_FETCH_ALLOWED_HOSTS],
+      extraHosts: [...ALIYUN_MEDIA_HOSTS, ...env().ASSET_FETCH_ALLOWED_HOSTS],
     });
 
+    const pixels = qualityFrame(request.format, quality);
     return {
-      provider: "fal",
-      // The canonical id, so an asset generated from a legacy alias records what
-      // actually ran rather than the string the project happened to store.
-      modelId: spec.id,
+      provider: "qwen",
+      modelId: TAL_1.id,
       bytes: asset.bytes,
-      mimeType: asset.contentType.startsWith("video/")
-        ? asset.contentType
-        : "video/mp4",
+      mimeType: videoMime(asset.contentType),
       extension: "mp4",
-      width: frame.width,
-      height: frame.height,
-      durationMs: seconds * 1000,
-      providerAssetId: `fal:${requestId}`,
-      license: `Generated by ${label} via fal.ai under the Tally account's fal.ai terms`,
-      attribution: `Generated with ${label}`,
+      width: pixels.width,
+      height: pixels.height,
+      durationMs: seconds * 1_000,
+      providerAssetId: `qwen:${taskId}`,
+      license: brandedLicense(TAL_1.label),
+      attribution: brandedAttribution(TAL_1.label),
+      matchedOn: request.prompt.slice(0, 120),
+    };
+  },
+  async generateImage(request) {
+    const key = requireKey("Tal 1.0", env().DASHSCOPE_API_KEY, [
+      "DASHSCOPE_API_KEY",
+    ], SETUP_HINT);
+
+    const quality = assertImageQuality(TAL_1, request.quality);
+    const size = dashScopeSize(request.format, quality);
+    const base = env().DASHSCOPE_BASE_URL.replace(/\/+$/, "");
+    const headers = {
+      authorization: `Bearer ${key}`,
+      "X-DashScope-Async": "enable",
+    };
+
+    const submitted = await providerJson<DashScopeSubmit>({
+      provider: TAL_1.label,
+      url: `${base}/services/aigc/text2image/image-synthesis`,
+      method: "POST",
+      headers,
+      body: {
+        model: env().DASHSCOPE_IMAGE_MODEL,
+        input: { prompt: request.prompt.slice(0, 1_500) },
+        parameters: { size, n: 1 },
+      },
+    });
+
+    const taskId = submitted.output?.task_id;
+    if (!taskId) {
+      throw new ProviderError(TAL_1.label, "returned no task id", {
+        retryable: true,
+      });
+    }
+
+    const task = await awaitDashScopeTask(TAL_1.label, base, taskId, key);
+    const url = task.output?.results?.[0]?.url;
+    if (!url) {
+      throw new ProviderError(TAL_1.label, "completed with no image URL", {
+        retryable: false,
+        details: { taskId },
+      });
+    }
+
+    const asset = await fetchRemoteAsset(url, {
+      provider: TAL_1.label,
+      maxBytes: MAX_IMAGE_BYTES,
+      extraHosts: [...ALIYUN_MEDIA_HOSTS, ...env().ASSET_FETCH_ALLOWED_HOSTS],
+    });
+
+    const pixels = qualityFrame(request.format, quality);
+    return {
+      provider: "qwen",
+      modelId: TAL_1.id,
+      purpose: request.purpose,
+      bytes: asset.bytes,
+      mimeType: imageMime(asset.contentType),
+      extension: extensionFor(imageMime(asset.contentType)),
+      width: pixels.width,
+      height: pixels.height,
+      providerAssetId: `qwen:img:${taskId}`,
+      license: brandedLicense(TAL_1.label),
+      attribution: brandedAttribution(TAL_1.label),
       matchedOn: request.prompt.slice(0, 120),
     };
   },
 };
 
-/** Look up a fal model by id, accepting a legacy alias. */
-function falModel(modelId: string): FalModelSpec {
-  const canonical = canonicalModelId(modelId);
-  const spec = FAL_MODELS.find((m) => m.id === canonical);
-  if (!spec) {
-    // Unreachable through `generateClip`, which resolves the model first. Thrown
-    // rather than defaulted so a future caller that skips resolution fails loudly
-    // instead of silently generating on whichever model happens to be first.
-    throw new ProviderError(
-      "fal.ai",
-      `"${modelId.slice(0, 60)}" is not a known fal.ai model.`,
-      { retryable: false, status: 400 },
-    );
-  }
-  return spec;
+/** DashScope spells a frame `width*height`. */
+function dashScopeSize(format: VideoFormat, quality: VideoQuality): string {
+  const frame = qualityFrame(format, quality);
+  return `${frame.width}*${frame.height}`;
 }
 
-/** Poll a fal.ai queue entry until it completes. */
-async function awaitFalQueue(
-  spec: FalModelSpec,
-  requestId: string,
-  headers: Record<string, string>,
-): Promise<void> {
-  const deadline = Date.now() + FAL_MAX_WAIT_MS;
+/** Poll a DashScope task until it leaves the pending states. */
+async function awaitDashScopeTask(
+  label: string,
+  base: string,
+  taskId: string,
+  key: string,
+): Promise<DashScopeTask> {
+  const deadline = Date.now() + DASHSCOPE_MAX_WAIT_MS;
 
   for (;;) {
-    const status = await providerJson<FalQueueStatus>({
-      provider: spec.label,
-      url: `${FAL_QUEUE}/${spec.endpoint}/requests/${encodeURIComponent(requestId)}/status`,
-      headers,
+    const task = await providerJson<DashScopeTask>({
+      provider: label,
+      url: `${base}/tasks/${encodeURIComponent(taskId)}`,
+      headers: { authorization: `Bearer ${key}` },
     });
 
-    if (status.status === "COMPLETED") return;
+    const status = task.output?.task_status ?? "";
 
-    if (status.error || status.error_type) {
-      const detail = status.error ?? status.error_type ?? "unknown reason";
-      throw new ProviderError(spec.label, `generation failed: ${detail}`, {
-        // A content-policy refusal refuses identically next time. Anything else
-        // — a transient worker fault — is worth one more attempt.
-        retryable: !/safety|moderation|policy|content/i.test(detail),
-        details: { requestId },
+    if (status === "SUCCEEDED") return task;
+
+    if (status === "FAILED" || status === "CANCELED" || status === "UNKNOWN") {
+      const detail = task.output?.message ?? task.output?.code ?? status;
+      throw new ProviderError(label, `generation failed: ${detail}`, {
+        retryable: transientDetail(detail),
+        details: { taskId },
       });
     }
 
     if (Date.now() > deadline) {
       throw new ProviderError(
-        spec.label,
-        `generation did not finish within ${FAL_MAX_WAIT_MS / 1000}s`,
-        { retryable: true, details: { requestId, status: status.status } },
+        label,
+        `generation did not finish within ${DASHSCOPE_MAX_WAIT_MS / 1000}s`,
+        { retryable: true, details: { taskId, status } },
       );
     }
 
-    await sleep(FAL_POLL_MS);
+    await sleep(DASHSCOPE_POLL_MS);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Veo 3, via the Google AI (Gemini) API (§12)
+// Tal 2.0 — Creators Model, on MiniMax
 // ---------------------------------------------------------------------------
 
+/**
+ * MiniMax's three-step flow.
+ *
+ * Submit returns a task id; polling returns a *file id* rather than a URL; the file
+ * has to be retrieved to get a download URL. Three calls, all documented, and the
+ * middle one is the reason this adapter is longer than the others.
+ */
+const MINIMAX_POLL_MS = 5_000;
+const MINIMAX_MAX_WAIT_MS = 12 * 60_000;
+
+interface MiniMaxSubmit {
+  task_id?: string | null;
+  base_resp?: { status_code?: number | null; status_msg?: string | null } | null;
+}
+
+interface MiniMaxStatus {
+  task_id?: string | null;
+  status?: string | null;
+  file_id?: string | null;
+  base_resp?: { status_code?: number | null; status_msg?: string | null } | null;
+}
+
+interface MiniMaxFile {
+  file?: { download_url?: string | null; filename?: string | null } | null;
+}
+
+/**
+ * MiniMax's image response — synchronous, unlike its video flow.
+ *
+ * `image_generation` returns finished URLs in one call rather than a task id, so the
+ * image path here is one request where the video path is three.
+ */
+interface MiniMaxImage {
+  data?: { image_urls?: string[] | null } | null;
+  base_resp?: { status_code?: number | null; status_msg?: string | null } | null;
+}
+
+const TAL_2: VideoGenModel = {
+  id: "tal/2.0",
+  provider: "minimax",
+  label: "Tal 2.0 — Creators Model",
+  description: "Balanced quality and generation cost",
+  bestFor: "YouTube creators and everyday storytelling",
+  strengths: [
+    "Strong physics and character motion",
+    "Six- and ten-second clips, so fewer joins per scene",
+    "Good value per credit for a full-length video",
+    "Also generates reference stills for the continuity engine",
+  ],
+  limitations: [
+    "Landscape and portrait only — no square",
+    "No generated audio",
+  ],
+  maxClipSeconds: 10,
+  formats: ["landscape", "portrait"],
+  premium: false,
+  legacy: false,
+  capabilities: {
+    textToVideo: true,
+    imageToVideo: false,
+    // MiniMax's own `image_generation` endpoint, on the same host and key as the
+    // video API. Integrated in Phase 12 §5 so continuity references can be made by
+    // whichever model the project already selected.
+    imageGeneration: true,
+    referenceImages: false,
+    audio: false,
+    // Its image API takes an aspect ratio rather than a pixel size, so the tier
+    // list matches the video one — the frame is derived either way.
+    imageQualities: ["720p", "1080p"],
+    qualities: ["720p", "1080p"],
+    durations: [6, 10],
+  },
+};
+
+const minimax: GenerationProvider = {
+  id: "minimax",
+  label: "MiniMax (Hailuo and image-01)",
+  requiredEnvVars: ["MINIMAX_API_KEY"],
+  hint: "Create a key at https://www.minimaxi.com/user-center/basic-information",
+  serviceNote:
+    "MiniMax's own first-party video API. Finished files are retrieved by file id " +
+    "rather than returned as a URL, so this adapter makes three calls per clip. Its " +
+    "image endpoint is synchronous and takes one, on the same host and key; " +
+    "MINIMAX_IMAGE_MODEL selects that version independently of the video one.",
+  models: [TAL_2],
+  missingEnvVars() {
+    return env().MINIMAX_API_KEY ? [] : ["MINIMAX_API_KEY"];
+  },
+  async generate(request) {
+    const key = requireKey("Tal 2.0", env().MINIMAX_API_KEY, [
+      "MINIMAX_API_KEY",
+    ], SETUP_HINT);
+
+    if (request.format === "square") {
+      // Generating landscape and cropping to a square would cut the subject out of
+      // the shot, so this is refused with the actual reason. `resolveModel` plus
+      // `generationPlanFor` normally catch it first; this is the backstop.
+      throw new ProviderError(
+        TAL_2.label,
+        "does not generate square video. Choose landscape or portrait, or pick a " +
+          "different model.",
+        { retryable: false, status: 400 },
+      );
+    }
+
+    const quality = assertQuality(TAL_2, request.quality);
+    const seconds = nearest(TAL_2.capabilities.durations, secondsOf(request.durationMs));
+    const base = env().MINIMAX_BASE_URL.replace(/\/+$/, "");
+    const headers = { authorization: `Bearer ${key}` };
+
+    const submitted = await providerJson<MiniMaxSubmit>({
+      provider: TAL_2.label,
+      url: `${base}/video_generation`,
+      method: "POST",
+      headers,
+      body: {
+        model: env().MINIMAX_VIDEO_MODEL,
+        prompt: request.prompt.slice(0, 1_500),
+        duration: seconds,
+        resolution: quality === "1080p" ? "1080P" : "720P",
+        // A content-policy refusal is a correct outcome surfaced as a permanent
+        // error. Disabling the check would move responsibility for a policy
+        // violation onto Tally's account.
+        prompt_optimizer: true,
+      },
+    });
+
+    assertMiniMaxOk(submitted.base_resp);
+    const taskId = submitted.task_id;
+    if (!taskId) {
+      throw new ProviderError(TAL_2.label, "returned no task id", {
+        retryable: true,
+      });
+    }
+
+    const fileId = await awaitMiniMaxTask(base, taskId, headers);
+
+    const file = await providerJson<MiniMaxFile>({
+      provider: TAL_2.label,
+      url: `${base}/files/retrieve?file_id=${encodeURIComponent(fileId)}`,
+      headers,
+    });
+    const url = file.file?.download_url;
+    if (!url) {
+      throw new ProviderError(TAL_2.label, "returned no download URL", {
+        retryable: false,
+        details: { taskId, fileId },
+      });
+    }
+
+    const asset = await fetchRemoteAsset(url, {
+      provider: TAL_2.label,
+      maxBytes: MAX_CLIP_BYTES,
+      extraHosts: [
+        ...MINIMAX_MEDIA_HOSTS,
+        ...ALIYUN_MEDIA_HOSTS,
+        ...env().ASSET_FETCH_ALLOWED_HOSTS,
+      ],
+    });
+
+    const pixels = qualityFrame(request.format, quality);
+    return {
+      provider: "minimax",
+      modelId: TAL_2.id,
+      bytes: asset.bytes,
+      mimeType: videoMime(asset.contentType),
+      extension: "mp4",
+      width: pixels.width,
+      height: pixels.height,
+      durationMs: seconds * 1_000,
+      providerAssetId: `minimax:${taskId}`,
+      license: brandedLicense(TAL_2.label),
+      attribution: brandedAttribution(TAL_2.label),
+      matchedOn: request.prompt.slice(0, 120),
+    };
+  },
+  async generateImage(request) {
+    const key = requireKey("Tal 2.0", env().MINIMAX_API_KEY, [
+      "MINIMAX_API_KEY",
+    ], SETUP_HINT);
+
+    // Square is refused for images too, and for the same reason as video: the frame
+    // is a generation parameter, and cropping a landscape still to a square would
+    // move the subject out of a reference the continuity engine relies on.
+    if (request.format === "square") {
+      throw new ProviderError(
+        TAL_2.label,
+        "does not generate square images. Choose landscape or portrait, or pick a " +
+          "different model.",
+        { retryable: false, status: 400 },
+      );
+    }
+
+    const frame = formatSpec(request.format);
+    const quality = assertImageQuality(TAL_2, request.quality);
+    const base = env().MINIMAX_BASE_URL.replace(/\/+$/, "");
+
+    const response = await providerJson<MiniMaxImage>({
+      provider: TAL_2.label,
+      url: `${base}/image_generation`,
+      method: "POST",
+      headers: { authorization: `Bearer ${key}` },
+      body: {
+        model: env().MINIMAX_IMAGE_MODEL,
+        prompt: request.prompt.slice(0, 1_500),
+        aspect_ratio: frame.ratio,
+        response_format: "url",
+        n: 1,
+        prompt_optimizer: true,
+      },
+    });
+
+    assertMiniMaxOk(response.base_resp);
+    const url = response.data?.image_urls?.[0];
+    if (!url) {
+      throw new ProviderError(TAL_2.label, "returned no image URL", {
+        retryable: false,
+      });
+    }
+
+    const asset = await fetchRemoteAsset(url, {
+      provider: TAL_2.label,
+      maxBytes: MAX_IMAGE_BYTES,
+      extraHosts: [
+        ...MINIMAX_MEDIA_HOSTS,
+        ...ALIYUN_MEDIA_HOSTS,
+        ...env().ASSET_FETCH_ALLOWED_HOSTS,
+      ],
+    });
+
+    const mimeType = imageMime(asset.contentType);
+    const pixels = qualityFrame(request.format, quality);
+    return {
+      provider: "minimax",
+      modelId: TAL_2.id,
+      purpose: request.purpose,
+      bytes: asset.bytes,
+      mimeType,
+      extension: extensionFor(mimeType),
+      width: pixels.width,
+      height: pixels.height,
+      // Its image endpoint is synchronous and returns no task id to record.
+      providerAssetId: null,
+      license: brandedLicense(TAL_2.label),
+      attribution: brandedAttribution(TAL_2.label),
+      matchedOn: request.prompt.slice(0, 120),
+    };
+  },
+};
+
+/**
+ * MiniMax reports application errors in a 200 body.
+ *
+ * A non-zero `status_code` with HTTP 200 would otherwise sail past `providerJson`'s
+ * status translation and be read as a successful submit with a missing task id.
+ */
+function assertMiniMaxOk(
+  resp: { status_code?: number | null; status_msg?: string | null } | null | undefined,
+): void {
+  const code = resp?.status_code ?? 0;
+  if (code === 0) return;
+  const detail = resp?.status_msg ?? `status ${code}`;
+  throw new ProviderError(TAL_2.label, `rejected the request: ${detail}`, {
+    retryable: transientDetail(detail),
+    details: { statusCode: code },
+  });
+}
+
+/** Poll a MiniMax generation task and return its file id. */
+async function awaitMiniMaxTask(
+  base: string,
+  taskId: string,
+  headers: Record<string, string>,
+): Promise<string> {
+  const deadline = Date.now() + MINIMAX_MAX_WAIT_MS;
+
+  for (;;) {
+    const status = await providerJson<MiniMaxStatus>({
+      provider: TAL_2.label,
+      url: `${base}/query/video_generation?task_id=${encodeURIComponent(taskId)}`,
+      headers,
+    });
+
+    const state = (status.status ?? "").toLowerCase();
+
+    if (state === "success") {
+      const fileId = status.file_id;
+      if (!fileId) {
+        throw new ProviderError(TAL_2.label, "succeeded with no file id", {
+          retryable: false,
+          details: { taskId },
+        });
+      }
+      return fileId;
+    }
+
+    if (state === "fail" || state === "failed") {
+      const detail = status.base_resp?.status_msg ?? "unknown reason";
+      throw new ProviderError(TAL_2.label, `generation failed: ${detail}`, {
+        retryable: transientDetail(detail),
+        details: { taskId },
+      });
+    }
+
+    if (Date.now() > deadline) {
+      throw new ProviderError(
+        TAL_2.label,
+        `generation did not finish within ${MINIMAX_MAX_WAIT_MS / 1000}s`,
+        { retryable: true, details: { taskId, status: state } },
+      );
+    }
+
+    await sleep(MINIMAX_POLL_MS);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tal 3.0 — Cinematic Model, on Volcengine Ark (Seedance)
+// ---------------------------------------------------------------------------
+
+const ARK_POLL_MS = 5_000;
+const ARK_MAX_WAIT_MS = 15 * 60_000;
+
+interface ArkTask {
+  id?: string | null;
+  status?: string | null;
+  error?: { code?: string | null; message?: string | null } | null;
+  content?: { video_url?: string | null } | null;
+}
+
+/**
+ * Ark's image response, which is OpenAI-shaped rather than task-shaped.
+ *
+ * Its video family is asynchronous and its image family is not, so `generateImage`
+ * below is a single call with no polling — the same split MiniMax has.
+ */
+interface ArkImage {
+  data?: ({ url?: string | null; size?: string | null } | null)[] | null;
+  error?: { code?: string | null; message?: string | null } | null;
+}
+
+/**
+ * Largest reference still this adapter will inline, before base64 (§6).
+ *
+ * A quoted vendor limit, unlike Veo's equivalent: the API reference states "Single image
+ * is less than 30 MB". Held one megabyte under it because the number the vendor measures
+ * is the encoded payload and base64 inflates by about a third — a 30 MB file becomes a
+ * 40 MB string, so a check against the raw byte count at exactly 30 would pass here and
+ * be rejected there, after the scene's credits were committed.
+ */
+const SEEDANCE_MAX_REFERENCE_BYTES = 22 * 1_048_576;
+
+/**
+ * Reference images this adapter will send in one request.
+ *
+ * The vendor documents 1–9 for the Seedance 2.0 series. Tally's own ceiling is lower and
+ * deliberately so: `referencesForScene` emits characters, then the environment, then
+ * props, and the whole set is base64-inlined into a single body the vendor caps at 64 MB.
+ * Four covers a cast of three in their location, which is what a scene prompt describes;
+ * beyond that the marginal still buys less than the request-size risk it adds.
+ */
+const SEEDANCE_MAX_REFERENCE_IMAGES = 4;
+
+/**
+ * Image types the reference input accepts.
+ *
+ * The vendor lists jpeg, png, webp, bmp, tiff, gif and (on this family) heic/heif. Only
+ * the three Tally's own image stages actually produce are listed: a still arrives here
+ * from `assets.mimeType` after being drawn by Seedream or Imagen, and accepting formats
+ * nothing in this repository writes would be untested breadth.
+ */
+const SEEDANCE_REFERENCE_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+] as const;
+
+/**
+ * Whether the *configured* Seedance model version accepts reference images.
+ *
+ * The same arrangement as `veoReferenceModel`, and for the same reason: the capability
+ * is gated at the vendor on the model version, and `SEEDANCE_VIDEO_MODEL` is operator-
+ * configurable. Omni reference-to-video arrived with the Dreamina Seedance 2.0 series —
+ * the 1.0 pro/fast models this repository defaulted to until now document `first_frame`
+ * and `last_frame` only, and would reject or ignore a `reference_image` role.
+ *
+ * So the flag is declared statically on the model (the matrix describes Tal 3.0, not one
+ * deployment's env) and enforced dynamically here. A deployment still pinned to 1.0 gets
+ * textual continuity, which is exactly what it gets today.
+ */
+function seedanceReferenceModel(model: string): boolean {
+  const id = model.toLowerCase();
+  return id.includes("seedance-2-") || id.includes("seedance-2.");
+}
+
+/** One reference item of Ark's `content` array, in the shape the API reference documents. */
+interface ArkReferenceImage {
+  type: "image_url";
+  /** A `data:` URI. The vendor takes a fetchable URL, base64 or an asset id here. */
+  image_url: { url: string };
+  /**
+   * Omni reference-to-video. A sibling of `image_url`, not a field inside it — the
+   * documented examples put it at the item level and the SDK types it there.
+   */
+  role: "reference_image";
+}
+
+/**
+ * Map continuity stills onto Ark's multimodal `content` array (§6).
+ *
+ * Base64 data URIs rather than links, which the vendor documents as an accepted form of
+ * `image_url.url` alongside a public URL and an uploaded asset id. That choice is what
+ * makes this work at all here: Tally's stills live in a private bucket reached through
+ * `getObjectBuffer`, MinIO is not addressable from the vendor's network, and the
+ * alternative would be either publishing the bucket or handing a third party a signed
+ * URL to object storage — a credential in a request body by another name (§21).
+ *
+ * Unusable stills are skipped rather than failing the scene: the clip still renders with
+ * its textual continuity, which is the same degradation as having no still at all, and a
+ * scene that failed outright would lose the operator both the video and the credits.
+ */
+function seedanceReferenceImages(
+  references: readonly ReferenceImageInput[],
+): { images: ArkReferenceImage[]; skipped: number } {
+  const usable = references.filter(
+    (reference) =>
+      (SEEDANCE_REFERENCE_MIME_TYPES as readonly string[]).includes(
+        reference.mimeType.toLowerCase(),
+      ) &&
+      reference.bytes.byteLength > 0 &&
+      reference.bytes.byteLength <= SEEDANCE_MAX_REFERENCE_BYTES,
+  );
+
+  const images = usable
+    .slice(0, SEEDANCE_MAX_REFERENCE_IMAGES)
+    .map((reference): ArkReferenceImage => {
+      // Lowercase and canonical: the vendor documents the data URI as
+      // `data:image/<format>;base64,<encoding>` with the format in lower case.
+      const mime = reference.mimeType.toLowerCase() === "image/jpg"
+        ? "image/jpeg"
+        : reference.mimeType.toLowerCase();
+      return {
+        type: "image_url",
+        image_url: { url: `data:${mime};base64,${reference.bytes.toString("base64")}` },
+        role: "reference_image",
+      };
+    });
+
+  return { images, skipped: references.length - images.length };
+}
+
+const TAL_3: VideoGenModel = {
+  id: "tal/3.0",
+  provider: "seedance",
+  label: "Tal 3.0 — Cinematic Model",
+  description: "Higher visual quality and stronger cinematic motion",
+  bestFor: "Storytelling, children's animation, cinematic content",
+  strengths: [
+    "Best camera control and motion coherence of the standard tiers",
+    "Clips up to fifteen seconds, so a whole scene often fits one generation",
+    "Holds a character's appearance across a shot",
+    "Reuses up to four continuity reference stills so a cast keeps one face",
+    "Generates all three aspect ratios",
+    "Also generates reference stills for the continuity engine",
+  ],
+  limitations: [
+    "Slower than Tal 1.0 and Tal 2.0",
+    "No generated audio",
+    "Clips are at least four seconds",
+  ],
+  maxClipSeconds: 15,
+  formats: ["landscape", "portrait", "square"],
+  premium: false,
+  legacy: false,
+  capabilities: {
+    textToVideo: true,
+    imageToVideo: false,
+    // Ark's Seedream family, on the same host and key as Seedance video, under the
+    // OpenAI-shaped `/images/generations` route. Integrated in Phase 12 §5 so a
+    // project on Tal 3.0 makes its continuity references with the model it already
+    // selected instead of borrowing another one's look.
+    imageGeneration: true,
+    /**
+     * Omni reference-to-video, on the Dreamina Seedance 2.0 series (§6).
+     *
+     * Paired with `seedance.acceptsReferenceImages`; `assertRegistryIntegrity` fails the
+     * module load if either is set without the other, so this cannot become a claim the
+     * adapter does not honour. Version-gated at the vendor, which
+     * `seedanceReferenceModel()` checks against the configured `SEEDANCE_VIDEO_MODEL` at
+     * request time rather than assuming — a deployment pinned to Seedance 1.0 falls back
+     * to textual continuity.
+     */
+    referenceImages: true,
+    /**
+     * False despite the vendor generating audio on this family.
+     *
+     * `generate_audio` defaults to *true* at the vendor and the adapter sends it off
+     * explicitly. Tally composes narration, music and captions itself, so a vendor
+     * soundtrack arriving inside the clip would fight the voice track the renderer lays
+     * over it — and this flag is what the rest of the pipeline reads to decide whether a
+     * clip already carries sound. Declaring it true would silence Tally's own narration.
+     */
+    audio: false,
+    /**
+     * No draft tier for stills, unlike video.
+     *
+     * A draft *clip* is a check-the-scene-before-committing artefact and is thrown
+     * away. A reference image is the opposite: it is kept and re-read by every later
+     * scene, so a 480-line character sheet would degrade every generation that
+     * consults it. 2K is absent because Seedream bounds a side at 2048 and the 2K
+     * long edge is 2560.
+     */
+    imageQualities: ["720p", "1080p"],
+    /**
+     * Unchanged across the 1.0 → 2.0 move: 480p, 720p and 1080p.
+     *
+     * Which of these the vendor honours depends on the configured version, and the tiers
+     * diverge — the Seedance 2.0 *standard* and mini models serve 1080p, the *fast* tier
+     * caps at 720p. `SEEDANCE_VIDEO_MODEL` defaults to standard precisely so this list
+     * stays true: Tal 3.0 has offered a 1080p master since it was catalogued, and a
+     * project that selected it keeps generating it.
+     *
+     * A deployment that pins the fast tier is choosing to lose 1080p. That is a
+     * misconfiguration this matrix cannot express — capabilities describe the model
+     * Tally catalogues, not one environment's env file — so it surfaces as the vendor
+     * refusing the resolution rather than as a silent downgrade, which is the same
+     * failure mode as pinning a version that takes no reference images.
+     */
+    qualities: ["draft", "720p", "1080p"],
+    /**
+     * 4–15 seconds, the documented range for this family.
+     *
+     * Starts at four rather than three: the vendor's minimum is four, and `nearest()`
+     * rounds a three-second scene up to it. `maxClipSeconds` must equal the largest of
+     * these or the module refuses to load.
+     */
+    durations: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+  },
+};
+
+const seedance: GenerationProvider = {
+  id: "seedance",
+  label: "Volcengine Ark (Seedance and Seedream)",
+  requiredEnvVars: ["SEEDANCE_API_KEY"],
+  hint: "Create a key at https://console.volcengine.com/ark",
+  serviceNote:
+    "ByteDance serves Seedance through Volcengine Ark, which is ByteDance's own " +
+    "platform rather than a third-party aggregator. SEEDANCE_VIDEO_MODEL selects " +
+    "the model version, so a newer Seedance release is a configuration change " +
+    "rather than a code change — but reference-image continuity needs the Dreamina " +
+    "Seedance 2.0 series, and a deployment pinned to 1.0 falls back to textual " +
+    "continuity. Generation parameters are passed in the request body, which the " +
+    "vendor documents as the validated form; continuity stills travel in the same " +
+    "multimodal content array as the prompt. Stills come from the Seedream family " +
+    "on the same host and key, selected by SEEDANCE_IMAGE_MODEL, through an " +
+    "OpenAI-shaped route that takes ordinary JSON.",
+  models: [TAL_3],
+  acceptsReferenceImages: true,
+  missingEnvVars() {
+    return env().SEEDANCE_API_KEY ? [] : ["SEEDANCE_API_KEY"];
+  },
+  async generate(request) {
+    const key = requireKey("Tal 3.0", env().SEEDANCE_API_KEY, [
+      "SEEDANCE_API_KEY",
+    ], SETUP_HINT);
+
+    const frame = formatSpec(request.format);
+    const quality = assertQuality(TAL_3, request.quality);
+    const seconds = nearest(TAL_3.capabilities.durations, secondsOf(request.durationMs));
+    const base = env().SEEDANCE_BASE_URL.replace(/\/+$/, "");
+    const headers = { authorization: `Bearer ${key}` };
+
+    /**
+     * Continuity stills, when this deployment's model version can use them (§6).
+     *
+     * The capability is declared on the model and `generateClip` has already refused to
+     * pass references to a model that does not declare it, so an empty list here is the
+     * ordinary case — most scenes have no stored stills.
+     */
+    const videoModel = env().SEEDANCE_VIDEO_MODEL;
+    const requested = request.referenceImages ?? [];
+    const supportsReferences = seedanceReferenceModel(videoModel);
+    const { images: referenceImages, skipped } = supportsReferences
+      ? seedanceReferenceImages(requested)
+      : { images: [] as ArkReferenceImage[], skipped: requested.length };
+
+    if (skipped > 0) {
+      /**
+       * Loud, because the scene still renders (§19).
+       *
+       * A skipped still is a continuity constraint the operator paid to generate and did
+       * not get. The clip is fine, so nothing downstream reports it — this line is the
+       * only trace, and it names the reason rather than just the count.
+       */
+      log.warn("some continuity references were not sent to the vendor", {
+        modelId: TAL_3.id,
+        videoModel,
+        sceneIndex: request.sceneIndex,
+        requested: requested.length,
+        sent: referenceImages.length,
+        skipped,
+        versionUnsupported: !supportsReferences,
+      });
+    }
+
+    /**
+     * The prompt, with the references named if any were sent.
+     *
+     * The vendor resolves an omni reference by *position*: "Image n" in the prompt means
+     * the nth `image_url` item in the content array. A body carrying stills whose prompt
+     * never names them is a documented no-op — the images are accepted and ignored — so
+     * this sentence is what makes the reuse actually take effect, and it is generated
+     * from the array that was just built rather than assumed by the prompt builder.
+     * Nothing is appended when there are no references, which keeps every existing
+     * text-to-video request byte-identical to what it was.
+     */
+    const naming = referenceImages.length > 0
+      ? ` Keep the appearance of ${referenceImages
+          .map((_, index) => `Image ${index + 1}`)
+          .join(", ")} exactly consistent with the reference${
+          referenceImages.length === 1 ? "" : "s"
+        } provided.`
+      : "";
+
+    const submitted = await providerJson<ArkTask>({
+      provider: TAL_3.label,
+      url: `${base}/contents/generations/tasks`,
+      method: "POST",
+      headers,
+      body: {
+        model: videoModel,
+        /**
+         * Parameters in the body, not as `--flag` text commands.
+         *
+         * Both forms exist at the vendor and they are not equivalent: the body is
+         * documented as strictly validated, while a flag in the text is "ignored or
+         * causes an error". The 2.0 series also renamed the flags (`--rs`, `--rt`,
+         * `--dur`), so the long-form commands this adapter used for the 1.0 family
+         * would now be silently dropped — a request that quietly generates at the
+         * wrong resolution and duration after the credits are committed.
+         */
+        content: [
+          { type: "text", text: `${request.prompt.slice(0, 1_200)}${naming}` },
+          ...referenceImages,
+        ],
+        resolution: arkResolution(quality),
+        duration: seconds,
+        ratio: frame.ratio,
+        // No recognisable people: a generated likeness in a published video is a
+        // rights problem, and the scene director never asks for one.
+        watermark: false,
+        /**
+         * Off explicitly, because the vendor's default is on.
+         *
+         * Tally lays its own narration, music and captions over the clip. A vendor
+         * soundtrack inside the video would play underneath the voice track with no way
+         * to separate them again, and `TAL_3.capabilities.audio` tells the rest of the
+         * pipeline this clip is silent.
+         */
+        generate_audio: false,
+      },
+    });
+
+    const taskId = submitted.id;
+    if (!taskId) {
+      throw new ProviderError(TAL_3.label, "returned no task id", {
+        retryable: true,
+      });
+    }
+
+    const url = await awaitArkTask(base, taskId, headers);
+
+    const asset = await fetchRemoteAsset(url, {
+      provider: TAL_3.label,
+      maxBytes: MAX_CLIP_BYTES,
+      extraHosts: [...ARK_MEDIA_HOSTS, ...env().ASSET_FETCH_ALLOWED_HOSTS],
+    });
+
+    const pixels = qualityFrame(request.format, quality);
+    return {
+      provider: "seedance",
+      modelId: TAL_3.id,
+      bytes: asset.bytes,
+      mimeType: videoMime(asset.contentType),
+      extension: "mp4",
+      width: pixels.width,
+      height: pixels.height,
+      durationMs: seconds * 1_000,
+      providerAssetId: `seedance:${taskId}`,
+      license: brandedLicense(TAL_3.label),
+      attribution: brandedAttribution(TAL_3.label),
+      matchedOn: request.prompt.slice(0, 120),
+    };
+  },
+  async generateImage(request) {
+    const key = requireKey("Tal 3.0", env().SEEDANCE_API_KEY, [
+      "SEEDANCE_API_KEY",
+    ], SETUP_HINT);
+
+    const quality = assertImageQuality(TAL_3, request.quality);
+    const base = env().SEEDANCE_BASE_URL.replace(/\/+$/, "");
+
+    /**
+     * Ark's image route takes ordinary JSON fields, not the `--flag` commands its
+     * video route wants, so the prompt is not trimmed to leave room for them.
+     */
+    const image = await providerJson<ArkImage>({
+      provider: TAL_3.label,
+      url: `${base}/images/generations`,
+      method: "POST",
+      headers: { authorization: `Bearer ${key}` },
+      body: {
+        model: env().SEEDANCE_IMAGE_MODEL,
+        prompt: request.prompt.slice(0, 1_500),
+        size: arkImageSize(request.format, quality),
+        response_format: "url",
+        n: 1,
+        // Same reasoning as the video route: a visible vendor mark in a published
+        // frame is both a rights problem and a §3 leak.
+        watermark: false,
+      },
+    });
+
+    if (image.error?.message) {
+      const detail = image.error.message;
+      throw new ProviderError(TAL_3.label, `rejected the request: ${detail}`, {
+        retryable: transientDetail(detail),
+      });
+    }
+
+    const url = image.data?.[0]?.url;
+    if (!url) {
+      throw new ProviderError(TAL_3.label, "returned no image URL", {
+        retryable: false,
+      });
+    }
+
+    const asset = await fetchRemoteAsset(url, {
+      provider: TAL_3.label,
+      maxBytes: MAX_IMAGE_BYTES,
+      extraHosts: [...ARK_MEDIA_HOSTS, ...env().ASSET_FETCH_ALLOWED_HOSTS],
+    });
+
+    const mimeType = imageMime(asset.contentType);
+    const pixels = qualityFrame(request.format, quality);
+    return {
+      provider: "seedance",
+      modelId: TAL_3.id,
+      purpose: request.purpose,
+      bytes: asset.bytes,
+      mimeType,
+      extension: extensionFor(mimeType),
+      width: pixels.width,
+      height: pixels.height,
+      // Ark's image route is synchronous and returns no task id to record.
+      providerAssetId: null,
+      license: brandedLicense(TAL_3.label),
+      attribution: brandedAttribution(TAL_3.label),
+      matchedOn: request.prompt.slice(0, 120),
+    };
+  },
+};
+
+/**
+ * Seedream spells a frame `widthxheight` and bounds each side to 512..2048.
+ *
+ * Clamped rather than trusted, because `qualityFrame` is derived from the format and
+ * a future tier or format could fall outside the window; an out-of-range side is a
+ * 400 from Ark after the request is already in flight, which costs a round trip to
+ * learn something computable here. The clamp keeps the aspect ratio: only the side
+ * that violates the bound moves, and both bounds are far outside the tiers this
+ * model actually offers, so in practice nothing moves.
+ */
+function arkImageSize(format: VideoFormat, quality: VideoQuality): string {
+  const frame = qualityFrame(format, quality);
+  const long = Math.max(frame.width, frame.height);
+  const short = Math.min(frame.width, frame.height);
+
+  let scale = 1;
+  if (long > 2048) scale = 2048 / long;
+  if (short * scale < 512) scale = 512 / short;
+
+  const width = Math.round(frame.width * scale);
+  const height = Math.round(frame.height * scale);
+  return `${width}x${height}`;
+}
+
+/**
+ * Tally's resolution vocabulary in the vendor's tokens.
+ *
+ * Three tiers, matching `TAL_3.capabilities.qualities`. No 2K branch: Ark does not
+ * document one for this family, and `assertQuality` refuses the tier before this is
+ * reached, so a fallback for it would be an unreachable claim that the model does more
+ * than it does. 1080p maps straight through — the default `SEEDANCE_VIDEO_MODEL` is the
+ * standard tier, which serves it.
+ */
+function arkResolution(quality: VideoQuality): string {
+  return quality === "draft" ? "480p" : quality === "720p" ? "720p" : "1080p";
+}
+
+/** Poll an Ark generation task and return its video URL. */
+async function awaitArkTask(
+  base: string,
+  taskId: string,
+  headers: Record<string, string>,
+): Promise<string> {
+  const deadline = Date.now() + ARK_MAX_WAIT_MS;
+
+  for (;;) {
+    const task = await providerJson<ArkTask>({
+      provider: TAL_3.label,
+      url: `${base}/contents/generations/tasks/${encodeURIComponent(taskId)}`,
+      headers,
+    });
+
+    const status = (task.status ?? "").toLowerCase();
+
+    if (status === "succeeded") {
+      const url = task.content?.video_url;
+      if (!url) {
+        throw new ProviderError(TAL_3.label, "succeeded with no video URL", {
+          retryable: false,
+          details: { taskId },
+        });
+      }
+      return url;
+    }
+
+    if (status === "failed" || status === "cancelled" || status === "canceled") {
+      const detail = task.error?.message ?? task.error?.code ?? status;
+      throw new ProviderError(TAL_3.label, `generation failed: ${detail}`, {
+        retryable: transientDetail(detail),
+        details: { taskId },
+      });
+    }
+
+    if (Date.now() > deadline) {
+      throw new ProviderError(
+        TAL_3.label,
+        `generation did not finish within ${ARK_MAX_WAIT_MS / 1000}s`,
+        { retryable: true, details: { taskId, status } },
+      );
+    }
+
+    await sleep(ARK_POLL_MS);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tal 3.1 — Ultra Model, on the Google AI (Gemini) API: Veo + Imagen
+// ---------------------------------------------------------------------------
+
+/**
+ * §15: Tally already had a Gemini integration for Veo, and this is it — adapted to
+ * the branded model rather than duplicated. The image half (Imagen) is added to the
+ * *same* provider, sharing the same `GEMINI_API_KEY`, which is what keeps §15's "do
+ * not create a duplicate Gemini integration" true.
+ */
 const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta";
 
 /** Veo takes minutes per clip; the operation is polled, not awaited. */
 const VEO_POLL_MS = 10_000;
 const VEO_MAX_WAIT_MS = 15 * 60_000;
-
-/** Host Veo serves finished files from — same API host, authenticated download. */
-const GEMINI_MEDIA_HOST = "generativelanguage.googleapis.com";
 
 interface VeoOperation {
   name?: string | null;
@@ -643,91 +1556,290 @@ interface VeoOperation {
   } | null;
 }
 
-/** Veo's supported clip lengths, as documented. */
-const VEO_DURATIONS = [4, 6, 8] as const;
+interface ImagenResponse {
+  predictions?: Array<{
+    bytesBase64Encoded?: string | null;
+    mimeType?: string | null;
+    raiFilteredReason?: string | null;
+  }> | null;
+}
 
-const veo: VideoGenerationProvider = {
+/**
+ * How many reference stills Veo accepts on one request.
+ *
+ * The vendor documents "up to three asset images of a single person, character, or
+ * product". A fourth is not merged or ignored by the API — the request is rejected — so
+ * the adapter truncates rather than forwarding whatever the continuity layer selected.
+ * `referencesForScene` already emits them in continuity priority order (characters,
+ * then the environment, then props), which is what makes truncation from the end the
+ * right end: the least important reference is the one dropped.
+ */
+const VEO_MAX_REFERENCE_IMAGES = 3;
+
+/**
+ * Image types Veo's reference input accepts.
+ *
+ * Checked rather than trusted because the bytes come from object storage via
+ * `assets.mimeType`, and a still stored as something else — a WebP from a vendor whose
+ * image endpoint returned one — would be a request the vendor rejects *after* the
+ * scene's credits are committed. A rejected still is skipped and the scene keeps its
+ * textual continuity, which is the same degradation as having no still at all.
+ */
+const VEO_REFERENCE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg"] as const;
+
+/**
+ * Largest still this adapter will inline, before base64.
+ *
+ * **Tally's own guard, not a quoted vendor limit.** The reference-image documentation
+ * does not state a per-image size, and inventing a number and attributing it to the
+ * vendor is exactly what §19 forbids — so this is chosen from what is actually known:
+ * base64 inflates bytes by a third, three stills share one request, and Tally's own
+ * stills are 1080p-to-2K PNGs that land far below this. A still much larger than this
+ * did not come from `executeReferenceImages`, and inlining three of them would build a
+ * multi-megabyte body to be rejected after the scene's credits were committed.
+ *
+ * Skipping is the safe direction: the scene keeps its textual continuity and renders.
+ */
+const VEO_MAX_REFERENCE_BYTES = 6 * 1_048_576;
+
+/**
+ * Whether the *configured* Veo model version accepts reference images.
+ *
+ * `GEMINI_VEO_MODEL` is operator-configurable and the vendor gates this feature on the
+ * model version: Veo 3.1 accepts reference images, Veo 3.1 Lite, Veo 3 and Veo 2 reject
+ * the field. Tally's default (`veo-3.1-generate-preview`) qualifies, but a deployment
+ * that pinned an older version must not have its requests rejected wholesale for
+ * carrying a field that version has never heard of.
+ *
+ * So the capability is declared statically on the model — the matrix describes Tal 3.1,
+ * not one deployment's env — and enforced dynamically here. An operator on Veo 3 gets
+ * textual continuity, which is the documented fallback and exactly what they get today.
+ */
+function veoReferenceModel(model: string): boolean {
+  const id = model.toLowerCase();
+  return id.startsWith("veo-3.1") && !id.includes("lite");
+}
+
+/** One `VideoGenerationReferenceImage`, in the shape the REST API documents. */
+interface VeoReferenceImage {
+  image: { inlineData: { mimeType: string; data: string } };
+  /** The only documented value. Preserves a subject's appearance across the clip. */
+  referenceType: "asset";
+}
+
+/**
+ * Map continuity stills onto Veo's `referenceImages` instance field (§6).
+ *
+ * The vendor takes them inline, base64, *inside the instance* alongside the prompt —
+ * not in `parameters`, and not as a URL the vendor fetches. Sending bytes rather than a
+ * link is also the only option available here: Tally's stills live in a private bucket,
+ * and the alternative would be handing Google a signed URL to storage.
+ *
+ * Deliberately not `imageToVideo`. The instance-level `image` field is a *first frame*
+ * to animate and is a separate feature with separate cost and framing consequences;
+ * this function never populates it, and `capabilities.imageToVideo` stays false.
+ *
+ * Returns the images and the count skipped, so the caller can say which it is when a
+ * scene ends up with fewer references than the continuity layer chose.
+ */
+function veoReferenceImages(
+  references: readonly ReferenceImageInput[],
+): { images: VeoReferenceImage[]; skipped: number } {
+  const usable = references.filter(
+    (reference) =>
+      (VEO_REFERENCE_MIME_TYPES as readonly string[]).includes(
+        reference.mimeType.toLowerCase(),
+      ) &&
+      reference.bytes.byteLength > 0 &&
+      reference.bytes.byteLength <= VEO_MAX_REFERENCE_BYTES,
+  );
+
+  const images = usable.slice(0, VEO_MAX_REFERENCE_IMAGES).map((reference) => ({
+    image: {
+      inlineData: {
+        mimeType: reference.mimeType.toLowerCase() === "image/jpg"
+          ? "image/jpeg"
+          : reference.mimeType.toLowerCase(),
+        data: reference.bytes.toString("base64"),
+      },
+    },
+    referenceType: "asset" as const,
+  }));
+
+  return { images, skipped: references.length - images.length };
+}
+
+const TAL_3_1: VideoGenModel = {
+  id: "tal/3.1",
+  provider: "veo",
+  label: "Tal 3.1 — Ultra Model",
+  description: "Premium generation quality",
+  bestFor: "Hero scenes, premium productions and highest visual quality",
+  strengths: [
+    "Highest visual fidelity available in Tally",
+    "Generates a native audio track with the clip",
+    "Strongest prompt adherence for complex direction",
+    "Also generates 2K reference stills for the continuity engine",
+    "Can be shown a continuity still, not just told about one",
+  ],
+  limitations: [
+    "Highest credit cost per scene",
+    "Eight seconds maximum per clip",
+    "Landscape and portrait only — no square",
+    "Refuses prompts asking for recognisable people",
+    "Uses at most three continuity reference stills per scene",
+  ],
+  maxClipSeconds: 8,
+  formats: ["landscape", "portrait"],
+  premium: true,
+  legacy: false,
+  capabilities: {
+    textToVideo: true,
+    imageToVideo: false,
+    imageGeneration: true,
+    /**
+     * Reference-image input on the endpoint this adapter calls (§6). Tal 3.0 declares the
+     * same capability against its own vendor; nothing here is exclusive to this model.
+     *
+     * Paired with `veo.acceptsReferenceImages`; `assertRegistryIntegrity` fails the
+     * module load if either is set without the other, so this cannot become a claim the
+     * adapter does not honour. The support is model-version-gated at the vendor —
+     * Veo 3.1 only — which `veoReferenceModel()` checks against the configured
+     * `GEMINI_VEO_MODEL` at request time rather than assuming.
+     */
+    referenceImages: true,
+    audio: true,
+    qualities: ["720p", "1080p"],
+    imageQualities: ["1080p", "2k"],
+    durations: [4, 6, 8],
+  },
+};
+
+const veo: GenerationProvider = {
   id: "veo",
-  label: "Veo 3.1",
+  label: "Google AI (Veo and Imagen)",
   requiredEnvVars: ["GEMINI_API_KEY"],
   hint: "Create a key at https://aistudio.google.com/apikey",
   serviceNote:
-    "Veo runs on the Google AI (Gemini) API and needs its own API key. The " +
+    "Runs on the Google AI (Gemini) API and needs its own API key. The " +
     "GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET pair Tally already uses is an OAuth " +
     "client for acting as a user's YouTube channel, granted YouTube scopes at " +
-    "consent; it cannot authenticate Veo and is not reused here. No second " +
-    "Google authentication path is introduced — this is a different credential " +
-    "for a different Google API.",
-  models: [
-    {
-      id: "veo/3.1",
-      provider: "veo",
-      label: "Veo 3.1",
-      description:
-        "Google's highest-fidelity text-to-video, up to 8s with native audio.",
-      maxClipSeconds: 8,
-      formats: ["landscape", "portrait"],
-      premium: true,
-    },
-    {
-      id: "veo/3.1-fast",
-      provider: "veo",
-      label: "Veo 3.1 Fast",
-      description: "Faster, cheaper Veo tier. Up to 8s, lower fidelity.",
-      maxClipSeconds: 8,
-      formats: ["landscape", "portrait"],
-      premium: false,
-    },
-  ],
+    "consent; it cannot authenticate Veo and is not reused here. No second Google " +
+    "authentication path is introduced — this is a different credential for a " +
+    "different Google API, and the video and image halves share it.",
+  models: [TAL_3_1],
+  /**
+   * Signed: `generate` below reads `request.referenceImages` and sends the bytes (§6).
+   *
+   * Paired with `TAL_3_1.capabilities.referenceImages`. Both directions are checked at
+   * module load, so this cannot outlive the code that honours it.
+   */
+  acceptsReferenceImages: true,
   missingEnvVars() {
     return env().GEMINI_API_KEY ? [] : ["GEMINI_API_KEY"];
   },
   async generate(request) {
-    const key = env().GEMINI_API_KEY;
-    if (!key) {
-      throw new NotConfiguredError("Veo", ["GEMINI_API_KEY"], this.hint);
-    }
+    const key = requireKey("Tal 3.1", env().GEMINI_API_KEY, [
+      "GEMINI_API_KEY",
+    ], SETUP_HINT);
 
     const frame = formatSpec(request.format);
     if (frame.format === "square") {
-      // Veo generates 16:9 and 9:16 only. Generating landscape and cropping to a
-      // square would cut the subject out of the shot, so this is refused with the
-      // actual reason rather than silently producing the wrong frame.
       throw new ProviderError(
-        "Veo",
-        "does not generate square video. Choose landscape or portrait, or use " +
-          "stock footage for a square render.",
+        TAL_3_1.label,
+        "does not generate square video. Choose landscape or portrait, or pick a " +
+          "different model.",
         { retryable: false, status: 400 },
       );
     }
 
-    const model = modelIdFor(request.modelId);
-    const seconds = nearest(VEO_DURATIONS, Math.round(request.durationMs / 1000));
+    const quality = assertQuality(TAL_3_1, request.quality);
+    const seconds = nearest(
+      TAL_3_1.capabilities.durations,
+      secondsOf(request.durationMs),
+    );
     const headers = { "x-goog-api-key": key };
 
+    /**
+     * The scene's continuity stills, if this deployment's Veo version takes them (§6).
+     *
+     * `generateClip` has already stripped the field for a model that declares no
+     * support, so a non-empty list here means Tal 3.1 was selected and the continuity
+     * layer chose these entities for this scene. The version check is the remaining
+     * unknown: it is the *operator's* `GEMINI_VEO_MODEL` that decides, not the matrix.
+     */
+    const videoModel = env().GEMINI_VEO_MODEL;
+    const requested = request.referenceImages ?? [];
+    const supportsReferences = veoReferenceModel(videoModel);
+    const { images: referenceImages, skipped } = supportsReferences
+      ? veoReferenceImages(requested)
+      : { images: [] as VeoReferenceImage[], skipped: requested.length };
+
+    if (skipped > 0) {
+      // Never silently: a skipped still means this scene fell back to textual
+      // continuity, and the operator is the only one who can tell whether the cause
+      // is a pinned model version, an unsupported stored format, or simply a cast
+      // larger than three.
+      log.warn("some continuity references were not sent to the vendor", {
+        model: TAL_3_1.id,
+        videoModel,
+        supportsReferences,
+        requested: requested.length,
+        sent: referenceImages.length,
+        skipped,
+      });
+    }
+
     const started = await providerJson<VeoOperation>({
-      provider: "Veo",
-      url: `${GEMINI_API}/models/${model}:predictLongRunning`,
+      provider: TAL_3_1.label,
+      url: `${GEMINI_API}/models/${videoModel}:predictLongRunning`,
       method: "POST",
       headers,
       body: {
-        instances: [{ prompt: request.prompt.slice(0, 1_500) }],
+        instances: [
+          {
+            prompt: request.prompt.slice(0, 1_500),
+            /**
+             * Reference stills go *inside the instance*, beside the prompt — this
+             * vendor does not take them in `parameters`, and the field is omitted
+             * entirely rather than sent empty when there are none.
+             */
+            ...(referenceImages.length > 0 ? { referenceImages } : {}),
+          },
+        ],
         parameters: {
           aspectRatio: frame.ratio,
-          resolution: "1080p",
+          resolution: quality === "720p" ? "720p" : "1080p",
           durationSeconds: String(seconds),
           numberOfVideos: 1,
-          // No recognisable people: a generated likeness in a published video is
-          // a rights problem, and the scene director is already instructed never
-          // to ask for one.
-          personGeneration: "dont_allow",
+          /**
+           * No recognisable people: a generated likeness in a published video is a
+           * rights problem, and the scene director is already instructed never to ask
+           * for one.
+           *
+           * Relaxed to `allow_adult` on the reference-image path, and only there,
+           * because the vendor does not offer the choice: it documents `allow_adult` as
+           * the *only* accepted value once `referenceImages` is present, so
+           * `dont_allow` here would not be a stricter request — it would be a rejected
+           * one, after the scene's credits were already committed.
+           *
+           * What that does and does not concede is worth being exact about. It permits
+           * an adult figure in the frame, which a character reference for a story bible
+           * with human characters obviously requires. It does not introduce a real
+           * likeness: every still Tally sends was drawn by `executeReferenceImages`
+           * from Tally's own story bible, so the subject being preserved is a generated
+           * character, and the scene director still never asks for a named person. The
+           * text-to-video path — every other scene, and every scene on every other
+           * model — is untouched and still sends `dont_allow`.
+           */
+          personGeneration: referenceImages.length > 0 ? "allow_adult" : "dont_allow",
         },
       },
     });
 
     const operation = started.name;
     if (!operation) {
-      throw new ProviderError("Veo", "returned no operation name", {
+      throw new ProviderError(TAL_3_1.label, "returned no operation name", {
         retryable: true,
       });
     }
@@ -735,42 +1847,100 @@ const veo: VideoGenerationProvider = {
     const uri = await awaitVeoOperation(operation, headers);
 
     const asset = await fetchRemoteAsset(uri, {
-      provider: "Veo",
+      provider: TAL_3_1.label,
       maxBytes: MAX_CLIP_BYTES,
       extraHosts: [GEMINI_MEDIA_HOST, ...env().ASSET_FETCH_ALLOWED_HOSTS],
-      // The file lives behind the same API host and needs the key to download.
-      // Veo deletes generated files after two days, which is the other reason
-      // the bytes are fetched now rather than referenced later.
+      // The file lives behind the same API host and needs the key to download. Veo
+      // deletes generated files after two days, which is the other reason the bytes
+      // are fetched now rather than referenced later.
       headers,
     });
 
+    const pixels = qualityFrame(request.format, quality);
     return {
       provider: "veo",
-      modelId: request.modelId,
+      modelId: TAL_3_1.id,
       bytes: asset.bytes,
-      mimeType: asset.contentType.startsWith("video/")
-        ? asset.contentType
-        : "video/mp4",
+      mimeType: videoMime(asset.contentType),
       extension: "mp4",
-      width: frame.width,
-      height: frame.height,
-      durationMs: seconds * 1000,
+      width: pixels.width,
+      height: pixels.height,
+      durationMs: seconds * 1_000,
       providerAssetId: `veo:${operation.split("/").pop() ?? operation}`,
-      license:
-        "Generated by Google Veo under the Tally account's Google AI API terms",
-      attribution: "Generated with Veo",
+      license: brandedLicense(TAL_3_1.label),
+      attribution: brandedAttribution(TAL_3_1.label),
+      matchedOn: request.prompt.slice(0, 120),
+    };
+  },
+  async generateImage(request) {
+    const key = requireKey("Tal 3.1", env().GEMINI_API_KEY, [
+      "GEMINI_API_KEY",
+    ], SETUP_HINT);
+
+    const frame = formatSpec(request.format);
+    const quality = assertImageQuality(TAL_3_1, request.quality);
+
+    const response = await providerJson<ImagenResponse>({
+      provider: TAL_3_1.label,
+      url: `${GEMINI_API}/models/${env().GEMINI_IMAGE_MODEL}:predict`,
+      method: "POST",
+      headers: { "x-goog-api-key": key },
+      body: {
+        instances: [{ prompt: request.prompt.slice(0, 1_500) }],
+        parameters: {
+          sampleCount: 1,
+          aspectRatio: frame.ratio,
+          sampleImageSize: quality === "2k" ? "2K" : "1K",
+          personGeneration: "dont_allow",
+        },
+      },
+    });
+
+    const prediction = response.predictions?.[0];
+    const encoded = prediction?.bytesBase64Encoded;
+    if (!encoded) {
+      // A responsible-AI filter reports success with nothing generated. That is a
+      // refusal, not a fault, and it will refuse again for the same prompt.
+      const filtered = prediction?.raiFilteredReason;
+      throw new ProviderError(
+        TAL_3_1.label,
+        filtered ? `refused the prompt: ${filtered}` : "returned no image",
+        { retryable: false },
+      );
+    }
+
+    const mimeType = imageMime(prediction?.mimeType ?? "image/png");
+    const bytes = Buffer.from(encoded, "base64");
+    if (bytes.byteLength === 0) {
+      throw new ProviderError(TAL_3_1.label, "returned an empty image", {
+        retryable: true,
+      });
+    }
+    if (bytes.byteLength > MAX_IMAGE_BYTES) {
+      throw new ProviderError(TAL_3_1.label, "returned an oversize image", {
+        retryable: false,
+        details: { bytes: bytes.byteLength },
+      });
+    }
+
+    const pixels = qualityFrame(request.format, quality);
+    return {
+      provider: "veo",
+      modelId: TAL_3_1.id,
+      purpose: request.purpose,
+      bytes,
+      mimeType,
+      extension: extensionFor(mimeType),
+      width: pixels.width,
+      height: pixels.height,
+      // Imagen returns the bytes inline with no server-side id to record.
+      providerAssetId: null,
+      license: brandedLicense(TAL_3_1.label),
+      attribution: brandedAttribution(TAL_3_1.label),
       matchedOn: request.prompt.slice(0, 120),
     };
   },
 };
-
-/** Which Veo model id a Tally model id maps to. */
-function modelIdFor(tallyModelId: string): string {
-  if (tallyModelId === "veo/3.1-fast") return "veo-3.1-fast-generate-preview";
-  // The configured default, so a preview rename is a config change rather than a
-  // code change.
-  return env().GEMINI_VEO_MODEL;
-}
 
 /** Poll a Veo long-running operation and return its video URI. */
 async function awaitVeoOperation(
@@ -781,7 +1951,7 @@ async function awaitVeoOperation(
 
   for (;;) {
     const operation = await providerJson<VeoOperation>({
-      provider: "Veo",
+      provider: TAL_3_1.label,
       // The operation name already carries its own path prefix.
       url: `${GEMINI_API}/${operationName}`,
       headers,
@@ -789,7 +1959,7 @@ async function awaitVeoOperation(
 
     if (operation.error) {
       throw new ProviderError(
-        "Veo",
+        TAL_3_1.label,
         `generation failed: ${operation.error.message ?? "unknown reason"}`,
         { retryable: false, details: { operationName } },
       );
@@ -799,14 +1969,10 @@ async function awaitVeoOperation(
       const response = operation.response?.generateVideoResponse;
       const uri = response?.generatedSamples?.[0]?.video?.uri;
       if (!uri) {
-        // A responsible-AI filter reports success with nothing generated. That is
-        // a refusal, not a fault, and it will refuse again for the same prompt.
         const filtered = response?.raiMediaFilteredReasons?.join("; ");
         throw new ProviderError(
-          "Veo",
-          filtered
-            ? `refused the prompt: ${filtered}`
-            : "completed with no video",
+          TAL_3_1.label,
+          filtered ? `refused the prompt: ${filtered}` : "completed with no video",
           { retryable: false, details: { operationName } },
         );
       }
@@ -815,7 +1981,7 @@ async function awaitVeoOperation(
 
     if (Date.now() > deadline) {
       throw new ProviderError(
-        "Veo",
+        TAL_3_1.label,
         `generation did not finish within ${VEO_MAX_WAIT_MS / 1000}s`,
         { retryable: true, details: { operationName } },
       );
@@ -826,7 +1992,7 @@ async function awaitVeoOperation(
 }
 
 // ---------------------------------------------------------------------------
-// Runway (§13, §14) — already integrated, exposed as a selectable AI model
+// Runway — legacy, kept resolvable so saved projects still render (§17)
 // ---------------------------------------------------------------------------
 
 const RUNWAY_API = "https://api.dev.runwayml.com/v1";
@@ -845,38 +2011,58 @@ interface RunwayTask {
 /**
  * Runway, reached the same way `providers/visuals.ts` already reaches it.
  *
- * Present because §14 asks for extensibility and Runway is the provider that is
- * already configured in this project — including it proves the abstraction is not
- * shaped around one vendor. The two calls (still, then animate) are Runway's own
- * requirement: its video models take a first frame rather than text alone.
+ * §2 names four customer-facing models and Runway is not one of them, so its model
+ * is marked `legacy: true` and never appears in a picker (§14: "do not leave dead
+ * model options in the UI"). It stays *resolvable* because a project created in
+ * Phase 11 may hold `runway/gen4-turbo`, and §17 requires that project to still
+ * render. Runway's separate role in the stock/b-roll stage is untouched.
  */
-const runway: VideoGenerationProvider = {
+const RUNWAY_MODEL: VideoGenModel = {
+  id: "runway/gen4-turbo",
+  provider: "runway",
+  label: "Tally AI Video (legacy)",
+  description: "A model selected before Tally's branded models existed.",
+  bestFor: "Existing projects only",
+  strengths: [],
+  limitations: [
+    "No longer offered for new projects — pick a Tal model instead",
+    "Five-second clips only",
+  ],
+  maxClipSeconds: 5,
+  formats: ["landscape", "portrait", "square"],
+  premium: false,
+  legacy: true,
+  capabilities: {
+    textToVideo: true,
+    imageToVideo: false,
+    imageGeneration: false,
+    referenceImages: false,
+    audio: false,
+    imageQualities: [],
+    qualities: ["720p", "1080p"],
+    durations: [5],
+  },
+};
+
+const runway: GenerationProvider = {
   id: "runway",
-  label: "Runway Gen-4",
+  label: "Runway",
   requiredEnvVars: ["RUNWAY_API_KEY"],
   hint: "Create a key at https://dev.runwayml.com",
-  serviceNote: null,
-  models: [
-    {
-      id: "runway/gen4-turbo",
-      provider: "runway",
-      label: "Runway Gen-4 Turbo",
-      description: "5s generated clips. Already used by the b-roll stage.",
-      maxClipSeconds: 5,
-      formats: ["landscape", "portrait", "square"],
-      premium: false,
-    },
-  ],
+  serviceNote:
+    "Retained for projects that selected it before Tally's branded models " +
+    "existed. Runway's role in the stock/b-roll stage is separate and unaffected.",
+  models: [RUNWAY_MODEL],
   missingEnvVars() {
     return env().RUNWAY_API_KEY ? [] : ["RUNWAY_API_KEY"];
   },
   async generate(request) {
-    const key = env().RUNWAY_API_KEY;
-    if (!key) {
-      throw new NotConfiguredError("Runway", ["RUNWAY_API_KEY"], this.hint);
-    }
+    const key = requireKey("Runway", env().RUNWAY_API_KEY, [
+      "RUNWAY_API_KEY",
+    ], SETUP_HINT);
 
     const frame = formatSpec(request.format);
+    const quality = assertQuality(RUNWAY_MODEL, request.quality);
     const ratio = `${frame.width}:${frame.height}`;
     const headers = {
       authorization: `Bearer ${key}`,
@@ -884,6 +2070,7 @@ const runway: VideoGenerationProvider = {
     };
     const prompt = request.prompt.slice(0, 900);
 
+    // Two calls: Runway's video models take a first frame rather than text alone.
     const imageTask = await providerJson<RunwayTask>({
       provider: "Runway",
       url: `${RUNWAY_API}/text_to_image`,
@@ -914,18 +2101,19 @@ const runway: VideoGenerationProvider = {
       extraHosts: env().ASSET_FETCH_ALLOWED_HOSTS,
     });
 
+    const pixels = qualityFrame(request.format, quality);
     return {
       provider: "runway",
-      modelId: request.modelId,
+      modelId: RUNWAY_MODEL.id,
       bytes: asset.bytes,
       mimeType: "video/mp4",
       extension: "mp4",
-      width: frame.width,
-      height: frame.height,
+      width: pixels.width,
+      height: pixels.height,
       durationMs: 5_000,
       providerAssetId: `runway:${videoTask.id}`,
       license: "Generated by Runway under the Tally account's Runway licence",
-      attribution: "Generated with Runway",
+      attribution: "Generated with Tally AI Video",
       matchedOn: prompt.slice(0, 120),
     };
   },
@@ -958,7 +2146,7 @@ async function awaitRunwayTask(
     if (task.status === "FAILED") {
       const detail = task.failure ?? task.failureCode ?? "unknown reason";
       throw new ProviderError("Runway", `generation failed: ${detail}`, {
-        retryable: !/safety|moderation|policy/i.test(detail),
+        retryable: transientDetail(detail),
         details: { taskId },
       });
     }
@@ -976,19 +2164,43 @@ async function awaitRunwayTask(
 }
 
 // ---------------------------------------------------------------------------
-// Mock (§40) — development only
+// Mock — development only
 // ---------------------------------------------------------------------------
+
+const MOCK_MODEL: VideoGenModel = {
+  id: "mock/placeholder",
+  provider: "mock",
+  label: "Placeholder (development)",
+  description: "A solid-colour frame. Not a generated video.",
+  bestFor: "Local development only",
+  strengths: [],
+  limitations: ["Not a video, and not for publication"],
+  maxClipSeconds: 5,
+  formats: ["landscape", "portrait", "square"],
+  premium: false,
+  legacy: false,
+  capabilities: {
+    textToVideo: true,
+    imageToVideo: false,
+    // True so the image path is exercisable in development without a paid call.
+    imageGeneration: true,
+    referenceImages: false,
+    audio: false,
+    qualities: ["draft", "720p", "1080p", "2k"],
+    imageQualities: ["draft", "720p", "1080p", "2k"],
+    durations: [5],
+  },
+};
 
 /**
  * A real PNG at the requested frame, one colour per scene.
  *
  * Only reachable when `TALLY_USE_MOCK_PROVIDERS` is on, which `env.ts` refuses in
  * production. It is honest about what it is: `kind` ends up `generated_image`, the
- * licence says "not for publication", and the model is labelled a placeholder in
- * the picker. §42 forbids claiming a video was generated when it was not, and
- * this claims nothing.
+ * licence says "not for publication", and the model is labelled a placeholder.
+ * Nothing here claims a video was generated when it was not.
  */
-const mock: VideoGenerationProvider = {
+const mock: GenerationProvider = {
   id: "mock",
   label: "Development placeholder",
   requiredEnvVars: [],
@@ -996,22 +2208,13 @@ const mock: VideoGenerationProvider = {
   serviceNote:
     "Produces a solid-colour still, not a video. Development only, and refused " +
     "in production by the environment validator.",
-  models: [
-    {
-      id: "mock/placeholder",
-      provider: "mock",
-      label: "Placeholder (development)",
-      description: "A solid-colour frame. Not a generated video.",
-      maxClipSeconds: 5,
-      formats: ["landscape", "portrait", "square"],
-      premium: false,
-    },
-  ],
+  models: [MOCK_MODEL],
   missingEnvVars() {
     return [];
   },
   async generate(request) {
-    const frame = formatSpec(request.format);
+    const quality = assertQuality(MOCK_MODEL, request.quality);
+    const frame = qualityFrame(request.format, quality);
     const width = Math.round(frame.width / 4);
     const height = Math.round(frame.height / 4);
     const bytes = solidPng({
@@ -1022,7 +2225,7 @@ const mock: VideoGenerationProvider = {
 
     return {
       provider: "mock",
-      modelId: request.modelId,
+      modelId: MOCK_MODEL.id,
       bytes,
       mimeType: "image/png",
       extension: "png",
@@ -1035,21 +2238,185 @@ const mock: VideoGenerationProvider = {
       matchedOn: request.prompt.slice(0, 120),
     };
   },
+  async generateImage(request) {
+    const quality = assertImageQuality(MOCK_MODEL, request.quality);
+    const frame = qualityFrame(request.format, quality);
+    const width = Math.round(frame.width / 4);
+    const height = Math.round(frame.height / 4);
+    const bytes = solidPng({
+      width,
+      height,
+      seed: `img:${request.purpose}:${request.index}:${request.prompt}`,
+    });
+
+    return {
+      provider: "mock",
+      modelId: MOCK_MODEL.id,
+      purpose: request.purpose,
+      bytes,
+      mimeType: "image/png",
+      extension: "png",
+      width,
+      height,
+      providerAssetId: `mock:img:${request.purpose}:${request.index}`,
+      license: "Development placeholder — not for publication",
+      attribution: null,
+      matchedOn: request.prompt.slice(0, 120),
+    };
+  },
 };
+
+// ---------------------------------------------------------------------------
+// Aliases — what a project row from an earlier release resolves to (§17)
+// ---------------------------------------------------------------------------
+
+/**
+ * Model ids that moved, old → new.
+ *
+ * Phase 11 offered ten fal.ai models across six vendors plus two Veo tiers. Phase 12
+ * offers four branded models reached directly. A project row may hold any of the old
+ * ids, and the visuals stage re-resolves a stored id at render time — so dropping an
+ * id would turn a saved project into a failed render (§17).
+ *
+ * Each old id maps to the branded tier backed by the *same vendor* where one exists,
+ * and to the nearest tier otherwise. Kling and Hunyuan have no direct Tally
+ * credential, so they map to the cinematic tier; that is a visible change of model
+ * for those projects, and the alternative — failing the render — is worse.
+ */
+const MODEL_ALIASES: Readonly<Record<string, string>> = {
+  // Alibaba Wan → Tal 1.0, same vendor.
+  "fal/wan-v2-2-a14b": "tal/1.0",
+  // Tencent Hunyuan: no direct credential. Nearest by cost and clip length.
+  "fal/hunyuan-video": "tal/1.0",
+  // MiniMax Hailuo → Tal 2.0, same vendor.
+  "fal/minimax-hailuo-02-pro": "tal/2.0",
+  "fal/minimax-hailuo-02-standard": "tal/2.0",
+  // ByteDance Seedance → Tal 3.0, same vendor.
+  "fal/seedance-1-pro": "tal/3.0",
+  "fal/seedance-1-lite": "tal/3.0",
+  // The pre-catalogue single-model id from the first Phase 11 release.
+  "seedance/v1-pro": "tal/3.0",
+  // Kuaishou Kling: no direct credential. Nearest by intent — cinematic motion.
+  "fal/kling-v2-master": "tal/3.0",
+  "fal/kling-v2-5-turbo-pro": "tal/3.0",
+  // Google Veo → Tal 3.1, same vendor, now billed to Google rather than to fal.
+  "fal/veo3": "tal/3.1",
+  "fal/veo3-fast": "tal/3.1",
+  "veo/3.1": "tal/3.1",
+  "veo/3.1-fast": "tal/3.1",
+};
+
+/**
+ * Provider ids that moved or were never canonical, old → new.
+ *
+ * `fal` is deliberately absent: it is not a member of `VideoGenProviderId` any more
+ * and there is no single provider it could resolve to, so a stale
+ * `VIDEO_GEN_PROVIDERS=fal` warns and is skipped. The vendor-flavoured spellings
+ * below are accepted because an operator reading §2 might reasonably write any of
+ * them.
+ */
+const PROVIDER_ALIASES: Readonly<Record<string, VideoGenProviderId>> = {
+  dashscope: "qwen",
+  wan: "qwen",
+  alibaba: "qwen",
+  ark: "seedance",
+  bytedance: "seedance",
+  gemini: "veo",
+  google: "veo",
+};
+
+/** Resolve a possibly-aliased model id to its current one. */
+function canonicalModelId(modelId: string): string {
+  return MODEL_ALIASES[modelId] ?? modelId;
+}
 
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
-const PROVIDERS: readonly VideoGenerationProvider[] = [fal, veo, runway, mock];
+const PROVIDERS: readonly GenerationProvider[] = [
+  qwen,
+  minimax,
+  seedance,
+  veo,
+  runway,
+  mock,
+];
+
+/**
+ * Fail at load if a provider's declared capabilities and its methods disagree.
+ *
+ * §5 requires the capability resolver to prevent unsupported requests, and §6 requires
+ * continuity references to be reused "where the selected backend supports them". Both
+ * are claims about the matrix being true, and the ways it can silently go false are
+ * mechanical: a model declaring `imageGeneration: true` on a provider with no
+ * `generateImage`, or one declaring `referenceImages: true` on an adapter that never
+ * reads `request.referenceImages`. Checked here rather than in a test, because a test
+ * can be skipped and a module cannot.
+ */
+function assertRegistryIntegrity(): void {
+  for (const provider of PROVIDERS) {
+    const claimsImages = provider.models.some(
+      (model) => model.capabilities.imageGeneration,
+    );
+    if (claimsImages && !provider.generateImage) {
+      throw new Error(
+        `provider ${provider.id} declares image generation but implements none`,
+      );
+    }
+
+    /**
+     * Reference support, checked in both directions.
+     *
+     * A model claiming it without the adapter would charge for stills nobody sends;
+     * an adapter claiming it with no model to use it is a dead branch that reads as a
+     * shipped feature. Neither is allowed to load.
+     */
+    const claimsReferences = provider.models.some(
+      (model) => model.capabilities.referenceImages,
+    );
+    if (claimsReferences && !provider.acceptsReferenceImages) {
+      throw new Error(
+        `provider ${provider.id} declares reference images but its adapter ignores them`,
+      );
+    }
+    if (provider.acceptsReferenceImages && !claimsReferences) {
+      throw new Error(
+        `provider ${provider.id} accepts reference images but no model declares them`,
+      );
+    }
+
+    for (const model of provider.models) {
+      if (model.provider !== provider.id) {
+        throw new Error(`model ${model.id} is registered under ${provider.id}`);
+      }
+      if (model.capabilities.qualities.length === 0) {
+        throw new Error(`model ${model.id} declares no video resolutions`);
+      }
+      if (model.capabilities.imageGeneration === (model.capabilities.imageQualities.length === 0)) {
+        throw new Error(
+          `model ${model.id} disagrees with itself about image resolutions`,
+        );
+      }
+      const longest = Math.max(...model.capabilities.durations);
+      if (model.maxClipSeconds !== longest) {
+        throw new Error(
+          `model ${model.id} says ${model.maxClipSeconds}s but offers ${longest}s`,
+        );
+      }
+    }
+  }
+}
+
+assertRegistryIntegrity();
 
 /**
  * Provider ids the operator has enabled, in priority order.
  *
  * Empty is the normal state for a deployment that has not opted in, and it means
- * link mode offers stock footage only. Mock replaces the list entirely in
- * development, exactly as `visualSources()` does — a development run must not
- * reach a paid generation API by accident.
+ * every project uses stock footage. Mock replaces the list entirely in development,
+ * exactly as `visualSources()` does — a development run must not reach a paid
+ * generation API by accident.
  */
 export function videoGenProviderIds(): VideoGenProviderId[] {
   if (usingMockProviders()) return ["mock"];
@@ -1060,16 +2427,16 @@ export function videoGenProviderIds(): VideoGenProviderId[] {
     const id = raw.trim().toLowerCase();
     if (!id) continue;
 
-    // A deprecated name resolves to its replacement rather than warning: an
-    // operator who wrote `seedance` before the fal catalogue existed should get
-    // the fal provider, not an empty picker.
     const canonical = PROVIDER_ALIASES[id] ?? id;
 
     if (!known.has(canonical as VideoGenProviderId) || canonical === "mock") {
+      // Includes `fal`, removed as a video route in §14. Warned about and skipped
+      // so a stale environment line degrades to "no AI video" rather than taking
+      // the deployment down.
       log.warn("unknown provider in VIDEO_GEN_PROVIDERS", { provider: id });
       continue;
     }
-    // De-duplicated, so `seedance,fal` enables one provider and not two.
+    // De-duplicated, so `wan,qwen` enables one provider and not two.
     if (!resolved.includes(canonical as VideoGenProviderId)) {
       resolved.push(canonical as VideoGenProviderId);
     }
@@ -1078,16 +2445,46 @@ export function videoGenProviderIds(): VideoGenProviderId[] {
   return resolved;
 }
 
+/**
+ * Every credential the currently-enabled providers need, de-duplicated.
+ *
+ * Exists so `providers/config.ts` can answer "which variables must this deployment
+ * set for AI video?" by asking the registry rather than by keeping its own
+ * provider→variable if-chain. That chain drifted the moment §14 replaced the
+ * aggregator: it still mapped `seedance` to the aggregator's key, so an operator
+ * following the banner would have set a revoked credential and got no video and no
+ * explanation.
+ *
+ * Operator-facing, like `videoGenStatuses()` — variable names, never values, and
+ * never sent to the customer-facing picker (§3).
+ */
+export function videoGenRequiredEnvVars(): string[] {
+  const enabled = videoGenProviderIds();
+  const names = new Set<string>();
+  for (const provider of PROVIDERS) {
+    if (!enabled.includes(provider.id)) continue;
+    for (const name of provider.requiredEnvVars) names.add(name);
+  }
+  return [...names];
+}
+
 /** True when at least one AI video provider is enabled *and* configured. */
 export function isVideoGenConfigured(): boolean {
   return videoGenStatuses().some((s) => s.state === "ready" || s.state === "mock");
 }
 
+/** True when at least one enabled, configured model can generate images (§5). */
+export function isImageGenConfigured(): boolean {
+  return imageModels().length > 0;
+}
+
 /**
- * Configuration state of every enabled provider (§20).
+ * Configuration state of every enabled provider.
  *
- * Names and states only. Safe to return from an API route: there is no code path
- * here that reads a credential's value, only whether it is set.
+ * Names and states only. There is no code path here that reads a credential's
+ * value, only whether it is set — but it *does* carry vendor names, so it is
+ * operator-facing and §3 keeps it out of the customer UI. `/api/video/providers`
+ * sends `providerReadiness()` instead.
  */
 export function videoGenStatuses(): VideoGenProviderStatus[] {
   const enabled = videoGenProviderIds();
@@ -1115,11 +2512,11 @@ export function videoGenStatuses(): VideoGenProviderStatus[] {
 }
 
 /**
- * Every provider Tally knows how to call, enabled or not (§20).
+ * Every provider Tally knows how to call, enabled or not.
  *
- * The operator-facing view: a provider that is implemented but switched off shows
- * as `disabled` rather than vanishing, so "we do not offer this" and "this is
- * broken" are distinguishable in the verification script and the settings screen.
+ * The operator-facing view: a provider that is implemented but switched off shows as
+ * `disabled` rather than vanishing, so "we do not offer this" and "this is broken"
+ * are distinguishable in the verification script and the settings screen.
  */
 export function allVideoGenStatuses(): VideoGenProviderStatus[] {
   const enabled = videoGenProviderIds();
@@ -1149,18 +2546,74 @@ export function allVideoGenStatuses(): VideoGenProviderStatus[] {
 }
 
 /**
- * Models a client may actually select (§10).
+ * Models a client may actually select.
  *
- * Enabled *and* configured. A model whose provider is missing its key is
- * deliberately absent from this list rather than present-but-flagged, because a
- * flagged model is one careless render away from being selected. The unconfigured
- * state is still reported — by `providerStatuses()`, which the UI shows as a
- * configuration notice — so nothing is hidden from the operator.
+ * Enabled *and* configured *and* not legacy. A model whose provider is missing its
+ * key is deliberately absent rather than present-but-flagged, because a flagged
+ * model is one careless render away from being selected. The unconfigured state is
+ * still reported — by `providerReadiness()`, which the UI shows as a configuration
+ * notice — so nothing is hidden from the operator.
  */
 export function availableModels(): VideoGenModel[] {
   return videoGenStatuses()
     .filter((status) => status.state === "ready" || status.state === "mock")
-    .flatMap((status) => status.models);
+    .flatMap((status) => status.models)
+    .filter((model) => !model.legacy);
+}
+
+/** Selectable models that can generate stills (§5). */
+export function imageModels(): VideoGenModel[] {
+  return availableModels().filter(
+    (model) => model.capabilities.imageGeneration,
+  );
+}
+
+/**
+ * The customer-facing projection of a model (§3).
+ *
+ * `provider` is dropped, not renamed. §3 forbids exposing the underlying provider
+ * in the normal customer UI, and the reliable way to honour that is for the object
+ * the API serialises not to contain the field at all — a UI cannot render what it
+ * was never sent, and a future component cannot start rendering it by accident.
+ * Backend logs, `api_usage` and the operator status report keep it.
+ */
+export type PublicModel = Omit<VideoGenModel, "provider">;
+
+export function publicModel(model: VideoGenModel): PublicModel {
+  const { provider: _provider, ...rest } = model;
+  return rest;
+}
+
+export function publicModels(): PublicModel[] {
+  return availableModels().map(publicModel);
+}
+
+/**
+ * Aggregate readiness, with no vendor names (§3).
+ *
+ * What the customer-facing picker needs to distinguish "this deployment does not
+ * offer AI video" from "AI video is misconfigured — contact support", without
+ * learning which company Tally buys generation from. The variable-naming detail an
+ * operator needs stays in `allVideoGenStatuses()`, which only operator surfaces and
+ * the verification scripts read.
+ */
+export interface ProviderReadiness {
+  /** Enabled providers that have their credentials. */
+  ready: number;
+  /** Enabled providers still missing a credential — an operator action. */
+  awaitingConfiguration: number;
+  /** True when the development placeholder is in use. */
+  placeholder: boolean;
+}
+
+export function providerReadiness(): ProviderReadiness {
+  const statuses = videoGenStatuses();
+  return {
+    ready: statuses.filter((s) => s.state === "ready").length,
+    awaitingConfiguration: statuses.filter((s) => s.state === "not_configured")
+      .length,
+    placeholder: statuses.some((s) => s.state === "mock"),
+  };
 }
 
 export interface ResolvedModel {
@@ -1169,26 +2622,24 @@ export interface ResolvedModel {
 }
 
 /**
- * Validate a client-supplied model id (§10, §21).
+ * Validate a client-supplied model id.
  *
- * The single choke point. Three failures, three different errors, because they
- * mean three different things to the caller:
+ * The single choke point. Three failures, three different errors, because they mean
+ * three different things to the caller:
  *
- *  - unknown id            -> `ValidationError`-shaped 400 via `ProviderError`
- *    with status 400. The client sent something that does not exist.
- *  - known but disabled    -> the same, because as far as this deployment is
- *    concerned it does not exist. Reporting "disabled" would confirm the
- *    existence of a provider the operator chose not to offer.
+ *  - unknown id             -> `ProviderError` with status 400. The client sent
+ *    something that does not exist.
+ *  - known but disabled     -> the same, because as far as this deployment is
+ *    concerned it does not exist. Reporting "disabled" would confirm the existence
+ *    of a provider the operator chose not to offer.
  *  - enabled, no credential -> `NotConfiguredError` naming the variable, which is
  *    the operator's problem and is reported as a 503 configuration state.
  *
- * That ordering is what §10's "a client must not be able to request an
- * unconfigured provider simply by manipulating the request" reduces to in code.
+ * That ordering is what "a client must not be able to request an unconfigured
+ * provider simply by manipulating the request" reduces to in code. A `legacy` model
+ * resolves normally: it is not offered, but a project that stored it must render.
  */
 export function resolveModel(modelId: string): ResolvedModel {
-  // A stored id from an earlier release maps to its current model first, so a
-  // project saved against `seedance/v1-pro` resolves instead of failing its render
-  // (§10 re-resolves at render time, which is what makes this matter).
   const canonical = canonicalModelId(modelId);
   const provider = PROVIDERS.find((p) =>
     p.models.some((m) => m.id === canonical),
@@ -1213,17 +2664,109 @@ export function resolveModel(modelId: string): ResolvedModel {
 
   const missing = provider.missingEnvVars();
   if (missing.length > 0) {
-    throw new NotConfiguredError(provider.label, missing, provider.hint);
+    // Named for the *model*, not the vendor. A `NotConfiguredError` is a 503 that
+    // reaches a user, so §3 applies to it: `provider.label` would put "Volcengine
+    // Ark" in front of a customer. The variable names stay, because they are the
+    // actionable fact and §2 names them itself; the vendor's console URL does not,
+    // because it is operator information and `allVideoGenStatuses()` already
+    // carries it for the surfaces operators actually read.
+    throw new NotConfiguredError(model.label, missing, SETUP_HINT);
   }
 
   return { model, provider: provider.id };
 }
 
 /**
+ * Validate a model id for an *image* request (§5).
+ *
+ * "Where a model does not support image generation, the capability resolver must
+ * prevent unsupported requests." This is that resolver: same three failures as
+ * `resolveModel`, plus a fourth for a model that exists and is configured but
+ * cannot produce a still.
+ */
+export function resolveImageModel(modelId: string): ResolvedModel {
+  const resolved = resolveModel(modelId);
+  if (!resolved.model.capabilities.imageGeneration) {
+    throw new ProviderError(
+      "Image generation",
+      `"${resolved.model.label}" does not generate images. Choose a model that does.`,
+      { retryable: false, status: 400 },
+    );
+  }
+  return resolved;
+}
+
+/**
+ * The requested resolution, checked against what the model declares (§4).
+ *
+ * Null means "no preference" and resolves to the shared default, then goes through
+ * the same check — so a caller that omits quality on a model without a 1080p tier
+ * gets that model's nearest supported tier rather than a rejected request. An
+ * *explicit* unsupported request is refused, because silently downgrading a
+ * selection the user made and was quoted a credit price for would be worse.
+ */
+export function assertQuality(
+  model: VideoGenModel,
+  requested: VideoQuality | null | undefined,
+): VideoQuality {
+  return checkQuality(model, model.capabilities.qualities, requested, "video");
+}
+
+export function assertImageQuality(
+  model: VideoGenModel,
+  requested: VideoQuality | null | undefined,
+): VideoQuality {
+  return checkQuality(
+    model,
+    model.capabilities.imageQualities,
+    requested,
+    "image",
+  );
+}
+
+function checkQuality(
+  model: VideoGenModel,
+  supported: readonly VideoQuality[],
+  requested: VideoQuality | null | undefined,
+  kind: "video" | "image",
+): VideoQuality {
+  if (supported.length === 0) {
+    throw new ProviderError(
+      "Image generation",
+      `"${model.label}" does not generate images.`,
+      { retryable: false, status: 400 },
+    );
+  }
+
+  if (requested == null) {
+    const fallback = qualitySpec(null).quality;
+    if (supported.includes(fallback)) return fallback;
+    // Nearest supported tier, preferring the lower one so an absent choice never
+    // silently costs more than the default would have.
+    return [...supported].sort(
+      (a, b) =>
+        Math.abs(qualityRank(a) - qualityRank(fallback)) -
+        Math.abs(qualityRank(b) - qualityRank(fallback)),
+    )[0] as VideoQuality;
+  }
+
+  if (!supported.includes(requested)) {
+    throw new ProviderError(
+      model.label,
+      `does not generate ${kind} at ${qualitySpec(requested).label}. ` +
+        `Supported: ${supported.map((q) => qualitySpec(q).label).join(", ")}.`,
+      { retryable: false, status: 400 },
+    );
+  }
+
+  return requested;
+}
+
+/**
  * Generate one clip.
  *
- * Re-resolves the model rather than trusting the caller's, so a stored model id
- * that was valid when a project was created is re-checked against the current
+ * Re-resolves the model rather than trusting the caller's, so a stored model id that
+ * was valid when a project was created is re-checked against the current
  * configuration before any money is spent. Usage is recorded through the same
  * `withUsage` accounting every other provider uses.
  */
@@ -1232,10 +2775,26 @@ export async function generateClip(
   options: GenerateOptions,
 ): Promise<GeneratedClip> {
   const { model, provider: providerId } = resolveModel(request.modelId);
-  const provider = PROVIDERS.find((p) => p.id === providerId);
-  if (!provider) {
-    throw new ProviderError("Video generation", "provider disappeared", {
-      retryable: false,
+  const provider = providerFor(providerId);
+
+  /**
+   * References are dropped, loudly, for a model that cannot use them (§6).
+   *
+   * Dropped rather than refused, because the caller is the visuals stage and the
+   * alternative to a reference-constrained clip is a textually-constrained one — which
+   * is the documented fallback and a working video. Failing the scene would turn a
+   * capability the project does not have into a build error.
+   *
+   * Warned rather than ignored, because a stage that keeps sending references nothing
+   * reads is paying to generate stills for no consumer, and that is invisible unless
+   * something says so.
+   */
+  const references = request.referenceImages ?? [];
+  if (references.length > 0 && !model.capabilities.referenceImages) {
+    log.warn("dropping reference images: model does not accept them", {
+      model: model.id,
+      provider: provider.id,
+      count: references.length,
     });
   }
 
@@ -1246,8 +2805,16 @@ export async function generateClip(
    * `generate` and the usage row all see the id that actually ran. Leaving the
    * alias in place would record spend against a model id that no longer exists in
    * the catalogue, which makes per-model cost reporting quietly wrong.
+   *
+   * The reference list is normalised the same way: a provider's `generate` sees the
+   * field only when its own model declares support, so an adapter cannot accidentally
+   * come to depend on a field the matrix says it does not get.
    */
-  const normalised: GenerateClipRequest = { ...request, modelId: model.id };
+  const normalised: GenerateClipRequest = {
+    ...request,
+    modelId: model.id,
+    referenceImages: model.capabilities.referenceImages ? references : undefined,
+  };
 
   return withUsage(
     {
@@ -1264,17 +2831,129 @@ export async function generateClip(
   );
 }
 
+/**
+ * Generate one still (§5).
+ *
+ * Deliberately the same shape as `generateClip`: same resolver, same normalisation,
+ * same accounting, same provider objects. §5 forbids "a separate disconnected image
+ * architecture", and the way to comply is for image generation to be a second method
+ * on one registry rather than a second registry.
+ */
+export async function generateImage(
+  request: GenerateImageRequest,
+  options: GenerateOptions,
+): Promise<GeneratedImage> {
+  const { model, provider: providerId } = resolveImageModel(request.modelId);
+  const provider = providerFor(providerId);
+
+  if (!provider.generateImage) {
+    // Unreachable: `assertRegistryIntegrity` refuses to load a registry where a
+    // model claims image generation and its provider implements none.
+    throw new ProviderError("Image generation", "is not implemented", {
+      retryable: false,
+      status: 400,
+    });
+  }
+  const generateOne = provider.generateImage.bind(provider);
+
+  const normalised: GenerateImageRequest = { ...request, modelId: model.id };
+
+  return withUsage(
+    {
+      provider: provider.id,
+      operation: options.usage.operation ?? "image-gen.still",
+      userId: options.usage.userId ?? null,
+      projectId: options.usage.projectId ?? null,
+      jobId: options.usage.jobId ?? null,
+      traceId: options.usage.traceId ?? null,
+      model: model.id,
+    },
+    () => generateOne(normalised),
+    (image) => ({ quantity: image.bytes.byteLength, unit: "bytes" }),
+  );
+}
+
+function providerFor(id: VideoGenProviderId): GenerationProvider {
+  const provider = PROVIDERS.find((p) => p.id === id);
+  if (!provider) {
+    throw new ProviderError("Video generation", "provider disappeared", {
+      retryable: false,
+    });
+  }
+  return provider;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /**
+ * Read a credential or refuse, naming the variable rather than the vendor.
+ *
+ * The customer-facing name is passed in — a `NotConfiguredError` reaches a user, and
+ * §3 keeps vendor names out of what a user sees. The *variable* names are the point
+ * of the message and are not vendor branding.
+ */
+function requireKey(
+  label: string,
+  value: string | undefined,
+  vars: string[],
+  hint: string,
+): string {
+  if (!value) throw new NotConfiguredError(label, vars, hint);
+  return value;
+}
+
+/** Licence text for a branded generation. */
+function brandedLicense(label: string): string {
+  return `Generated by ${label} under the Tally account's generation terms`;
+}
+
+/** Attribution text. Names the Tally model, never the vendor behind it (§3). */
+function brandedAttribution(label: string): string {
+  return `Generated with ${label}`;
+}
+
+/** Seconds, floored at one — a zero-length request is a caller bug, not a clip. */
+function secondsOf(durationMs: number): number {
+  const seconds = Math.round(durationMs / 1_000);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 1;
+}
+
+function videoMime(contentType: string): string {
+  return contentType.startsWith("video/") ? contentType : "video/mp4";
+}
+
+function imageMime(contentType: string): string {
+  return contentType.startsWith("image/") ? contentType : "image/png";
+}
+
+function extensionFor(mimeType: string): string {
+  if (mimeType === "image/jpeg" || mimeType === "image/jpg") return "jpg";
+  if (mimeType === "image/webp") return "webp";
+  return "png";
+}
+
+/**
+ * Whether a vendor's failure detail is worth another attempt.
+ *
+ * A content-policy refusal refuses identically next time, so retrying spends money
+ * to learn nothing. Anything else — a transient worker fault, a queue eviction — is
+ * worth one more attempt. Shared by all four adapters so they classify alike.
+ */
+function transientDetail(detail: string): boolean {
+  return !/safety|moderation|policy|content|sensitive|violat|prohibit/i.test(
+    detail,
+  );
+}
+
+/**
  * The supported duration closest to what the scene wants.
  *
- * A clamp is not enough for the fal.ai catalogue: Kling offers 5s and 10s and
- * nothing between, and a request for 7 is rejected rather than rounded, so the
- * choice has to be made here. A non-finite input falls through to the first
- * option — the shortest, and therefore the cheapest thing to be wrong about.
+ * A clamp is not enough: Tal 2.0 offers 6s and 10s and nothing between, and a
+ * request for 7 is rejected rather than rounded, so the choice has to be made here.
+ * A non-finite input falls through to the first option — the shortest, and therefore
+ * the cheapest thing to be wrong about.
  */
 function nearest(options: readonly number[], value: number): number {
   let best = options[0] ?? 0;

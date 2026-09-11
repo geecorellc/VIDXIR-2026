@@ -13,6 +13,10 @@
 import { bedrockRegion, env, usingMockProviders } from "@/lib/env";
 import { hasFfmpeg } from "@/lib/media/ffmpeg";
 import { FONT_HINT, hasThumbnailFont } from "@/lib/media/fonts";
+import {
+  videoGenProviderIds,
+  videoGenRequiredEnvVars,
+} from "@/lib/providers/video-gen";
 
 export type Capability =
   | "ai"
@@ -165,28 +169,35 @@ const SPECS: Spec[] = [
     // rest of this table has.
     provider: () => {
       if (usingMockProviders()) return "mock";
-      const list = env().VIDEO_GEN_PROVIDERS;
+      // The *resolved* ids, not the raw environment line: an alias is reported
+      // under the name it resolves to, and an id §14 retired is absent rather than
+      // being listed as though this deployment offered it.
+      const list = videoGenProviderIds();
       // "stock" is not a provider in the AI sense — it is the absence of one, and
       // saying so is more honest than reporting `not_configured` for a deployment
       // that deliberately offers stock footage only.
       return list.length > 0 ? list.join("+") : "stock";
     },
-    required: (p) => {
-      const names: string[] = [];
-      // "seedance" is the pre-catalogue name for the fal provider and still
-      // resolves to it, so either spelling requires the same key.
-      if (p.includes("fal") || p.includes("seedance")) names.push("FAL_KEY");
-      if (p.includes("veo")) names.push("GEMINI_API_KEY");
-      if (p.includes("runway")) names.push("RUNWAY_API_KEY");
-      return names;
-    },
+    /**
+     * Asked of the registry rather than matched against the provider string.
+     *
+     * The previous if-chain mapped `seedance` to `FAL_KEY`, which was true while
+     * every model came through the aggregator and became wrong the moment §14
+     * replaced it — an operator following this banner would have set a revoked key,
+     * got no video, and had nothing to read. Each provider already declares its own
+     * `requiredEnvVars`, so deriving the list means the banner cannot drift from
+     * what the generation path actually reads.
+     */
+    required: () => videoGenRequiredEnvVars(),
     hint:
-      "Set VIDEO_GEN_PROVIDERS to any of fal,veo,runway. `fal` offers the whole " +
-      "fal.ai catalogue — Seedance, Kling, Hailuo, Hunyuan, Wan and Veo 3 — on " +
-      "one key (https://fal.ai/dashboard/keys); `veo` calls Google's own Gemini " +
-      "API and needs a Google AI key (https://aistudio.google.com/apikey), which " +
-      "is separate from the YouTube OAuth client; `runway` uses the existing " +
-      "RUNWAY_API_KEY.",
+      "Set VIDEO_GEN_PROVIDERS to any of qwen,minimax,seedance,veo,runway — the " +
+      "four backends behind Tally's own video models, plus Runway. Each needs one " +
+      "key: DASHSCOPE_API_KEY (https://bailian.console.aliyun.com), " +
+      "MINIMAX_API_KEY (https://platform.minimaxi.chat), SEEDANCE_API_KEY " +
+      "(https://console.volcengine.com/ark), GEMINI_API_KEY " +
+      "(https://aistudio.google.com/apikey — a Google AI key, separate from the " +
+      "YouTube OAuth client), RUNWAY_API_KEY. `fal` was retired in Phase 12 and " +
+      "enables nothing.",
   },
   {
     capability: "music",

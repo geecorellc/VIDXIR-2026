@@ -44,10 +44,46 @@ const MAX_AUDIO_BYTES = 25 * 1_048_576;
 /** ElevenLabs rejects a request over 5,000 characters on most plans. */
 export const MAX_SEGMENT_CHARS = 4_800;
 
+/**
+ * Provider-independent voice tuning, as the continuity layer expresses it.
+ *
+ * Structurally identical to `CharacterVoice.settings` in the story bible, and
+ * declared here rather than imported from it on purpose: this module is the provider
+ * adapter, and it must not depend on the continuity layer any more than the
+ * continuity layer may depend on it. The caller passes a plain struct; each branch
+ * below translates the fields its own vendor understands and ignores the rest.
+ */
+export interface VoiceTuning {
+  stability?: number | null;
+  similarity?: number | null;
+  styleIntensity?: number | null;
+  speed?: number | null;
+}
+
 export interface VoiceSegmentRequest {
   /** Matches `scenes.index`, so the caller can map results back. */
   sceneIndex: number;
   text: string;
+  /**
+   * The voice this one segment must be spoken in, overriding the batch voice.
+   *
+   * How voice continuity reaches the provider. Per segment rather than per batch
+   * because a video with two characters has two voices in one voiceover stage, and a
+   * batch-level id cannot express that — which is why the whole feature needed this
+   * field rather than a second call per character.
+   *
+   * Absent or null means "use the batch voice", which is what every existing caller
+   * passes and why this is additive: a request with no per-segment voice behaves
+   * byte-identically to the one this interface accepted before.
+   */
+  voiceId?: string | null;
+  /**
+   * Tuning for this segment's voice, overriding the batch tuning.
+   *
+   * Only consulted when it is set. A segment naming a voice but no tuning gets the
+   * batch tuning, so a character voice does not silently lose the project's speed.
+   */
+  tuning?: VoiceTuning | null;
 }
 
 export interface VoiceSegmentResult {
@@ -56,17 +92,34 @@ export interface VoiceSegmentResult {
   durationMs: number;
   bytes: Buffer;
   charactersBilled: number;
+  /**
+   * The voice id this segment was actually requested with.
+   *
+   * Reported rather than assumed, so the caller can record what was used instead of
+   * what it asked for. That distinction is what lets the continuity check compare the
+   * audio as produced against the bible, rather than comparing the bible with itself.
+   *
+   * `null` for a silent segment, which was never sent to a provider at all.
+   */
+  voiceId: string | null;
 }
 
 export interface SynthesizeOptions {
   segments: readonly VoiceSegmentRequest[];
-  /** Provider voice id from `channel_settings.voice_provider_voice_id`. */
+  /**
+   * Provider voice id from `channel_settings.voice_provider_voice_id`.
+   *
+   * The project's voice, and the fallback for any segment that does not name one of
+   * its own. Still the only voice on a project without character voices.
+   */
   voiceId?: string | null;
   /** BCP-47 tag; ElevenLabs infers language from the text but logs this. */
   language?: string | null;
   /** 0.5–2.0. Applied by the provider where supported. */
   speed?: number | null;
   style?: string | null;
+  /** Batch-level tuning, overridden per segment where a segment sets its own. */
+  tuning?: VoiceTuning | null;
   usage: Omit<UsageContext, "provider" | "operation"> & { operation?: string };
   /**
    * Called after each segment's audio exists, with the number completed.
@@ -81,6 +134,13 @@ export interface SynthesizeOptions {
 
 export interface SynthesizeResult {
   provider: string;
+  /**
+   * The batch voice — the project's, or the provider default.
+   *
+   * Still the row-level value for `voiceovers.voice_id`, and still correct as one:
+   * on a project with per-character voices it is the voice every unassigned scene
+   * used. Which voice each individual scene used is on its own segment.
+   */
   voiceId: string;
   voiceName: string | null;
   mimeType: string;
@@ -119,6 +179,11 @@ function requireConfigured(): void {
  * accounts and the retry costs more wall-clock than the sequence saved. It also
  * keeps `charactersBilled` honest when a later segment fails: the caller learns
  * what was actually spent.
+ *
+ * A segment may name its own voice, which is how character voice continuity reaches
+ * a provider. Resolution is per segment and entirely local — the segment's voice, or
+ * the batch's, or the provider default — so the caller decides the identity and this
+ * function only ever translates one.
  */
 export async function synthesize(
   options: SynthesizeOptions,
@@ -126,7 +191,7 @@ export async function synthesize(
   requireConfigured();
 
   const provider = voiceProviderName();
-  const voiceId = options.voiceId?.trim() || DEFAULT_VOICE_ID;
+  const batchVoiceId = options.voiceId?.trim() || DEFAULT_VOICE_ID;
 
   const segments: VoiceSegmentResult[] = [];
   const total = options.segments.length;
@@ -140,6 +205,7 @@ export async function synthesize(
         durationMs: 0,
         bytes: Buffer.alloc(0),
         charactersBilled: 0,
+        voiceId: null,
       });
       await options.onSegment?.(segments.length, total);
       continue;
@@ -150,6 +216,17 @@ export async function synthesize(
         `Scene ${segment.sceneIndex + 1} has ${text.length} characters of narration, over the ${MAX_SEGMENT_CHARS}-character limit for a single request.`,
       );
     }
+
+    /**
+     * This segment's voice.
+     *
+     * A trimmed, non-empty per-segment id wins; anything else falls back to the
+     * batch voice. Falling back rather than erroring is what keeps a project whose
+     * bible names a voice for one character and not another working: the unvoiced
+     * scenes get the project's voice, which is the voice they would have had anyway.
+     */
+    const voiceId = segment.voiceId?.trim() || batchVoiceId;
+    const tuning = segment.tuning ?? options.tuning ?? null;
 
     const result = await withUsage(
       {
@@ -163,12 +240,13 @@ export async function synthesize(
       },
       () =>
         provider === "mock"
-          ? mockSegment(segment.sceneIndex, text)
+          ? mockSegment(segment.sceneIndex, text, voiceId)
           : elevenLabsSegment({
               sceneIndex: segment.sceneIndex,
               text,
               voiceId,
-              speed: options.speed ?? 1,
+              speed: tuning?.speed ?? options.speed ?? 1,
+              tuning,
             }),
       (r) => ({ quantity: r.charactersBilled, unit: "characters" }),
     );
@@ -180,6 +258,17 @@ export async function synthesize(
   const totalDurationMs = segments.reduce((sum, s) => sum + s.durationMs, 0);
   const charactersBilled = segments.reduce((sum, s) => sum + s.charactersBilled, 0);
 
+  /**
+   * How many distinct voices this batch used.
+   *
+   * Logged rather than asserted: on a project with character voices this is the one
+   * number that says whether per-scene voices reached the provider at all, and it is
+   * a count of requests actually made rather than of intentions.
+   */
+  const voices = new Set(
+    segments.map((segment) => segment.voiceId).filter((id): id is string => id !== null),
+  );
+
   log.info("voiceover synthesized", {
     provider,
     userId: options.usage.userId ?? undefined,
@@ -187,11 +276,12 @@ export async function synthesize(
     segments: segments.length,
     durationMs: totalDurationMs,
     charactersBilled,
+    voices: voices.size,
   });
 
   return {
     provider,
-    voiceId: provider === "mock" ? "mock-voice" : voiceId,
+    voiceId: provider === "mock" ? "mock-voice" : batchVoiceId,
     voiceName: provider === "mock" ? "Mock voice" : DEFAULT_VOICE_NAME,
     mimeType: provider === "mock" ? "audio/wav" : "audio/mpeg",
     extension: provider === "mock" ? "wav" : "mp3",
@@ -205,13 +295,46 @@ export async function synthesize(
 // ElevenLabs
 // ---------------------------------------------------------------------------
 
+/**
+ * ElevenLabs' own defaults for the two settings it always requires.
+ *
+ * Named rather than inline so the fallback is visible: a character voice that tunes
+ * neither gets exactly what every Tally voiceover got before voice continuity
+ * existed, which is what makes the tuning additive.
+ */
+const ELEVENLABS_DEFAULT_STABILITY = 0.5;
+const ELEVENLABS_DEFAULT_SIMILARITY = 0.75;
+
 async function elevenLabsSegment(input: {
   sceneIndex: number;
   text: string;
   voiceId: string;
   speed: number;
+  tuning: VoiceTuning | null;
 }): Promise<VoiceSegmentResult> {
   const e = env();
+
+  /**
+   * The provider-agnostic tuning, translated.
+   *
+   * This is the whole of §4's division of labour: the continuity layer says
+   * "similarity 0.9", and the only code that knows the field is called
+   * `similarity_boost` is here. `styleIntensity` maps to ElevenLabs' `style`, which
+   * its v2 models accept and older ones ignore — sending it is harmless, and omitting
+   * it when unset keeps the request identical to the pre-continuity one.
+   */
+  const voiceSettings: Record<string, number> = {
+    stability: clamp01(input.tuning?.stability ?? ELEVENLABS_DEFAULT_STABILITY),
+    similarity_boost: clamp01(
+      input.tuning?.similarity ?? ELEVENLABS_DEFAULT_SIMILARITY,
+    ),
+    // Clamped to the documented range; a value outside it is a 422.
+    speed: Math.min(1.2, Math.max(0.7, input.speed)),
+  };
+
+  if (input.tuning?.styleIntensity !== null && input.tuning?.styleIntensity !== undefined) {
+    voiceSettings["style"] = clamp01(input.tuning.styleIntensity);
+  }
 
   const { bytes } = await providerBytes(
     {
@@ -224,12 +347,7 @@ async function elevenLabsSegment(input: {
       body: {
         text: input.text,
         model_id: e.ELEVENLABS_MODEL_ID,
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          // Clamped to the documented range; a value outside it is a 422.
-          speed: Math.min(1.2, Math.max(0.7, input.speed)),
-        },
+        voice_settings: voiceSettings,
       },
       // A 90-second ceiling is not enough for a long paragraph on a busy account.
       timeoutMs: 180_000,
@@ -242,7 +360,14 @@ async function elevenLabsSegment(input: {
     durationMs: mp3DurationMs(bytes, input.text),
     bytes,
     charactersBilled: input.text.length,
+    voiceId: input.voiceId,
   };
+}
+
+/** 0–1, so a tuning value out of range is clamped rather than sent as a 422. */
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0.5;
+  return Math.min(1, Math.max(0, value));
 }
 
 /**
@@ -344,6 +469,7 @@ function parseMp3Duration(buffer: Buffer): number | null {
 async function mockSegment(
   sceneIndex: number,
   text: string,
+  voiceId: string,
 ): Promise<VoiceSegmentResult> {
   const words = text.split(/\s+/).filter(Boolean).length;
   const durationMs = Math.max(700, Math.round((words / WORDS_PER_MINUTE) * 60_000));
@@ -356,5 +482,14 @@ async function mockSegment(
     durationMs: wavDurationMs(bytes),
     bytes,
     charactersBilled: text.length,
+    /**
+     * The voice the mock was asked for, reported back verbatim.
+     *
+     * Not `"mock-voice"`. The mock exists so the pipeline can be exercised without
+     * spending quota, and a mock that discarded the requested voice id would make
+     * every voice-continuity test pass by accident — the one thing under test is
+     * whether the right id reaches the provider.
+     */
+    voiceId,
   };
 }

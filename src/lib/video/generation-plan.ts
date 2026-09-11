@@ -25,23 +25,44 @@
  * `generationMode` null is a pre-Phase-11 project, and it resolves to stock in
  * landscape, which is exactly what it would have rendered before.
  */
+import { imagePriceFor, scenePriceFor, BASE_SECONDS } from "@/lib/credits/pricing";
 import { ProviderError, ValidationError } from "@/lib/errors";
 import { requireFeature, hasFeature } from "@/lib/plans/enforce";
 import type { PlanTier } from "@/lib/plans";
 import {
+  assertQuality,
   availableModels,
   isGenerationMode,
+  publicModel,
   resolveModel,
   type GenerationMode,
+  type PublicModel,
   type VideoGenModel,
 } from "@/lib/providers/video-gen";
 import { formatSpec, type FormatSpec, type VideoFormat } from "@/lib/video/format";
+import {
+  DEFAULT_VIDEO_QUALITY,
+  isVideoQuality,
+  qualitySpec,
+  videoQualities,
+  type QualitySpec,
+  type VideoQuality,
+} from "@/lib/video/quality";
 
 export interface GenerationPlan {
   mode: GenerationMode;
   /** The frame every stage targets. Landscape when the project chose none. */
   format: VideoFormat;
   spec: FormatSpec;
+  /**
+   * The resolution to ask the model for (§4).
+   *
+   * Meaningful only in AI mode — stock footage arrives at whatever size the library
+   * holds, and the renderer already scales it. Resolved against the chosen model's
+   * declared support, so a project holding a quality the model does not offer fails
+   * here with a readable reason rather than at the vendor.
+   */
+  quality: VideoQuality;
   /** Null in STOCK mode. */
   model: VideoGenModel | null;
 }
@@ -51,6 +72,8 @@ export interface GenerationChoice {
   generationMode: string | null;
   generationModel: string | null;
   videoFormat: string | null;
+  /** Null for any project created before §4 added the choice. */
+  videoQuality?: string | null;
 }
 
 /**
@@ -68,7 +91,13 @@ export function generationPlanFor(choice: GenerationChoice): GenerationPlan {
     : "STOCK";
 
   if (mode === "STOCK") {
-    return { mode, format: spec.format, spec, model: null };
+    return {
+      mode,
+      format: spec.format,
+      spec,
+      quality: DEFAULT_VIDEO_QUALITY,
+      model: null,
+    };
   }
 
   if (!choice.generationModel) {
@@ -94,7 +123,19 @@ export function generationPlanFor(choice: GenerationChoice): GenerationPlan {
     );
   }
 
-  return { mode, format: spec.format, spec, model };
+  /**
+   * Re-checked here for the same reason the model is: a project can hold a quality
+   * that was valid when it was selected and is not any more — the operator swapped
+   * the configured model version, or the project was moved to a different model.
+   * `assertQuality` accepts null and returns the model's nearest supported tier, so
+   * a pre-§4 project resolves without a stored value.
+   */
+  const quality = assertQuality(
+    model,
+    isVideoQuality(choice.videoQuality) ? choice.videoQuality : null,
+  );
+
+  return { mode, format: spec.format, spec, quality, model };
 }
 
 /**
@@ -119,12 +160,15 @@ export interface ValidatedSelection {
   generationMode: GenerationMode;
   generationModel: string | null;
   videoFormat: VideoFormat;
+  /** Null in STOCK mode, where resolution is not a choice the user makes. */
+  videoQuality: VideoQuality | null;
 }
 
 export function validateSelection(input: {
   mode: string;
   model?: string | null;
   format?: string | null;
+  quality?: string | null;
   /** The caller's plan, read server-side from their subscription. Never from the body. */
   tier: PlanTier;
 }): ValidatedSelection {
@@ -145,10 +189,21 @@ export function validateSelection(input: {
         { field: "model" },
       );
     }
+    if (input.quality) {
+      // Same reasoning as the model above: dropping a field the user set is how a
+      // UI ends up showing a selection that was never saved. Stock resolution is
+      // whatever the library holds.
+      throw new ValidationError(
+        "Generation quality applies to AI video only. Stock footage uses the " +
+          "highest rendition available.",
+        { field: "quality" },
+      );
+    }
     return {
       generationMode: "STOCK",
       generationModel: null,
       videoFormat: spec.format,
+      videoQuality: null,
     };
   }
 
@@ -161,10 +216,21 @@ export function validateSelection(input: {
     throw new ValidationError("Choose a video model.", { field: "model" });
   }
 
+  if (input.quality && !isVideoQuality(input.quality)) {
+    // Rejected rather than coerced to the default: §12 quotes a credit cost from
+    // the resolution, so accepting an unrecognised value would charge for a
+    // resolution the user never chose.
+    throw new ValidationError(
+      `"${String(input.quality).slice(0, 24)}" is not a generation quality.`,
+      { field: "quality" },
+    );
+  }
+
   const plan = generationPlanFor({
     generationMode: "AI_VIDEO",
     generationModel: input.model,
     videoFormat: spec.format,
+    videoQuality: input.quality ?? null,
   });
 
   if (plan.model?.premium) {
@@ -175,6 +241,10 @@ export function validateSelection(input: {
     generationMode: "AI_VIDEO",
     generationModel: plan.model?.id ?? null,
     videoFormat: spec.format,
+    // `generationPlanFor` already refused an explicit quality the model does not
+    // support, so this is the resolved value rather than the requested one — which
+    // is what gets stored, and therefore what the cost preview must have quoted.
+    videoQuality: plan.quality,
   };
 }
 
@@ -201,9 +271,57 @@ export interface GenerationModeOption {
   locked: boolean;
 }
 
-export interface GenerationModelOption extends VideoGenModel {
+/**
+ * One model as the picker sees it (§3, §4).
+ *
+ * Built on `PublicModel`, so the vendor behind the model is *absent* rather than
+ * omitted-by-convention — §3 forbids exposing the underlying provider, and a type
+ * that cannot hold the field is the enforceable version of that.
+ *
+ * `qualities` is the §4 resolution list narrowed to what this model declares, with
+ * the label and description each option needs, so the picker renders "do not show an
+ * option the model does not support" by iterating rather than by filtering. Duration
+ * and aspect-ratio options come from `capabilities.durations` and `formats`, which
+ * `PublicModel` already carries.
+ */
+/**
+ * One resolution option, with what choosing it costs (§20).
+ *
+ * `QualitySpec` says what the tier *is*; these two numbers say what it costs on this
+ * model. Both come from `credits/pricing` — the same pure function the charge path and
+ * the refund path call — so the figure the picker shows is by construction the figure
+ * that will be billed. §20 requires the customer to see the cost before generating, and
+ * a separately-maintained display price is how a UI ends up quoting one number and
+ * charging another.
+ *
+ * Per *quality* rather than per model, because the multiplier is the whole point of the
+ * choice: 2K is 3.5× draft on the same model, and a single headline price would hide
+ * the one comparison the resolution row exists to support.
+ */
+export interface QualityPriceOption extends QualitySpec {
+  /** Credits for one `BASE_SECONDS` scene at this resolution. */
+  sceneCredits: number;
+  /** Credits for one still at this resolution, where the model draws them (§5). */
+  imageCredits: number | null;
+}
+
+export interface GenerationModelOption extends PublicModel {
   /** True when the model is configured but the plan does not include it. */
   locked: boolean;
+  /** Resolution options this model actually offers, ascending (§4), priced (§20). */
+  qualities: QualityPriceOption[];
+  /** The one marked "⭐ Recommended", or the nearest this model supports. */
+  defaultQuality: VideoQuality;
+  /**
+   * The headline figure next to the model name: one scene at its default resolution.
+   *
+   * A single comparable number across models, which is what a customer choosing
+   * between Tal 1.0 and Tal 3.1 actually wants. The per-quality figures above are the
+   * detail behind it.
+   */
+  sceneCredits: number;
+  /** The seconds `sceneCredits` buys, so the UI can say "per 5s scene" honestly. */
+  sceneSeconds: number;
 }
 
 export interface GenerationOptions {
@@ -211,16 +329,48 @@ export interface GenerationOptions {
   models: GenerationModelOption[];
   /** Configured *and* included in the plan — i.e. the AI mode is actually usable. */
   aiAvailable: boolean;
+  /**
+   * Every quality Tally knows, for rendering a consistent control.
+   *
+   * The *per-model* list is the authority on what is selectable; this exists so the
+   * UI can show an unsupported tier as unavailable rather than making options
+   * appear and disappear as the user compares models.
+   */
+  qualities: QualitySpec[];
 }
 
 export function generationOptions(tier: PlanTier): GenerationOptions {
   const aiAllowed = hasFeature(tier, "aiVideoGeneration");
   const premiumAllowed = hasFeature(tier, "premiumVideoModels");
 
-  const models: GenerationModelOption[] = availableModels().map((model) => ({
-    ...model,
-    locked: !aiAllowed || (model.premium && !premiumAllowed),
-  }));
+  const models: GenerationModelOption[] = availableModels().map((model) => {
+    // Not `DEFAULT_VIDEO_QUALITY` directly: a model without a 1080p tier needs a
+    // default it can actually generate, and `assertQuality(model, null)` is the same
+    // resolution the backend would perform for an absent choice.
+    const defaultQuality = assertQuality(model, null);
+
+    return {
+      ...publicModel(model),
+      locked: !aiAllowed || (model.premium && !premiumAllowed),
+      qualities: model.capabilities.qualities.map((quality) => ({
+        ...qualitySpec(quality),
+        sceneCredits: scenePriceFor(model.id, quality),
+        /**
+         * Null rather than a number for a model that cannot draw stills.
+         *
+         * `imagePriceFor` would happily return a price for any id, and quoting one for
+         * a model whose `imageGeneration` capability is false would advertise a
+         * capability `resolveImageModel` refuses (§5, §16).
+         */
+        imageCredits: model.capabilities.imageGeneration
+          ? imagePriceFor(model.id, quality)
+          : null,
+      })),
+      defaultQuality,
+      sceneCredits: scenePriceFor(model.id, defaultQuality),
+      sceneSeconds: BASE_SECONDS,
+    };
+  });
 
   return {
     modes: [
@@ -236,12 +386,13 @@ export function generationOptions(tier: PlanTier): GenerationOptions {
         mode: "AI_VIDEO",
         label: "AI video",
         description:
-          "Each scene generated from its description by a video model. Slower, " +
-          "and costs more per video.",
+          "Each scene generated from its description by a Tally AI video model. " +
+          "Slower, and costs more credits per video.",
         locked: !aiAllowed,
       },
     ],
     models,
     aiAvailable: aiAllowed && models.some((model) => !model.locked),
+    qualities: videoQualities(),
   };
 }

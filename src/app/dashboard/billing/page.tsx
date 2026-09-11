@@ -9,6 +9,7 @@
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { BillingPanel } from "@/components/billing/BillingPanel";
+import { CreditPanel } from "@/components/billing/CreditPanel";
 import { SectionHeader } from "@/components/ui/SectionHeader";
 import { getSession } from "@/lib/auth/session";
 import { currentTier } from "@/lib/api/guard";
@@ -77,6 +78,24 @@ export default async function BillingPage() {
         ]}
         billingProvider={availability.provider}
       />
+
+      {/*
+        Credits, below the plan (§7, §8, §11, §20).
+
+        Its own client component with its own fetch, deliberately: the balance is not a
+        property of the subscription and it moves between page loads every time a worker
+        charges for a scene, so it needs a refresh that is not a navigation. Nothing is
+        passed down — `GET /api/credits` authenticates the caller itself and reads the
+        balance server-side, so there is no figure here that a prop could contradict.
+      */}
+      <div style={{ marginTop: 32 }}>
+        <SectionHeader
+          eyebrow="Credits"
+          title="Credits & usage"
+          sub="Credits are spent per generated scene and per generated image. Your plan includes an allowance each month, and top-ups never expire."
+        />
+        <CreditPanel />
+      </div>
     </div>
   );
 }

@@ -671,18 +671,38 @@ so a developer's worker wakes up to hundreds of jobs it can never complete.
 
 ### What the test suite cannot check
 
-Both of these hid real defects behind a green run, so they have their own
-verification scripts. Neither is a substitute for the suite; they cover the gap
-the suite has by construction.
+`vitest.config.ts` aliases `server-only` away, so a module graph that could never boot
+passes green — that gap hid real defects twice, once behind 541 passing tests. Every
+script below runs with no aliases, in a real Node process, against real
+infrastructure. None is a substitute for the suite; each covers something the suite
+cannot reach by construction.
 
 ```bash
-npm run verify:worker       # the standalone worker boots and runs a job
-npm run verify:providers    # one real call per configured provider
-npm run verify:automation   # the scheduler's queries, cadence maths and publish queue
-npm run verify:billing      # the billing schema, idempotency index and HMAC
-npm run verify:analytics    # the analytics schema, revenue precision and experiment policy
-npm run verify:hardening    # the sixteen production safety invariants
+npm run verify:worker           # the standalone worker boots and runs a job
+npm run verify:automation       # the scheduler's queries, cadence maths and publish queue
+npm run verify:billing          # the billing schema, idempotency index and HMAC
+npm run verify:analytics        # the analytics schema, revenue precision and experiment policy
+npm run verify:hardening        # the sixteen production safety invariants
+npm run verify:video-providers  # the video model layer is honest about what it can do
+npm run verify:credits          # the ledger, the prices and the money, end to end
+npm run verify:editor           # a real project opens, edits, saves and exports to MP4
+npm run verify:continuity       # the continuity check and regeneration stages really run
+npm run verify:abandoned-source # a never-analysed source id reaches no screen
 ```
+
+All ten are free: they reach this deployment's own Postgres, Redis and MinIO, and no
+paid API. Three of them prove it rather than promise it — `credits` and `continuity`
+audit `api_usage` at the end to show no billable call was made, and `video-providers`
+asserts against its own source that it contains no network call, upload, publication or
+database write at all. One script is different:
+
+```bash
+npm run verify:providers    # one real call per configured provider — SPENDS MONEY
+```
+
+`verify:providers` is the only script here that bills anything. It is also the only
+one that can answer "does this key work", which is why it exists — but run it
+deliberately, not as part of a sweep.
 
 **`verify:worker`** runs the worker's boot path in a real Node process: env,
 BullMQ, Postgres, the provider layer, and one deterministic `maintenance` job
@@ -742,8 +762,11 @@ Two of those are checked structurally rather than by import, and deliberately.
 uuid pattern and the Redis Lua window out of their own source and exercises those —
 a change to the real ones changes what it proves — and audits every route file for
 the guard, validation and rate-limit calls it must make. That static audit is the
-stronger check anyway: it covers all 39 routes rather than whichever one a runtime
-probe happened to touch, so a route added later without a guard fails the script.
+stronger check anyway: it covers every route under `src/app/api` rather than whichever
+one a runtime probe happened to touch, so a route added later without a guard fails the
+script. The count is discovered rather than fixed — 52 at the time of writing, and the
+script prints the figure it found, along with how many are session-guarded, have their
+mutations rate-limited and validate their bodies with zod.
 
 The production guards run in child `tsx` processes, because proving them in-process
 would mean setting `NODE_ENV=production` and poisoning every later step. A fresh
@@ -755,6 +778,106 @@ this deployment's own Postgres and Redis; every write is namespaced and removed 
 `finally`, so a failed run leaves nothing behind either. Where a dependency is
 genuinely absent it reports `NOT_CONFIGURED` and names what was therefore not proven
 — currently only the client-bundle scan, which needs a `npm run build` first.
+
+**`verify:video-providers`** asks a different question of the video layer than
+`verify:providers` does, because the obvious one is not askable: §24 forbids a live
+generation request, and one premium clip costs real money. So instead of "does the
+credential work", it proves the layer **tells the truth about what it can do and
+refuses everything else** — which is where this layer's failures actually live, and
+they are all quiet ones. A provider that reports itself ready without a key produces a
+500 after the user has waited through scripting. A registry that accepts an unknown
+model id interpolates a client string into a vendor URL. A picker payload carrying a
+credential leaks it to every browser that opens the page. None of those fail a unit
+test that mocks the environment; all are visible to a process reading the real one.
+
+Fifteen checks. Steps 1–10 run with mocks *off* — the honest reading of a deployment
+that has configured nothing — and 11–13 turn them on, since that is the only way to
+exercise the generation path for free. Two are worth naming: step 5 audits the source
+for a vendor name in any customer-facing label and for any client string reaching a
+request path, and step 6 refuses an undeclared resolution rather than snapping it to a
+supported one. Step 15 asserts against this script's own source that it performs no
+network call, upload, publication, database write or child process.
+
+**`verify:credits`** proves the money and the numbers agree, in a real process against
+real Postgres. Sixteen checks: every plan's included credits ascend with price, every
+model the *live* registry resolves has an explicit price at every quality, a charge
+lowers the balance by exactly the figure a picker would have quoted, a replay charges
+nothing, an unaffordable charge is refused with a 402 naming no vendor and writing no
+row, **eight concurrent charges against a balance of three spend exactly three**, a
+refund returns what was charged however many times it is called, and the ledger
+reconciles against the balance after every one of those.
+
+It is free because it charges for generations that never happen — the credit service
+takes no provider argument and reaches no network. Step 14 calls
+`completeCreditPurchase` directly, handed a session id and a payment status exactly as
+a verified webhook event would hand it one, so a top-up is exercised with no Stripe
+call anywhere in the file. Step 16 audits `api_usage` afterwards to prove the run was
+inert. Everything it writes belongs to two fixture tenants, reset at the start of each
+run — including `credit_purchases`, whose unique session key made an earlier version
+single-use.
+
+**`verify:editor`** runs the editor against a real generated project, in fifteen checks
+built around **one real export** — save → export → `RENDER_JOB` → real Worker → real
+ffmpeg → MP4 — after which it asserts the resulting file is playable and that its own
+header duration reflects the edit. In between, every gesture the UI dispatches (move, trim,
+split, duplicate, delete, text, volume, undo, redo) is the same `applyOperation` call
+the components make, a stale save and a malformed save are both refused without
+touching the row, and another tenant can neither open nor save the cut.
+
+`RENDER_PROVIDER` resolves to `ffmpeg`, so the export is a local encode: no provider
+call, no quota, nothing published. It reads the source project's rows, duplicates them
+under a fixture user, and edits the *copy* — so the real project's status, renders and
+`project_edits` are never touched, which step 7 asserts rather than assumes, and the
+copy is a genuine second tenant, which is what makes the isolation checks real.
+
+What it does not prove is the browser layer — that pointer capture drags, that
+`<video>` seeks, that the rAF clock advances. There is no browser driver in this repo,
+so those are reported as hand-checked rather than claimed.
+
+**`verify:continuity`** proves the two continuity stages really run through the shipped
+`HANDLERS` map and a real BullMQ `Worker`, against real Postgres, Redis and MinIO. The
+suites cover the arithmetic and the persistence; what nothing under vitest can prove is
+that the registry those two new entries live in can be loaded by the process that
+consumes the queue. Eighteen checks: the check scores a video a `fail`, the verdict
+lands in `quality_checks`, regeneration is enqueued **for exactly the failed scenes**,
+each repointed scene gets a new asset and an incremented counter while the untouched
+scene is left alone, and the project never leaves `VIDEO_READY` — continuity cannot
+fail a paid render.
+
+Three of them are about cost, and they are the reason the script is worth running: a
+re-check reads the constraints the redraw actually carried, so the repaired scenes pass
+and **nothing is re-billed**; a further re-run with no regeneration between scores
+identically (§12's determinism, end to end, on inputs that genuinely did not move); and
+the regeneration ceiling refuses a further attempt and spends nothing.
+
+Mocks are forced on at module scope, so each regeneration is a PNG synthesised
+in-process — step 1 asserts that rather than assuming it, and a later step audits
+`api_usage` to prove no real backend was reached. The planner is deliberately *not*
+exercised: `planContinuity` reaches a model through `generateJson` and `lib/providers/ai`
+has no mock branch, so calling it would be a real billable request. The bible and scene
+states are seeded directly instead.
+
+**`verify:abandoned-source`** answers a question a fixture cannot: "is that raw video id
+still on my screen?" The distinction it enforces is *a user submitted a URL* ≠ *Tally
+successfully analysed the source* — `projects.source_video_id` is written the moment a
+link is pasted, before any worker runs, so its presence proves the first and never the
+second. It loads real rows through the same server functions the pages call —
+`getProject`, `getLinkStudioData`, `getStageContext`, `buildBrief`, `buildScriptPrompt`,
+`getOverview` — and scans what comes back, including the exact prop expression each page
+evaluates and the fully rendered provider prompt, which is the one path where this bug
+reached a model rather than a screen.
+
+It audits every channel-less link-seeded project by default, or one named on the
+command line:
+
+```bash
+npx tsx scripts/verify-abandoned-source.ts <project-id>
+```
+
+Read-only and free: it opens no queue, enqueues nothing and writes no row, asserted at
+the end by re-reading `updated_at` and comparing it to what was read first. It does not
+rewrite the offending rows either — the fix is in the reads, because §9 asks for the
+failure history to be preserved.
 
 ### Why lint, not `server-only`
 

@@ -412,6 +412,17 @@ export interface DirectSceneInput {
   title: string;
   niche: string | null;
   videoStyle: string | null;
+  /**
+   * Continuity direction from the story bible, or omitted.
+   *
+   * Optional, and the empty case is the pre-continuity behaviour byte for byte: the
+   * block is only added to the prompt when it is non-empty, so a project without a
+   * bible sends exactly the request it always sent. Built by
+   * `lib/continuity/prompt.plannerContext` — the director is told the cast and the
+   * agreed look so it can direct *into* them rather than inventing a new subject per
+   * scene.
+   */
+  continuity?: string | null;
   usage: {
     userId: string;
     projectId: string;
@@ -445,11 +456,26 @@ export async function directScenes(
     )
     .join("\n\n");
 
+  const continuity = input.continuity?.trim() ?? "";
+
   const prompt = [
     `Video title: ${input.title}`,
     input.niche ? `Channel niche: ${input.niche}` : null,
     input.videoStyle ? `Visual style: ${input.videoStyle}` : null,
     "",
+    // Before the scene list, unlike the per-scene continuity block: the director is
+    // choosing subjects, so it needs the cast and the look before it reads the first
+    // beat rather than after the last.
+    continuity
+      ? [
+          "This video has an established look and cast. Direct every scene to fit",
+          "them — name a character when they are on screen, and keep the stated",
+          "medium and palette in every shot.",
+          "",
+          continuity,
+          "",
+        ].join("\n")
+      : null,
     `Plan the visuals for these ${input.scenes.length} scenes.`,
     "Return exactly one direction per scene, using the same indices.",
     "",

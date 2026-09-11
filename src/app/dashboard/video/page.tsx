@@ -11,8 +11,11 @@
  */
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
+import { ContinuityPanel } from "@/components/video/ContinuityPanel";
 import { VideoStudio } from "@/components/video/VideoStudio";
 import { SectionHeader } from "@/components/ui/SectionHeader";
+import { currentTier } from "@/lib/plans/enforce";
+import { continuityView, type ContinuityView } from "@/lib/continuity/read";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db";
 import { assets } from "@/lib/db/schema";
@@ -45,6 +48,7 @@ export default async function VideoPage({
   ];
 
   const videoUrl = await resolveVideoUrl(userId, context.render?.outputAssetId ?? null);
+  const continuity = project ? await resolveContinuity(userId, project.id) : null;
 
   return (
     <div>
@@ -57,6 +61,7 @@ export default async function VideoPage({
             : "Every asset generated and cut together automatically."
         }
       />
+      {continuity && <ContinuityPanel view={continuity} />}
       <VideoStudio
         projectId={project?.id ?? null}
         status={project?.status ?? null}
@@ -75,6 +80,28 @@ export default async function VideoPage({
       />
     </div>
   );
+}
+
+/**
+ * Load the continuity view, or nothing.
+ *
+ * Swallowed on failure rather than propagated: continuity is an additive panel on a
+ * screen whose job is to show a build, and §22's rule that continuity must never break
+ * the pipeline applies just as much to the page that displays it. A missing panel is a
+ * missing panel; a thrown error here would be a blank video screen.
+ */
+async function resolveContinuity(
+  userId: string,
+  projectId: string,
+): Promise<ContinuityView | null> {
+  try {
+    return await continuityView(userId, projectId, await currentTier(userId));
+  } catch (error) {
+    logger
+      .child({ component: "video-page", userId })
+      .warn("continuity_view_failed", { error });
+    return null;
+  }
 }
 
 /**

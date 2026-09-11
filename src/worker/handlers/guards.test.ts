@@ -40,6 +40,7 @@ vi.mock("@/lib/db", () => {
 const executeResearchRun = vi.fn();
 const executeScriptGeneration = vi.fn();
 const executeScenePlan = vi.fn();
+const executeSceneRegeneration = vi.fn();
 const executePublish = vi.fn();
 const forgetUploadProgress = vi.fn();
 
@@ -51,10 +52,20 @@ vi.mock("@/lib/scripts/service", () => ({
   SCRIPT_JOB_NAME: "script-generate",
   executeScriptGeneration: (...a: unknown[]) => executeScriptGeneration(...a),
 }));
+/**
+ * Every stage name the registry reads, including the two continuity stages.
+ *
+ * A missing name here does not fail loudly at the mock — it registers a handler
+ * under the key `undefined`, so the stage silently disappears from `videoHandlers`
+ * and the guard tests for it stop running. Hence the whole list.
+ */
 vi.mock("@/lib/video/service", () => ({
   SCENE_PLAN_JOB: "video-scene-plan",
   VOICEOVER_JOB: "video-voiceover",
   VISUALS_JOB: "video-visuals",
+  CONTINUITY_JOB: "video-continuity-check",
+  SCENE_REGEN_JOB: "video-scene-regenerate",
+  REFERENCE_IMAGES_JOB: "video-reference-images",
   MUSIC_JOB: "video-music",
   CAPTIONS_JOB: "video-captions",
   TIMELINE_JOB: "video-timeline",
@@ -62,6 +73,9 @@ vi.mock("@/lib/video/service", () => ({
   executeScenePlan: (...a: unknown[]) => executeScenePlan(...a),
   executeVoiceover: vi.fn(),
   executeVisuals: vi.fn(),
+  executeContinuityCheck: vi.fn(),
+  executeReferenceImages: vi.fn(),
+  executeSceneRegeneration: (...a: unknown[]) => executeSceneRegeneration(...a),
   executeMusic: vi.fn(),
   executeCaptions: vi.fn(),
   executeTimeline: vi.fn(),
@@ -89,11 +103,13 @@ function ctx(payload: Record<string, unknown>) {
   return { jobId: JOB_ID, payload, traceId: "trace", attempt: 1 };
 }
 
-const scenePlan = () => {
-  const handler = videoHandlers["video-scene-plan"];
-  if (!handler) throw new Error("scene plan handler is not registered");
+const stage = (name: string) => {
+  const handler = videoHandlers[name];
+  if (!handler) throw new Error(`${name} handler is not registered`);
   return handler;
 };
+
+const scenePlan = () => stage("video-scene-plan");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -120,6 +136,55 @@ describe.each([
     run: () => scenePlan()(ctx({ projectId: PROJECT_ID, tier: "studio" })),
     row: { userId: USER_ID, projectId: PROJECT_ID },
     badPayload: () => scenePlan()(ctx({})),
+    mismatched: { userId: USER_ID, projectId: CHANNEL_ID },
+  },
+  {
+    /**
+     * The continuity check is a stage like any other, and gets the same guards.
+     * Worth stating explicitly: it reads a project's story bible and scene states,
+     * so a handler that took the payload's `userId` would read another tenant's
+     * bible (§20).
+     */
+    label: "continuity check",
+    run: () =>
+      stage("video-continuity-check")(ctx({ projectId: PROJECT_ID, tier: "studio" })),
+    row: { userId: USER_ID, projectId: PROJECT_ID },
+    badPayload: () => stage("video-continuity-check")(ctx({})),
+    mismatched: { userId: USER_ID, projectId: CHANNEL_ID },
+  },
+  {
+    /**
+     * Scene regeneration has its own payload schema, so its guards are a separate
+     * code path rather than the shared one — and it is the stage that spends money
+     * on a mistake, since a regeneration is a paid generation.
+     */
+    label: "scene regeneration",
+    run: () =>
+      stage("video-scene-regenerate")(
+        ctx({ projectId: PROJECT_ID, tier: "studio", sceneIndex: 3 }),
+      ),
+    row: { userId: USER_ID, projectId: PROJECT_ID },
+    // No `sceneIndex`: required rather than defaulted, because defaulting to zero
+    // would rebuild the wrong scene at full price.
+    badPayload: () =>
+      stage("video-scene-regenerate")(ctx({ projectId: PROJECT_ID, tier: "studio" })),
+    mismatched: { userId: USER_ID, projectId: CHANNEL_ID },
+  },
+  {
+    /**
+     * Reference stills spend one paid generation per bible entity, so a guard that
+     * failed open here would bill a tenant for illustrating somebody else's cast —
+     * and store the results against their project.
+     *
+     * The ordinary payload and therefore the shared guard path: which entities get
+     * drawn is read from the stored bible inside the stage, never taken from the job
+     * message.
+     */
+    label: "reference stills",
+    run: () =>
+      stage("video-reference-images")(ctx({ projectId: PROJECT_ID, tier: "studio" })),
+    row: { userId: USER_ID, projectId: PROJECT_ID },
+    badPayload: () => stage("video-reference-images")(ctx({})),
     mismatched: { userId: USER_ID, projectId: CHANNEL_ID },
   },
   {
@@ -196,6 +261,25 @@ describe("authority comes from the job row", () => {
 
     expect(executeScenePlan).toHaveBeenCalledWith(
       expect.objectContaining({ tier: "starter", userId: USER_ID }),
+    );
+  });
+
+  it("regenerates the requested scene for the row's user, not the payload's", async () => {
+    rowsFor.mockReturnValue([{ userId: USER_ID, projectId: PROJECT_ID }]);
+    executeSceneRegeneration.mockResolvedValue({ regenerated: true });
+
+    await stage("video-scene-regenerate")(
+      ctx({
+        projectId: PROJECT_ID,
+        sceneIndex: 3,
+        userId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      }),
+    );
+
+    // The scene index does come from the payload — it is the one thing the job
+    // carries that the row cannot supply — but the owner does not.
+    expect(executeSceneRegeneration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID, projectId: PROJECT_ID, sceneIndex: 3 }),
     );
   });
 

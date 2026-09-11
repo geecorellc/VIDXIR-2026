@@ -14,6 +14,29 @@ import type { NextConfig } from "next";
  * `*` (it still forbids http and data:) and wider than we would like. Setting
  * `S3_ENDPOINT` or `CSP_IMG_ORIGINS` tightens it to exact hosts.
  */
+/**
+ * YouTube's own image hosts, which are not derivable from any variable.
+ *
+ * The source-analysis panel and the channel list display a thumbnail straight from
+ * YouTube's CDN — deliberately, because Tally must not fetch, store or re-encode
+ * another creator's media (§22), so the URL goes to the browser and the bytes never
+ * touch a Tally server. That design only works if the browser is allowed to load it:
+ * with these absent, `img-src` was `'self' data: blob:` plus the storage origin, and
+ * every source thumbnail and channel avatar was blocked by our own policy and rendered
+ * broken. The panel looked like it had failed to analyse the video when in fact it had.
+ *
+ * Constants rather than an env var, because they are a property of YouTube rather than
+ * of a deployment: `i.ytimg.com` serves video thumbnails, `yt3.ggpht.com` and
+ * `yt3.googleusercontent.com` serve channel avatars. An operator should not have to
+ * discover them to make a core screen display correctly. `CSP_IMG_ORIGINS` remains the
+ * place for deployment-specific hosts like a CDN.
+ */
+const YOUTUBE_IMAGE_ORIGINS = [
+  "https://i.ytimg.com",
+  "https://yt3.ggpht.com",
+  "https://yt3.googleusercontent.com",
+] as const;
+
 function imageOrigins(): string[] {
   const origins = new Set<string>();
   for (const raw of [
@@ -72,7 +95,15 @@ function contentSecurityPolicy(): string {
     `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"}`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
-    `img-src 'self' data: blob: ${imageOrigins().join(" ")}`,
+    /**
+     * YouTube's hosts are added to `img-src` only, not to `media-src`.
+     *
+     * Tally displays a remote *thumbnail*; it never plays remote video or audio. Listing
+     * these under `media-src` would permit a `<video src="https://…youtube…">` that
+     * nothing in the app creates, and §22's line is that source media is never
+     * fetched — so the narrower directive is the one that matches what the code does.
+     */
+    `img-src 'self' data: blob: ${[...imageOrigins(), ...YOUTUBE_IMAGE_ORIGINS].join(" ")}`,
     // blob: covers the rendered-video preview element.
     `media-src 'self' blob: ${imageOrigins().join(" ")}`,
     "connect-src 'self'",

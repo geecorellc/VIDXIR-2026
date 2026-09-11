@@ -26,7 +26,17 @@ import { logger } from "@/lib/logger";
 
 const log = logger.child({ component: "storage" });
 
-/** Kinds of object Tally stores, used to build readable keys. */
+/**
+ * Kinds of object Tally stores, used to build readable keys.
+ *
+ * `reference` is its own folder rather than more objects under `visual`, and the
+ * reason is lifecycle rather than tidiness. A visual is one scene's footage: it is
+ * superseded when that scene is regenerated and is a candidate for expiry once the
+ * project is rendered. A continuity reference still is the opposite — it is read by
+ * every later scene and by the human reviewing the cast, so it outlives the visuals
+ * made from it. Sharing a prefix would mean any retention rule written for one silently
+ * applies to the other.
+ */
 export type StorageFolder =
   | "voiceover"
   | "visual"
@@ -35,6 +45,7 @@ export type StorageFolder =
   | "video"
   | "thumbnail"
   | "poster"
+  | "reference"
   | "upload";
 
 let client: S3Client | undefined;

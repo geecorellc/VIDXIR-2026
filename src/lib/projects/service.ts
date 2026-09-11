@@ -54,6 +54,8 @@ export interface ProjectRecord {
   generationMode: string | null;
   generationModel: string | null;
   videoFormat: string | null;
+  /** Phase 12 §4. Null means "resolve the model's own default", not "1080p". */
+  videoQuality: string | null;
   /** The pasted video this project was seeded from — provenance only (§22). */
   sourceVideoId: string | null;
   createdAt: Date;
@@ -80,6 +82,7 @@ const COLUMNS = {
   generationMode: projects.generationMode,
   generationModel: projects.generationModel,
   videoFormat: projects.videoFormat,
+  videoQuality: projects.videoQuality,
   sourceVideoId: projects.sourceVideoId,
   createdAt: projects.createdAt,
   updatedAt: projects.updatedAt,
@@ -188,6 +191,16 @@ export async function listEvents(
 // Creation
 // ---------------------------------------------------------------------------
 
+/**
+ * How a project was started.
+ *
+ * `projects.origin` is a `varchar` with a `manual` default rather than a pg enum, so
+ * this union is the only place the accepted values are written down. Named as a type so
+ * readers that filter on origin — the studio screens' "what am I working on" lookup —
+ * cannot drift from what the writers here store.
+ */
+export type ProjectOrigin = "manual" | "automation" | "youtube_link" | "description";
+
 export interface CreateProjectInput {
   userId: string;
   /**
@@ -200,13 +213,17 @@ export interface CreateProjectInput {
   channelId: string | null;
   title: string;
   ideaId?: string | null;
-  /** `youtube_link` marks a project seeded by a pasted URL (§4). */
-  origin?: "manual" | "automation" | "youtube_link";
+  /**
+   * `youtube_link` marks a project seeded by a pasted URL (§4); `description` one
+   * seeded by the user's own written idea (§1C).
+   */
+  origin?: ProjectOrigin;
   targetDurationSeconds?: number | null;
-  /** Phase 11 §9-§10, §16. Server-validated before it reaches here. */
+  /** Phase 11 §9-§10, §16 and Phase 12 §4. Server-validated before it reaches here. */
   generationMode?: string | null;
   generationModel?: string | null;
   videoFormat?: string | null;
+  videoQuality?: string | null;
   /** Provenance for a link-mode project. Never read as generation input (§22). */
   sourceVideoId?: string | null;
   /**
@@ -293,6 +310,7 @@ export async function createProject(
         generationMode: input.generationMode ?? null,
         generationModel: input.generationModel ?? null,
         videoFormat: input.videoFormat ?? null,
+        videoQuality: input.videoQuality ?? null,
         sourceVideoId: input.sourceVideoId ?? null,
       })
       .returning(COLUMNS);
@@ -360,6 +378,15 @@ export interface ConfigureProjectInput {
   generationMode?: string;
   generationModel?: string | null;
   videoFormat?: string;
+  /**
+   * The resolution tier (Phase 12 §4), already checked against the chosen model.
+   *
+   * Nullable *and* optional, and the two mean different things: undefined leaves
+   * the stored value alone, while null clears it — which is what stock mode sends,
+   * because a resolution that outlived a switch away from AI video would be quoted
+   * back on the next visit as though the user had picked it.
+   */
+  videoQuality?: string | null;
 }
 
 /**
@@ -462,6 +489,9 @@ export async function configureProject(
         ...(input.videoFormat === undefined
           ? {}
           : { videoFormat: input.videoFormat }),
+        ...(input.videoQuality === undefined
+          ? {}
+          : { videoQuality: input.videoQuality }),
         updatedAt: new Date(),
       })
       .where(
@@ -483,6 +513,7 @@ export async function configureProject(
         generationMode: row.generationMode,
         generationModel: row.generationModel,
         videoFormat: row.videoFormat,
+        videoQuality: row.videoQuality,
       },
     });
 

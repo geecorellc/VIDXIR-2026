@@ -16,7 +16,7 @@
  */
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { channels, researchRuns } from "@/lib/db/schema";
+import { channels, onboardingProfiles, researchRuns } from "@/lib/db/schema";
 import {
   ConflictError,
   NotConfiguredError,
@@ -30,6 +30,10 @@ import {
 import { logger } from "@/lib/logger";
 import { queuePriorityFor } from "@/lib/plans/enforce";
 import { enqueue, hasActiveJob, reportProgress } from "@/lib/queue/jobs";
+import {
+  descriptionContext,
+  interpretDescriptionOrFallback,
+} from "@/lib/research/description";
 import { generateIdeas, persistIdeas } from "@/lib/research/ideas";
 import {
   channelSignalReader,
@@ -46,7 +50,10 @@ import {
   toStoredAnalysis,
   type SourceAnalysis,
 } from "@/lib/youtube/source-analysis";
-import type { IdeaSourceSeed } from "@/lib/research/ideas";
+import type {
+  IdeaDescriptionSeed,
+  IdeaSourceSeed,
+} from "@/lib/research/ideas";
 import type { PlanTier } from "@/lib/plans";
 import type { YouTubeLinkForm } from "@/lib/youtube/url";
 
@@ -135,9 +142,12 @@ export interface StartLinkRunInput {
   /**
    * The project this research belongs to.
    *
-   * Required, and it is what makes the duplicate guard work without a channel:
-   * `hasActiveJob` scopes on the project instead, so pasting the same link twice
-   * is refused while researching a *different* link concurrently is not.
+   * Required, and it does two things. It is what makes the duplicate guard work
+   * without a channel — `hasActiveJob` scopes on the project instead, so pasting the
+   * same link twice into one project is refused while researching a *different* link
+   * concurrently is not. And it is written to the run row, because the source video
+   * id is not unique per project: the same video legitimately seeds two projects, and
+   * without this both would resolve to whichever run was newest.
    */
   projectId: string;
   /** Which URL form was pasted, for the analysis record. */
@@ -173,6 +183,14 @@ export async function startLinkResearchRun(
       status: "queued",
       trigger: "youtube_link",
       sourceVideoId: input.videoId,
+      /**
+       * Which project this run is for, the same as description mode writes (§1C).
+       *
+       * `sourceVideoId` above is the seed, not an identity: two projects can be
+       * started from one video, and the screens key their run lookup through
+       * `channelLessRunKeys`, which needs this to tell those two runs apart.
+       */
+      projectId: input.projectId,
       // `niche` and `keywords` are filled in by the worker once the source has
       // been read. Left empty rather than guessed from the id.
       keywords: [],
@@ -207,7 +225,100 @@ export async function startLinkResearchRun(
   }
 }
 
-/** Shared tail of both start functions: the queue push failed. */
+// ---------------------------------------------------------------------------
+// Description mode (§1C)
+// ---------------------------------------------------------------------------
+
+export interface StartDescriptionRunInput {
+  userId: string;
+  /** The user's own words. Length-bounded by the route; stored verbatim. */
+  description: string;
+  tier: PlanTier;
+  /**
+   * The project this research is performed *for*, written to
+   * `research_runs.project_id`.
+   *
+   * This path has no other key at all: trending mode finds its run through the
+   * channel, and a description is free text that would be both slow and ambiguous
+   * to match on once a user describes two similar videos. Link mode now writes the
+   * same column for the same reason — a seed video is not an identity either, since
+   * two projects can be started from one link (see `channelLessRunKeys`).
+   */
+  projectId: string;
+  traceId?: string | null;
+}
+
+/**
+ * Create and enqueue a research run seeded by a described idea (§1C).
+ *
+ * Symmetrical with `startLinkResearchRun`, including what it does *not* do: the
+ * description is not interpreted here. That is a Claude call of unbounded latency,
+ * and §10 keeps those out of request handlers — the worker interprets it as the
+ * run's first step, so a slow or unconfigured provider shows up as a job the user
+ * can watch rather than a request that hangs.
+ */
+export async function startDescriptionResearchRun(
+  input: StartDescriptionRunInput,
+): Promise<StartRunResult> {
+  if (
+    await hasActiveJob(input.userId, null, RESEARCH_JOB_NAME, input.projectId)
+  ) {
+    throw new ConflictError(
+      "Research is already running for this idea. Wait for it to finish.",
+    );
+  }
+
+  const inserted = await db
+    .insert(researchRuns)
+    .values({
+      userId: input.userId,
+      // No channel, and none required — the same as link mode (§4, §1C).
+      channelId: null,
+      status: "queued",
+      trigger: "description",
+      description: input.description,
+      projectId: input.projectId,
+      // `niche` and `keywords` are filled in by the worker once the description has
+      // been interpreted. Left empty rather than guessed from the raw prose here,
+      // so what is stored is what was actually searched.
+      keywords: [],
+      sources: [],
+    })
+    .returning({ id: researchRuns.id });
+
+  const run = inserted[0];
+  if (!run) throw new Error("Failed to create research run.");
+
+  try {
+    const job = await enqueue({
+      queue: "research",
+      name: RESEARCH_JOB_NAME,
+      userId: input.userId,
+      channelId: null,
+      projectId: input.projectId,
+      stage: "RESEARCH",
+      /**
+       * The run id carries the description, not the payload.
+       *
+       * Deliberate, and different from link mode's `sourceVideoId`: that is a
+       * 11-character id, this is up to 2,000 characters of prose. Putting it in a
+       * Redis payload would duplicate the authoritative copy for no benefit — the
+       * worker re-reads the row anyway, because a payload is data and not an
+       * authorisation (§34).
+       */
+      payload: { runId: run.id, mode: "description" },
+      priority: queuePriorityFor(input.tier),
+      traceId: input.traceId ?? null,
+      statusMessage: "Queued",
+    });
+
+    return { runId: run.id, jobId: job.id };
+  } catch (error) {
+    return failQueuedRun(run.id, error);
+  }
+}
+
+/** Shared tail of all three start functions: the queue push failed. */
 async function failQueuedRun(runId: string, error: unknown): Promise<never> {
   // Nothing will ever pick this run up. Fail the row now rather than leaving a
   // permanent "queued" the UI would spin on (§30).
@@ -270,6 +381,7 @@ export async function executeResearchRun(
       id: researchRuns.id,
       channelId: researchRuns.channelId,
       sourceVideoId: researchRuns.sourceVideoId,
+      description: researchRuns.description,
     })
     .from(researchRuns)
     .where(
@@ -295,23 +407,58 @@ export async function executeResearchRun(
     // The stored id wins over the payload's. Both are written by Tally, but only
     // the row was written inside the request that authorised this run.
     const sourceVideoId = runRow.sourceVideoId ?? input.sourceVideoId ?? null;
+    // Likewise: the description is read from the row, never from the payload. It is
+    // up to 2,000 characters of user prose that reaches a model, so the copy that
+    // gets used is the one the authorising request wrote and length-checked.
+    const description = runRow.description?.trim() || null;
 
     let context: ResearchContext;
     let reader: SignalReader;
     let source: IdeaSourceSeed | null = null;
+    let described: IdeaDescriptionSeed | null = null;
 
     if (input.channelId) {
       const loaded = await loadResearchContext(input.userId, input.channelId);
       if (!loaded) throw new NotFoundError("Channel not found.");
       context = loaded;
       reader = channelSignalReader(input.userId, input.channelId);
+    } else if (description) {
+      // §1C. Third way *in*, not a third pipeline: once the brief exists this is an
+      // ordinary channel-less context and everything below is unchanged.
+      await reportProgress(input.jobId, 5, "Understanding your idea");
+
+      const brief = await interpretDescriptionOrFallback({
+        userId: input.userId,
+        description,
+        fallbackLanguage: await profileLanguage(input.userId),
+        jobId: input.jobId,
+        traceId: input.traceId ?? null,
+      });
+
+      context = descriptionContext(brief);
+      // The public credential, for the same reason link mode uses it: there is no
+      // connected channel whose OAuth token could be spent on this search.
+      reader = publicSignalReader();
+      described = {
+        description,
+        niche: brief.niche,
+        summary: brief.summary,
+      };
+
+      // Persist what was understood before researching. If collection fails, the
+      // screen can still show the niche and probes the run actually used — and an
+      // interpretation nobody can see is indistinguishable from one that never ran.
+      await db
+        .update(researchRuns)
+        .set({ niche: context.niche, keywords: context.keywords })
+        .where(eq(researchRuns.id, input.runId));
     } else {
       if (!sourceVideoId) {
-        // A run with neither a channel nor a source has nothing to research. This
-        // is unreachable through either start function; it is here because the
-        // alternative is researching whatever the empty context happens to yield.
+        // A run with no channel, no description and no source has nothing to
+        // research. This is unreachable through any start function; it is here
+        // because the alternative is researching whatever the empty context yields.
         throw new NotFoundError(
-          "This research run has no channel and no source video.",
+          "This research run has no channel, description or source video.",
         );
       }
 
@@ -375,6 +522,7 @@ export async function executeResearchRun(
       evidence,
       ownTopPerformers: collected.ownTopPerformers,
       source,
+      described,
       jobId: input.jobId,
       traceId: input.traceId ?? null,
     });
@@ -447,6 +595,29 @@ export async function executeResearchRun(
 
     throw error;
   }
+}
+
+/**
+ * The language the user said they publish in, if they ever said (§1C).
+ *
+ * A described idea carries no language signal of its own the way a source video's
+ * uploader declaration does, and defaulting to en-US would send a German
+ * description to an English-language search. The onboarding answer is the best
+ * available fallback — and only a fallback: the interpreter's own reading of the
+ * description's language wins, because a user may well describe a German video in
+ * English or the reverse.
+ *
+ * Returns null rather than throwing when there is no profile. A missing preference
+ * is not a reason to fail a run.
+ */
+async function profileLanguage(userId: string): Promise<string | null> {
+  const rows = await db
+    .select({ contentLanguage: onboardingProfiles.contentLanguage })
+    .from(onboardingProfiles)
+    .where(eq(onboardingProfiles.userId, userId))
+    .limit(1);
+
+  return rows[0]?.contentLanguage ?? null;
 }
 
 /**

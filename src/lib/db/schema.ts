@@ -88,6 +88,33 @@ export const subscriptionStatusEnum = pgEnum("subscription_status", [
   "unpaid",
 ]);
 
+/**
+ * Why a credit ledger row exists (§8, §12).
+ *
+ * An enum rather than free text because every one of these is read by code: the
+ * balance projection sums `grant`/`purchase`/`refund` against `spend`, the history
+ * screen groups by reason, and the period-grant idempotency check looks for an
+ * existing `monthly_grant` for the period. Free text would make each of those a
+ * string comparison nobody would notice going stale.
+ *
+ * Signs are a property of the reason, not a free choice: `spend` rows are the only
+ * negative ones, and a check constraint in the migration enforces it. That is what
+ * makes "sum the ledger" a correct definition of the balance rather than a
+ * convention.
+ */
+export const creditReasonEnum = pgEnum("credit_reason", [
+  /** The plan's included allowance for a billing period. Positive. */
+  "monthly_grant",
+  /** A one-off pack bought through Stripe (§11). Positive, and never expires. */
+  "purchase",
+  /** A generation was charged. Negative — the only negative reason. */
+  "spend",
+  /** A charged generation failed, so the charge is returned (§12). Positive. */
+  "refund",
+  /** An operator adjustment, e.g. goodwill after an incident. Positive. */
+  "adjustment",
+]);
+
 export const automationLevelEnum = pgEnum("automation_level", [
   /** Tally researches and drafts; user approves every step. */
   "manual",
@@ -295,6 +322,15 @@ export const plans = pgTable("plans", {
   /** null = unlimited. Enforced server-side; frontend values are never trusted. */
   maxChannels: integer("max_channels"),
   maxVideosPerMonth: integer("max_videos_per_month"),
+  /**
+   * Credits included each billing period (§7).
+   *
+   * Not nullable and defaulted to zero, unlike the two limits above where null means
+   * unlimited. There is no unlimited credit allowance — see the `monthlyCredits`
+   * docblock in `plans/index.ts`. The default exists only so the column can be added
+   * to existing rows; every row is then set from the catalogue by `db:migrate`.
+   */
+  monthlyCredits: integer("monthly_credits").notNull().default(0),
   /** Feature flags: aiVoiceover, brollLibrary, thumbnailAbTest, autoPublish, ... */
   features: jsonb("features")
     .notNull()
@@ -418,6 +454,234 @@ export const usageCounters = pgTable(
       .defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.period] })],
+);
+
+// ---------------------------------------------------------------------------
+// Credits (§7–§13)
+// ---------------------------------------------------------------------------
+
+/**
+ * The authoritative credit balance — one row per user (§7, §10).
+ *
+ * ## Why a balance row and not just the ledger
+ *
+ * The balance is *derivable* by summing `credit_ledger`, and that sum is the
+ * definition of correctness — the integration suite asserts the two agree. It is also
+ * materialised here, for one reason that is about locking rather than speed:
+ *
+ * A charge has to be **atomic and refuse when insufficient** (§10, §13). Expressed
+ * against a balance row that is one conditional UPDATE:
+ *
+ *     UPDATE credit_balances SET spent = spent + N
+ *      WHERE user_id = $1 AND (granted + purchased - spent) >= N
+ *
+ * Two concurrent charges contend on that row; the second blocks, re-reads the
+ * committed value, and its predicate fails if the money has gone. Expressed against a
+ * ledger sum it would be a read followed by an insert, with nothing serialising them —
+ * two requests could both read a balance of 10 and both spend 10. `SERIALIZABLE` or an
+ * advisory lock would close that, but both are heavier and easier to get wrong than a
+ * row that is already the natural point of contention.
+ *
+ * ## Why three counters instead of one signed integer
+ *
+ * `granted`, `purchased` and `spent` are kept apart because §11 requires purchased
+ * credits to be tracked separately from monthly ones — a customer who bought 500
+ * credits must not lose them when the month rolls over. `resetMonthly` zeroes
+ * `granted` and the portion of `spent` it covered; `purchased` is never touched by a
+ * reset. A single signed balance could not express that distinction, so the reset
+ * would either delete bought credits or never reclaim unused monthly ones.
+ *
+ * All three are monotonically increasing within a period, which makes them safe to
+ * increment concurrently — there is no read-modify-write anywhere in the charge path.
+ */
+export const creditBalances = pgTable(
+  "credit_balances",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * The current period's plan allowance, as granted. Reset each period.
+     *
+     * Not the *remaining* allowance: this is what was given, and `spent` is what was
+     * taken. Storing "remaining" would mean a grant had to read before it wrote.
+     */
+    granted: integer("granted").notNull().default(0),
+    /**
+     * Credits bought through Stripe that are still on the account (§11).
+     *
+     * Survives every period reset, which is the whole point of the column. Purchased
+     * credits are consumed *after* the monthly allowance — see `chargeCredits` — so a
+     * customer who tops up mid-month still uses their included credits first.
+     */
+    purchased: integer("purchased").notNull().default(0),
+    /** Everything spent this period, net of refunds. Reset alongside `granted`. */
+    spent: integer("spent").notNull().default(0),
+    /**
+     * `YYYY-MM` in UTC — which period `granted` and `spent` refer to.
+     *
+     * The idempotency key for the monthly grant, together with `userId`: a grant for
+     * a period this column already names is a no-op, so the grant can be called from
+     * anywhere (a webhook, a scheduled task, or lazily on first use) without double-
+     * granting. §13 requires exactly that property.
+     */
+    period: varchar("period", { length: 7 }).notNull(),
+    /** The tier the current grant was issued for, so a mid-period upgrade is visible. */
+    grantedForTier: planTierEnum("granted_for_tier").notNull().default("starter"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("credit_balances_period_idx").on(t.period)],
+);
+
+/**
+ * Append-only record of every credit movement (§8, §12).
+ *
+ * ## Why this is not `api_usage`
+ *
+ * `api_usage` already records every provider call, and reusing it as the ledger was
+ * considered. It cannot be one: `withUsage` deliberately **swallows its own write
+ * failures** so that a logging problem never fails a generation the customer already
+ * paid for. That is right for an audit log and disqualifying for a ledger — money that
+ * silently fails to be recorded is money that cannot be reconciled. The two coexist:
+ * `api_usage` answers "what did we ask the vendor", this answers "what did the
+ * customer pay".
+ *
+ * ## Idempotency (§13)
+ *
+ * `idempotency_key` is unique where present. A charge supplies a key derived from what
+ * is being generated — `{projectId}:{sceneIndex}:{attempt}` for a scene — so a retried
+ * job loses the insert and charges nothing. `ON CONFLICT DO NOTHING` returning no row
+ * is how the caller learns the charge already happened, without a separate read that
+ * could race. The column is nullable because an operator adjustment has no natural
+ * key, and a partial unique index means those rows do not collide with each other.
+ *
+ * ## Signs
+ *
+ * `amount` is signed: negative for `spend`, positive for everything else, enforced by
+ * a check constraint. `balance_after` is the balance at the moment the row was
+ * written, stored so the history screen can show a running total without re-summing,
+ * and so a divergence between the ledger and `credit_balances` is *locatable* rather
+ * than merely detectable.
+ */
+export const creditLedger = pgTable(
+  "credit_ledger",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reason: creditReasonEnum("reason").notNull(),
+    /** Signed. Negative only for `spend`; a check constraint enforces it. */
+    amount: integer("amount").notNull(),
+    /** Available balance immediately after this row was applied. */
+    balanceAfter: integer("balance_after").notNull(),
+    /**
+     * What was generated, for a `spend` or `refund`: `video_scene` or `image`.
+     *
+     * Null for grants and purchases, which are not attributable to an operation.
+     */
+    operation: varchar("operation", { length: 32 }),
+    /** The branded model id charged for, e.g. `tal/3.0`. Never a vendor name (§3). */
+    modelId: varchar("model_id", { length: 64 }),
+    /** The resolution charged for, which is half of what determined the price. */
+    quality: varchar("quality", { length: 16 }),
+    /**
+     * The project the spend belongs to, when there is one.
+     *
+     * `set null` rather than `cascade`: deleting a project must not erase the record
+     * that it was paid for. A ledger with holes in it cannot be reconciled against
+     * revenue.
+     */
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
+    /** Unique where present. The retry guard described above. */
+    idempotencyKey: varchar("idempotency_key", { length: 200 }),
+    /** `YYYY-MM` the movement fell in, for per-period reporting. */
+    period: varchar("period", { length: 7 }).notNull(),
+    /** Human-readable line for the history screen. Never contains a vendor name. */
+    description: text("description"),
+    /**
+     * Free-form context: the Stripe session for a purchase, the failed job for a
+     * refund, the scene index for a spend. Never a credential.
+     */
+    meta: jsonb("meta").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    /**
+     * Partial unique index, created in the migration rather than here: Drizzle's
+     * `uniqueIndex().where()` emits the predicate, but declaring it here as well
+     * would produce a second, conflicting definition in the generated snapshot. The
+     * index is `credit_ledger_idempotency_key` and the migration is authoritative.
+     */
+    index("credit_ledger_user_created_idx").on(t.userId, t.createdAt),
+    index("credit_ledger_user_period_idx").on(t.userId, t.period),
+    index("credit_ledger_project_idx").on(t.projectId),
+  ],
+);
+
+/**
+ * Stripe checkout sessions opened for a credit pack (§11, §13).
+ *
+ * The purchase equivalent of `billing_events`: a session is a *request* to buy, and
+ * the credits are only added when the webhook confirms payment. This row is what lets
+ * the webhook know how many credits a completed session is worth **without trusting
+ * anything in the session** — the pack and its credit count are written here at
+ * creation time, server-side, from the pack catalogue.
+ *
+ * Reading the amount back out of Stripe's session metadata would be the obvious
+ * alternative and is worse: metadata is writable by anyone with the API key, and the
+ * amount paid is in a currency, not in credits. This table means the credit grant is
+ * decided by Tally at a moment when nothing external has been consulted.
+ */
+export const creditPurchases = pgTable(
+  "credit_purchases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The pack slug from the catalogue, e.g. `credits_500`. */
+    pack: varchar("pack", { length: 32 }).notNull(),
+    /** Credits this session grants when it completes. Set server-side, never read back. */
+    credits: integer("credits").notNull(),
+    /** What Stripe will charge, recorded for the receipt line. */
+    amountCents: integer("amount_cents").notNull(),
+    currency: char("currency", { length: 3 }).notNull().default("usd"),
+    /** The Stripe checkout session id. Unique — one row per session. */
+    providerSessionId: varchar("provider_session_id", { length: 200 }).notNull(),
+    providerPaymentIntentId: varchar("provider_payment_intent_id", { length: 200 }),
+    /** `pending` until the webhook confirms, then `completed`, `failed` or `expired`. */
+    status: varchar("status", { length: 24 }).notNull().default("pending"),
+    /**
+     * The ledger row this purchase created, once it completed.
+     *
+     * Set in the same transaction that writes the ledger row, so "credited" is one
+     * fact rather than two that could disagree. Null means not yet credited.
+     */
+    ledgerId: uuid("ledger_id").references(() => creditLedger.id, {
+      onDelete: "set null",
+    }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("credit_purchases_session_key").on(t.providerSessionId),
+    index("credit_purchases_user_created_idx").on(t.userId, t.createdAt),
+  ],
 );
 
 /**
@@ -655,8 +919,27 @@ export const researchRuns = pgTable(
       onDelete: "cascade",
     }),
     status: jobStatusEnum("status").notNull().default("queued"),
-    /** `manual` | `automation` | `youtube_link` — who or what asked for this run. */
+    /**
+     * `manual` | `automation` | `youtube_link` | `description` — who or what asked
+     * for this run.
+     */
     trigger: varchar("trigger", { length: 32 }).notNull().default("manual"),
+    /**
+     * What the user said they wanted to make a video about (§1C).
+     *
+     * The third entry path's seed, and the counterpart of `sourceVideoId`: one run
+     * is seeded by somebody else's video, the other by the user's own sentence. Held
+     * here rather than on `projects` because it is research input — the worker reads
+     * it to derive the niche and the search probes, and the angle prompt is shown it
+     * so the proposals answer what was actually asked for.
+     *
+     * Stored verbatim, and never treated as instructions. It is the user's own prose,
+     * so unlike a source video's metadata there is nothing here that must not be
+     * reused — but it does reach a model, so `interpretDescription` frames it as the
+     * subject to serve rather than as direction to follow, and the length is bounded
+     * at the route.
+     */
+    description: text("description"),
     /**
      * The pasted video this run was seeded from (Phase 11 §4, §6).
      *
@@ -701,6 +984,26 @@ export const researchRuns = pgTable(
      * pattern-matching the message, which is prose and will be reworded.
      */
     errorCode: varchar("error_code", { length: 64 }),
+    /**
+     * The project this run was performed *for*, when it was performed for one (§18).
+     *
+     * Nullable, and the direction of the link is deliberate. Both existing entry
+     * paths research *before* a project exists — trending ideas produce an `ideas`
+     * row that a project is later created from, and a pasted link produces a run that
+     * seeds one — so `projects.ideaId` covers those and this stays null.
+     *
+     * The description path (§1C) inverts that: the user has already described the
+     * video, so the project is the thing that exists first and the research is done
+     * to inform it. Without this column that research would either have to invent a
+     * synthetic `ideas` row to hang itself from, or be unattributable, and the second
+     * means a project's page cannot show what was researched for it.
+     *
+     * `set null` rather than `cascade`: deleting a project should not delete the
+     * research, which is reusable and cost provider calls to gather.
+     */
+    projectId: uuid("project_id").references((): AnyPgColumn => projects.id, {
+      onDelete: "set null",
+    }),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -710,6 +1013,7 @@ export const researchRuns = pgTable(
   (t) => [
     index("research_runs_channel_created_idx").on(t.channelId, t.createdAt),
     index("research_runs_user_id_idx").on(t.userId),
+    index("research_runs_project_idx").on(t.projectId),
   ],
 );
 
@@ -870,7 +1174,7 @@ export const projects = pgTable(
     failedAt: timestamp("failed_at", { withTimezone: true }),
     retryCount: integer("retry_count").notNull().default(0),
 
-    /** `manual` | `automation`. */
+    /** `manual` | `automation` | `youtube_link` | `description`. */
     origin: varchar("origin", { length: 32 }).notNull().default("manual"),
     /** Correlation id shared by every log line and job for this project (§41). */
     traceId: varchar("trace_id", { length: 64 }),
@@ -901,6 +1205,20 @@ export const projects = pgTable(
      * Null means landscape, which is what every pre-Phase-11 render produced.
      */
     videoFormat: varchar("video_format", { length: 16 }),
+    /**
+     * Output resolution tier: `draft` | `720p` | `1080p` | `2k` (Phase 12 §4).
+     *
+     * Only meaningful when `generationMode` is `AI_VIDEO`. Null means "never chose",
+     * which the plan layer resolves to the selected model's own default — so a
+     * project created before this column existed still renders, and at the tier the
+     * model recommends rather than at whatever a default constant happened to say.
+     *
+     * Stored per project rather than per render because §12 quotes a credit price
+     * from it before the user commits, and the quote and the render must read the
+     * same number. Re-checked against the model on every use (`assertQuality`), never
+     * trusted because it was accepted once: a model's supported set can change.
+     */
+    videoQuality: varchar("video_quality", { length: 16 }),
 
     /**
      * The pasted YouTube video this project was seeded from (§4, §22).
@@ -1068,6 +1386,36 @@ export const scenes = pgTable(
     transition: varchar("transition", { length: 32 }),
     /** Chosen visual for this scene. */
     visualAssetId: uuid("visual_asset_id"),
+    /**
+     * Continuity commitments for this scene — `SceneState` from
+     * `lib/continuity/scene-state`.
+     *
+     * On the scene row rather than in a table of its own: a scene state is
+     * one-to-one with a scene, keyed by the same `(project, index)` the planner,
+     * timeline and `EditClip.sceneIndex` already agree on. A parallel table would
+     * be a second scene ordering to keep in step. Null for every project built
+     * before the continuity layer, and for every project it does not apply to.
+     */
+    continuityState: jsonb("continuity_state"),
+    /**
+     * The continuity block appended to this scene's prompt, as sent.
+     *
+     * Stored because the validator checks the prompt that was *used*, and because
+     * a regeneration has to reproduce the same constraints. Recomputing it would
+     * check the current bible against itself rather than against what the
+     * provider received.
+     */
+    continuityPrompt: text("continuity_prompt"),
+    /**
+     * How many times continuity has regenerated this scene.
+     *
+     * The stop condition. A scene that fails, is regenerated and fails again is
+     * not going to be fixed by a third paid attempt, so the count is a ceiling
+     * rather than a statistic.
+     */
+    continuityRegenerations: integer("continuity_regenerations")
+      .notNull()
+      .default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1078,6 +1426,48 @@ export const scenes = pgTable(
   (t) => [
     uniqueIndex("scenes_project_index_key").on(t.projectId, t.index),
     index("scenes_user_id_idx").on(t.userId),
+  ],
+);
+
+/**
+ * Story bible — the continuity contract for one project.
+ *
+ * One row per project, like `project_edits` and for the same reason: there is one
+ * answer, and a unique index on `project_id` makes a second one impossible rather
+ * than merely unlikely. The document is `StoryBible` from `lib/continuity/bible`,
+ * validated on the way in and out; `level` is the resolved `ContinuityLevel`,
+ * denormalised onto the row so the studio screen can say what a project is holding
+ * without parsing the blob.
+ *
+ * `editedByUser` follows the `video_metadata` precedent — once a human has touched
+ * the bible, a rebuild must not silently overwrite their casting.
+ */
+export const storyBibles = pgTable(
+  "story_bibles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    schemaVersion: integer("schema_version").notNull().default(1),
+    /** Resolved `ContinuityLevel`: off | style | world | character | episodic. */
+    level: varchar("level", { length: 16 }).notNull().default("off"),
+    document: jsonb("document").notNull(),
+    generatedBy: varchar("generated_by", { length: 48 }),
+    editedByUser: boolean("edited_by_user").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("story_bibles_project_key").on(t.projectId),
+    index("story_bibles_user_id_idx").on(t.userId),
   ],
 );
 
@@ -1147,9 +1537,27 @@ export const voiceovers = pgTable(
     speed: real("speed"),
     style: varchar("style", { length: 64 }),
     durationMs: integer("duration_ms"),
-    /** Per-scene audio offsets, so the timeline can align narration. */
+    /**
+     * Per-scene audio offsets, so the timeline can align narration.
+     *
+     * `voiceId` and `characterId` are optional and additive: they record the voice
+     * each scene was *actually* narrated in, which is what lets the continuity check
+     * compare produced audio against the story bible instead of comparing the bible
+     * with itself. Absent on every row written before character voices existed, and
+     * on every project that does not use them — the row-level `voice_id` above is the
+     * whole answer for those.
+     *
+     * A widening of the jsonb `$type` only. No column changes, so no migration: the
+     * offsets every existing consumer reads are untouched.
+     */
     segments: jsonb("segments").$type<
-      Array<{ sceneIndex: number; startMs: number; durationMs: number }>
+      Array<{
+        sceneIndex: number;
+        startMs: number;
+        durationMs: number;
+        voiceId?: string | null;
+        characterId?: string | null;
+      }>
     >(),
     charactersBilled: integer("characters_billed"),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -1998,6 +2406,31 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   onboarding: one(onboardingProfiles, {
     fields: [users.id],
     references: [onboardingProfiles.userId],
+  }),
+  creditBalance: one(creditBalances, {
+    fields: [users.id],
+    references: [creditBalances.userId],
+  }),
+  creditLedger: many(creditLedger),
+}));
+
+export const creditBalancesRelations = relations(creditBalances, ({ one }) => ({
+  user: one(users, { fields: [creditBalances.userId], references: [users.id] }),
+}));
+
+export const creditLedgerRelations = relations(creditLedger, ({ one }) => ({
+  user: one(users, { fields: [creditLedger.userId], references: [users.id] }),
+  project: one(projects, {
+    fields: [creditLedger.projectId],
+    references: [projects.id],
+  }),
+}));
+
+export const creditPurchasesRelations = relations(creditPurchases, ({ one }) => ({
+  user: one(users, { fields: [creditPurchases.userId], references: [users.id] }),
+  ledgerEntry: one(creditLedger, {
+    fields: [creditPurchases.ledgerId],
+    references: [creditLedger.id],
   }),
 }));
 
