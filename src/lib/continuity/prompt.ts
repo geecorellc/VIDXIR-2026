@@ -9,14 +9,15 @@
  * in is the wardrobe, the palette, the lighting and the state changes, verbatim
  * and in a fixed order.
  *
- * The *scene* prompt is text-only, deliberately — and stays text-only even on the one
- * model that now accepts reference stills. §8's fallback ("detailed textual continuity
+ * The *scene* prompt is text-only, deliberately — and stays text-only even on the models
+ * that now accept reference stills. §8's fallback ("detailed textual continuity
  * constraints") is the behaviour for every model without reference support, which is
- * most of the catalogue, and it is the behaviour *alongside* the stills on Tal 3.1
- * rather than instead of it: a still shows a face and a coat, and it cannot express a
- * state change, a lighting note or an entity the scene must not contain. Sending both
- * costs nothing extra and degrades cleanly — if the vendor drops a reference, or the
- * operator has pinned a model version that takes none, the words are still there.
+ * most of the catalogue, and it is the behaviour *alongside* the stills on Tal 3.0 and
+ * Tal 3.1 rather than instead of it: a still shows a face and a coat, and it cannot
+ * express a state change, a lighting note or an entity the scene must not contain.
+ * Sending both costs nothing extra and degrades cleanly — if the vendor drops a
+ * reference, or the operator has pinned a model version that takes none, the words are
+ * still there.
  *
  * So this module is not a placeholder and gains no branch for reference-capable models.
  * Which stills a scene gets is `referencesForScene`'s decision, in `service.ts`.
@@ -26,7 +27,8 @@
  * project's video backend can be handed it. That ordering was deliberate and has now
  * paid off — a reference image is worth having on its own, since it is what a human
  * reviews to say "no, her coat is wrong" before eighty scenes are paid for, and because
- * the library was already there, Tal 3.1's reference support needed no new generator.
+ * the library was already there, neither Tal 3.1's nor Tal 3.0's reference support needed
+ * a new generator.
  *
  * Everything is pure and deterministic. The same bible, state and graph produce
  * byte-identical text, which is what lets `prompt.test.ts` assert continuity

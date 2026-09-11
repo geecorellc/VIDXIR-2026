@@ -7,14 +7,14 @@
  *
  * **Why this is a user action rather than a pipeline step.** Every branded model can
  * draw a still, so the pipeline *could* generate the whole cast during the scene plan.
- * It deliberately does not, and still does not now that one model can consume a still.
- * Only Tal 3.1 declares `capabilities.referenceImages`, so on every other model a
- * still's only consumer is the human who reviews the cast before eighty scenes are paid
- * for — and spending up to thirty generations per build on something the project's own
- * backend cannot be handed would be cost with no output, which §21 forbids. Even on
- * Tal 3.1 the review is the point: a still nobody approved is a wrong coat propagated
- * into eighty scenes at premium rates instead of one. `executeReferenceImages` is the
- * stage either path runs, so the seam stays the enqueue rather than the work.
+ * It deliberately does not, and still does not now that some models can consume a still.
+ * Only Tal 3.0 and Tal 3.1 declare `capabilities.referenceImages`, so on every other
+ * model a still's only consumer is the human who reviews the cast before eighty scenes
+ * are paid for — and spending up to thirty generations per build on something the
+ * project's own backend cannot be handed would be cost with no output, which §21 forbids.
+ * Even on those two the review is the point: a still nobody approved is a wrong coat
+ * propagated into eighty scenes instead of one. `executeReferenceImages` is the stage
+ * either path runs, so the seam stays the enqueue rather than the work.
  *
  * Three properties, each a rule the mandate names:
  *

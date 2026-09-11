@@ -347,9 +347,11 @@ function CastChip({ character }: { character: Character }) {
  * A thumbnail and the entity's name, and nothing that could be mistaken for a claim
  * about the video: this is what the *bible* looks like, not what the scenes look like.
  * Whether a scene was actually drawn from one depends on the project's selected model —
- * only Tal 3.1 is handed the stills, every other model gets the same facts as text — and
- * this panel does not know which model a project uses. So the caption says "reference"
- * and the panel claims no scene was drawn from it, which is true either way.
+ * Tal 3.0 and Tal 3.1 are handed the stills, every other model gets the same facts as
+ * text, and even those two fall back to text when the deployment has pinned a model
+ * version that takes no reference — and this panel does not know which model a project
+ * uses, let alone which version is configured. So the caption says "reference" and the
+ * panel claims no scene was drawn from it, which is true either way.
  *
  * A still whose URL could not be signed keeps its name and loses its picture. It exists,
  * so hiding it would misreport the cast as undrawn.

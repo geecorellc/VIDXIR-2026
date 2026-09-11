@@ -212,10 +212,15 @@ export interface VideoGenProviderStatus {
 /**
  * A stored reference still, offered to a model that can constrain generation with one.
  *
- * §6's other half. Reaches exactly one adapter today — Tal 3.1, whose vendor documents
- * a reference-image input on the model Tally configures by default. Every other
+ * §6's other half. Reaches two adapters today — Tal 3.1 and Tal 3.0, whose vendors each
+ * document a reference-image input on the model Tally configures by default. Every other
  * catalogued model gets the fallback instead: detailed textual prompting, which is what
  * the continuity engine has always done and still does whenever a still cannot be used.
+ *
+ * Both vendors gate the input on the model *version*, not the family, so each adapter
+ * re-checks its configured model id before offering the stills. A deployment that has
+ * pinned an older version gets the same textual fallback as an uncapable model, without
+ * the capability matrix having to describe one deployment's environment.
  *
  * `generateClip` strips this field for a model that declares no support, so the
  * capability flag is what gates the feature rather than each adapter remembering to
@@ -360,11 +365,11 @@ interface GenerationProvider {
    * The adapter's signed statement that its `generate` reads
    * `request.referenceImages` and sends the bytes to the vendor (§6).
    *
-   * Absent on every provider below, because none of them do. It exists because
-   * "reused by scene generation where the selected backend supports them" is a claim
-   * that has to be *checkable*: a capability flag alone can be flipped on a model in
-   * one line, and the reference stills would then be generated, charged and silently
-   * dropped on the floor by an adapter that never looks at the field.
+   * Set on the two providers whose adapters do — Veo and Seedance — and absent on the
+   * rest. It exists because "reused by scene generation where the selected backend
+   * supports them" is a claim that has to be *checkable*: a capability flag alone can be
+   * flipped on a model in one line, and the reference stills would then be generated,
+   * charged and silently dropped on the floor by an adapter that never looks at the field.
    *
    * `assertRegistryIntegrity()` requires this and `capabilities.referenceImages` to
    * agree in both directions, so flipping either one alone fails at module load.
@@ -1670,7 +1675,7 @@ const TAL_3_1: VideoGenModel = {
     "Generates a native audio track with the clip",
     "Strongest prompt adherence for complex direction",
     "Also generates 2K reference stills for the continuity engine",
-    "The only model that can be shown a continuity still, not just told about one",
+    "Can be shown a continuity still, not just told about one",
   ],
   limitations: [
     "Highest credit cost per scene",
@@ -1688,8 +1693,8 @@ const TAL_3_1: VideoGenModel = {
     imageToVideo: false,
     imageGeneration: true,
     /**
-     * The one model in the catalogue whose vendor documents a reference-image input on
-     * the endpoint this adapter calls (§6).
+     * Reference-image input on the endpoint this adapter calls (§6). Tal 3.0 declares the
+     * same capability against its own vendor; nothing here is exclusive to this model.
      *
      * Paired with `veo.acceptsReferenceImages`; `assertRegistryIntegrity` fails the
      * module load if either is set without the other, so this cannot become a claim the

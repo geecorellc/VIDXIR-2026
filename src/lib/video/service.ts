@@ -850,9 +850,15 @@ export async function executeVisuals(input: StageInput): Promise<{
      *
      * The §6 reuse path. Three conditions have to hold before this costs anything: the
      * continuity layer is active, this is an AI project, and the **selected model
-     * declares `referenceImages`** — which today means the project chose Tal 3.1. Every
-     * other model leaves this an empty array, and the loop below behaves exactly as it
-     * did before the reuse path existed.
+     * declares `referenceImages`** — which today means the project chose Tal 3.0 or
+     * Tal 3.1. Every other model leaves this an empty array, and the loop below behaves
+     * exactly as it did before the reuse path existed.
+     *
+     * The flag is the model's, not the deployment's: both backends gate the capability on
+     * a vendor model version, so the adapter narrows again at request time and a
+     * deployment pinned to an older version still gets textual continuity. Loading the
+     * stills for it costs one storage read, which is why the narrower check lives there
+     * and this one stays at the capability.
      *
      * Gated on the capability *here* as well as in `generateClip` for a reason that is
      * about bytes rather than correctness: selecting references means downloading them
