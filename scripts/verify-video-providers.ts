@@ -518,16 +518,99 @@ async function main(): Promise<void> {
      * concern, and the only interpolations that may appear are a configured base
      * URL, an env-selected model name, or a task id the vendor itself just issued —
      * encoded.
+     *
+     * `data:` URIs are separated out rather than scanned as paths. A data URI is a
+     * request *payload* — the continuity reference stills of §6 travel as one — and it
+     * has no host and no path segments, so the rules below do not describe it: a media
+     * type there cannot traverse a directory or redirect a request. They get their own,
+     * stricter check immediately after, because "not a path" is not the same as
+     * "unconstrained".
      */
-    const urls = [...source.matchAll(/url:\s*(?:`([^`]+)`|"([^"]+)")/g)].flatMap((m) =>
+    const allUrls = [...source.matchAll(/url:\s*(?:`([^`]+)`|"([^"]+)")/g)].flatMap((m) =>
       [m[1] ?? m[2]].filter((value): value is string => typeof value === "string"),
     );
+    const dataUris = allUrls.filter((url) => url.startsWith("data:"));
+    const urls = allUrls.filter((url) => !url.startsWith("data:"));
     must(
       urls.length >= 8,
       `only ${urls.length} request URLs were found in video-gen.ts; five adapters each ` +
         `submit and poll, so a much smaller number means this scan is reading the wrong ` +
         `thing and passing vacuously.`,
     );
+
+    /**
+     * A data URI's media type must come from a fixed allowlist, never from the asset row.
+     *
+     * `assets.mimeType` is attacker-influenceable in principle — it is stored data — and
+     * a media type spliced into a payload the vendor parses is the injection this rule
+     * exists to prevent. The adapter narrows it against `SEEDANCE_REFERENCE_MIME_TYPES`
+     * before building the URI, so what is asserted here is that the allowlist exists,
+     * that it is actually applied, and that the URI is built from the narrowed local
+     * rather than straight from the reference.
+     */
+    for (const uri of dataUris) {
+      const interpolations = [...uri.matchAll(/\$\{([^}]+)\}/g)].flatMap((m) =>
+        m[1] ? [m[1].trim()] : [],
+      );
+      for (const expression of interpolations) {
+        must(
+          expression === "mime" || expression.endsWith('.toString("base64")'),
+          `the data URI "${uri}" interpolates \`${expression}\`. Only an allowlisted ` +
+            `media type and base64-encoded bytes may appear in a payload the vendor ` +
+            `parses.`,
+        );
+      }
+      must(
+        !/\$\{[^}]*\.mimeType[^}]*\}/.test(uri),
+        `the data URI "${uri}" splices a stored mimeType straight in; it must be ` +
+          `narrowed against the allowlist first.`,
+      );
+    }
+    must(
+      /SEEDANCE_REFERENCE_MIME_TYPES\s*=\s*\[/.test(source) &&
+        /SEEDANCE_REFERENCE_MIME_TYPES[\s\S]{0,200}?\.includes\(/.test(source),
+      `video-gen.ts builds a data URI but does not narrow the media type against a ` +
+        `declared allowlist. §10: what reaches a vendor payload must be chosen here, ` +
+        `not echoed from a stored row.`,
+    );
+
+    /**
+     * Locals that are provably a single read of `env()`, resolved rather than trusted.
+     *
+     * An adapter that reads its model id once and uses it in both the request body and
+     * the path — as the Veo and Seedance ones now do, because the reference-image
+     * capability is version-gated and has to be tested before the body is built — puts a
+     * local in the path where `env().X` used to be inline. That is the same value, but
+     * the scan cannot know it without looking.
+     *
+     * So a name qualifies only when *every* binding of it in the file is a
+     * `const <name> = env().<VAR>;` and it is never assigned anywhere else. The name is
+     * deliberately allowed to be bound more than once — two adapters each read their own
+     * model id into a local of the same name, and both are configuration — but a single
+     * `let`, a re-assignment, or one binding from any other initialiser disqualifies it
+     * and the check below rejects the URL. That keeps the rule enforcing what it always
+     * enforced: a path segment comes from configuration, not from a caller.
+     */
+    const envLocals = new Set(
+      [...source.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*env\(\)\.[A-Z0-9_]+\s*;/g)]
+        .flatMap((m) => (m[1] ? [m[1]] : []))
+        .filter((name) => {
+          const envBindings = [
+            ...source.matchAll(
+              new RegExp(`\\bconst\\s+${name}\\s*=\\s*env\\(\\)\\.[A-Z0-9_]+\\s*;`, "g"),
+            ),
+          ].length;
+          const allBindings = [
+            ...source.matchAll(new RegExp(`\\b(?:const|let|var)\\s+${name}\\b`, "g")),
+          ].length;
+          const assignments = [
+            ...source.matchAll(new RegExp(`\\b${name}\\s*=[^=]`, "g")),
+          ].length;
+          // Every declaration is an env read, and nothing assigns to it afterwards.
+          return allBindings === envBindings && assignments === envBindings;
+        }),
+    );
+
     for (const url of urls) {
       must(!url.includes(".."), `"${url}" contains a path traversal segment.`);
       const interpolations = [...url.matchAll(/\$\{([^}]+)\}/g)].flatMap((m) =>
@@ -539,6 +622,7 @@ async function main(): Promise<void> {
             expression === "operationName" ||
             /^[A-Z_]+_API$/.test(expression) ||
             /^env\(\)\.[A-Z0-9_]+$/.test(expression) ||
+            envLocals.has(expression) ||
             expression.startsWith("encodeURIComponent("),
           `"${url}" interpolates \`${expression}\`, which is neither a configured base, an ` +
             `env-selected model, a vendor-issued operation name, nor URI-encoded. A client ` +
