@@ -859,6 +859,13 @@ function laterPeriod(period: string): string {
  * The credit rows are deleted explicitly rather than relied upon to cascade from
  * `projects`: they hang off `users`, which this script deliberately does not delete —
  * a stable user id makes a failed run's rows readable afterwards.
+ *
+ * Every table the run writes has to be listed here, or the script is single-use. The
+ * top-up step derives its checkout session id from the user id, and
+ * `credit_purchases_session_key` is unique, so a purchase row left behind makes the
+ * second run die on a constraint violation rather than on a failed assertion — which
+ * looks like a broken script rather than a dirty fixture, and a verification script
+ * nobody can re-run is one nobody runs.
  */
 async function fixtureUser(
   ctx: {
@@ -879,6 +886,13 @@ async function fixtureUser(
 
   const found = existing[0];
   if (found) {
+    // Before the ledger: a purchase row points at the ledger row it created, and
+    // deleting that first would leave the purchase behind with a null `ledgerId` —
+    // a completed top-up that credited nothing, which is the exact state step 14
+    // asserts cannot happen.
+    await db
+      .delete(schema.creditPurchases)
+      .where(eq(schema.creditPurchases.userId, found.id));
     await db
       .delete(schema.creditLedger)
       .where(eq(schema.creditLedger.userId, found.id));
