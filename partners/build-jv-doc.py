@@ -183,9 +183,9 @@ para(
     size=10.5,
     color=MUTE,
 )
-para("Launch: Tuesday 20 October → Sunday 25 October 2026 (all times US Eastern)",
+para("Launch: Friday 23 October → Wednesday 28 October 2026 (all times US Eastern)",
      size=10.5, bold=True)
-para("Cart opens 11:00 AM EDT on the 20th and shuts 11:59 PM EDT on the 25th — a six-day window.",
+para("Cart opens 11:00 AM EDT on the 23rd and shuts 11:59 PM EDT on the 28th — a six-day window.",
      size=10, color=MUTE, after=10)
 
 table(
@@ -236,7 +236,7 @@ para(
     "Review access is granted on request — there is no shared public login. Message Goodluck "
     "Efe on Teams or Facebook (links on the JV page) with your JVZoo ID and what you are "
     "producing — review video, webinar, bonus page — and we will set up a hands-on account. "
-    "Ask before the 15th if you want it ready for day one.",
+    "Ask before the 18th if you want it ready for day one.",
 )
 para("Contact: Goodluck Efe, founder and JV manager — Microsoft Teams and Facebook, both linked "
      "on the JV page.", size=9.5, color=MUTE)
@@ -246,23 +246,23 @@ h2("3. Launch At A Glance")
 table(
     ["What", "When", "Notes"],
     [
-        ["Pre-launch opens", "Thu 15 Oct", "Swipes live — five days to warm your list"],
-        ["Cart opens", "Tue 20 Oct · 11:00 AM", "Full funnel live, early-bird pricing. "
+        ["Pre-launch opens", "Sun 18 Oct", "Swipes live — five days to warm your list"],
+        ["Cart opens", "Fri 23 Oct · 11:00 AM", "Full funnel live, early-bird pricing. "
                                                "Opening contest starts"],
-        ["Mid-launch push", "Thu 22 Oct · 11:00 AM", "Price step-up — switch to the urgency swipes"],
-        ["Contest boards switch", "Fri 23 Oct · 11:59 PM", "Opening board ends, closing board "
+        ["Mid-launch push", "Sun 25 Oct · 11:00 AM", "Price step-up — switch to the urgency swipes"],
+        ["Contest boards switch", "Mon 26 Oct · 11:59 PM", "Opening board ends, closing board "
                                                            "opens at midnight"],
-        ["Last call", "Sat 24 Oct · 11:59 PM", "Final full day — your biggest mailing day"],
-        ["Cart closes", "Sun 25 Oct · 11:59 PM", "The last minute of the 25th — not the 26th"],
+        ["Last call", "Tue 27 Oct · 11:59 PM", "Final full day — your biggest mailing day"],
+        ["Cart closes", "Wed 28 Oct · 11:59 PM", "The last minute of the 28th — not the 29th"],
     ],
     widths=[1.7, 1.8, 3.5],
 )
 callout(
     "The one scheduling mistake to avoid",
-    "The cart shuts at 11:59 PM EDT on Sunday 25 October — the last minute of the 25th. "
-    "Anything scheduled for “the 26th” fires into a closed cart. Note also that the launch "
-    "ends on a Sunday: if your list reads on Monday morning, your real last send is Sunday "
-    "evening, not Monday.",
+    "The cart shuts at 11:59 PM EDT on Wednesday 28 October — the last minute of the 28th. "
+    "Anything scheduled for “the 29th” fires into a closed cart. Note also that this window "
+    "opens on a Friday and closes midweek: the weekend falls on days 2 and 3, so your "
+    "heaviest sends are the Friday open and the Wednesday close, not a Sunday night.",
 )
 
 # ======================= 4. WHAT IS IT ================================
@@ -409,8 +409,8 @@ para("Two leaderboards, back to back. Solo entries only — no team pooling.", a
 table(
     ["Board", "Window (EDT)", "1st", "2nd", "3rd"],
     [
-        ["Opening · $3,000", "Tue 20 Oct 11:00 AM → Fri 23 Oct 11:59 PM", "$2,000", "$700", "$300"],
-        ["Closing · $2,000", "Sat 24 Oct 12:00 AM → Sun 25 Oct 11:59 PM", "$1,000", "$700", "$300"],
+        ["Opening · $3,000", "Fri 23 Oct 11:00 AM → Mon 26 Oct 11:59 PM", "$2,000", "$700", "$300"],
+        ["Closing · $2,000", "Tue 27 Oct 12:00 AM → Wed 28 Oct 11:59 PM", "$1,000", "$700", "$300"],
     ],
     widths=[1.4, 2.6, 0.9, 0.8, 0.8],
 )
@@ -426,7 +426,7 @@ callout(
 )
 para(
     "Contest cash is paid on top of your commission, never out of it. A send landing late on "
-    "the 23rd still counts for the opening board; one after midnight counts for the closing "
+    "the 26th still counts for the opening board; one after midnight counts for the closing "
     "board. If you are near a threshold, that boundary decides it.",
     size=9.5, color=MUTE,
 )
@@ -477,20 +477,20 @@ para("Anchor times are fixed. Everything between them is a recommendation — be
 table(
     ["When", "What to mail", "Swipe"],
     [
-        ["15–16 Oct", "The category — faceless YouTube, no link, no pitch", "Pre-launch 01"],
-        ["17–18 Oct", "The problem — why channels stall at editing", "Pre-launch 02"],
-        ["19 Oct", "The announcement — tomorrow, 11:00 AM", "Pre-launch 03"],
-        ["20 Oct, within 2 hrs of 11 AM", "Cart open — lead with the demo", "Email 01"],
-        ["20 Oct evening", "Story / personal send", "Email 02"],
-        ["21 Oct", "The “no camera, no mic, no face” angle", "Email 03"],
-        ["22 Oct", "Price step-up — the mid-launch push", "Email 04"],
-        ["22 Oct evening", "Demo walkthrough — show, do not describe", "Email 05"],
-        ["23 Oct", "Bundle value · one payment vs a monthly stack", "Email 06"],
-        ["23 Oct, before 11:59 PM", "Opening contest closes — your hardest send of the first half",
+        ["18–19 Oct", "The category — faceless YouTube, no link, no pitch", "Pre-launch 01"],
+        ["20–21 Oct", "The problem — why channels stall at editing", "Pre-launch 02"],
+        ["22 Oct", "The announcement — tomorrow, 11:00 AM", "Pre-launch 03"],
+        ["23 Oct, within 2 hrs of 11 AM", "Cart open — lead with the demo", "Email 01"],
+        ["23 Oct evening", "Story / personal send", "Email 02"],
+        ["24 Oct", "The “no camera, no mic, no face” angle", "Email 03"],
+        ["25 Oct", "Price step-up — the mid-launch push", "Email 04"],
+        ["25 Oct evening", "Demo walkthrough — show, do not describe", "Email 05"],
+        ["26 Oct", "Bundle value · one payment vs a monthly stack", "Email 06"],
+        ["26 Oct, before 11:59 PM", "Opening contest closes — your hardest send of the first half",
          "Resend 06"],
-        ["24 Oct", "Objections — answer them straight", "Email 07"],
-        ["25 Oct morning", "Close — the cart shuts tonight", "Email 08"],
-        ["25 Oct, 3–4 hrs out", "Final hours (optional)", "Email 09"],
+        ["27 Oct", "Objections — answer them straight", "Email 07"],
+        ["28 Oct morning", "Close — the cart shuts tonight", "Email 08"],
+        ["28 Oct, 3–4 hrs out", "Final hours (optional)", "Email 09"],
     ],
     widths=[1.9, 3.5, 1.2],
 )
@@ -530,7 +530,7 @@ para("Confirmed and quotable", bold=True, after=3)
 para(
     "The $37 front end and the $497/year Bundle · every OTO and downsell price · the flat 50% "
     "across all of them · the $5,000 prize pool and both boards' thresholds · the six-day "
-    "window, 20–25 October · the four video models and the 720p–4K range · the per-tier credit "
+    "window, 23–28 October · the four video models and the 720p–4K range · the per-tier credit "
     "allowances (300 / 3,000 / 10,000) · the monthly credit reset · the top-up pack prices · "
     "publishing to a real YouTube channel · thumbnail A/B testing · the continuity engine · "
     "agency client workspaces."
@@ -625,7 +625,7 @@ para(
     size=7.5,
     color=MUTE,
 )
-para("© 2026 Tally AI · Geecore Limited · Official JV Doc · 20–25 October 2026",
+para("© 2026 Tally AI · Geecore Limited · Official JV Doc · 23–28 October 2026",
      size=7.5, color=MUTE)
 
 out = os.path.join(HERE, "Tally AI - Official JV Doc.docx")
