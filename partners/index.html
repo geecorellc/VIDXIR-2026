@@ -280,6 +280,63 @@
   .fbar{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:22px;font-size:13px;font-weight:600;color:var(--ink)}
   .fbar span{background:#fff;border:1px solid var(--line);padding:8px 16px;border-radius:999px}
 
+  /* ---------- reciprocation ---------- */
+  .rstats{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-bottom:30px
+  }
+  .rstats > div{background:#fff;padding:20px 18px;text-align:center}
+  .rstats b{display:block;font-size:30px;font-weight:900;letter-spacing:-.02em;color:var(--red)}
+  .rstats span{font-size:12.5px;color:var(--gray);line-height:1.4;display:block;margin-top:4px}
+  @media(max-width:760px){.rstats{grid-template-columns:repeat(2,1fr)}}
+
+  .boards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  @media(max-width:980px){.boards{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:640px){.boards{grid-template-columns:1fr}}
+  /* The $3,000 board carries the strongest single number on the page, so it gets
+     the wide cell — its source image is a short, wide strip and would letterbox
+     badly in a one-third column. */
+  .board-wide{grid-column:span 2}
+  @media(max-width:640px){.board-wide{grid-column:auto}}
+
+  .board{
+    background:#fff;border:1px solid var(--line);border-radius:var(--radius);
+    overflow:hidden;display:flex;flex-direction:column
+  }
+  .board > a{
+    display:block;position:relative;background:var(--soft);
+    border-bottom:1px solid var(--line);text-decoration:none
+  }
+  /* Overrides the global `figure img` rule, which crops to a 3:2 box with
+     object-fit:cover. That is right for the stock photography in section 02 and
+     wrong here: these are screenshots of real leaderboards, and cropping one
+     cuts the name or the figure out of the evidence. Each board keeps its own
+     aspect ratio. */
+  .board img{display:block;width:100%;height:auto;aspect-ratio:auto;object-fit:fill}
+  .zoom{
+    position:absolute;right:10px;bottom:10px;background:rgba(15,15,15,.86);color:#fff;
+    font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    padding:5px 11px;border-radius:999px;opacity:0;transition:.18s
+  }
+  .board > a:hover .zoom,.board > a:focus-visible .zoom{opacity:1}
+  .board figcaption{padding:16px 18px 18px;display:flex;flex-direction:column;gap:4px}
+  .board figcaption b{font-size:14.5px;font-weight:700;color:var(--red)}
+  .bv{font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--gray)}
+  .bn{font-size:13px;color:var(--gray);line-height:1.5;margin-top:3px}
+
+  /* ---------- marketplace card ---------- */
+  .market{
+    max-width:420px;margin:30px auto 0;background:#fff;
+    border:1px solid var(--line);border-radius:var(--radius);padding:22px 24px
+  }
+  .market-k{
+    font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--gray);margin-bottom:13px
+  }
+  .market img{display:block;height:auto;max-width:124px;margin:0 auto 15px}
+  .market-p{font-size:13px;line-height:1.55}
+  .market-p b{color:var(--ink)}
+
   .note{font-size:12.5px;color:#8A8A8A;margin-top:18px;max-width:760px}
   .todo{background:#FFFBEA;border:1px solid #F5E6A8;color:#7A5C00;font-size:12.5px;font-weight:600;padding:3px 9px;border-radius:5px;display:inline-block}
   .sec-head{margin-bottom:42px}
@@ -297,9 +354,11 @@
         <a href="#product">Product</a>
         <a href="#funnel">Funnel</a>
         <a href="#contest">Contest</a>
+        <a href="#reciprocity">Our Record</a>
         <a href="#jvdoc">JV Doc</a>
         <a href="#tools">Swipes</a>
         <a href="#contact">Contact</a>
+        <a href="join.html">Join List</a>
       </div>
       <a class="btn btn-red" href="#jvlink">Get Links</a>
     </nav>
@@ -316,7 +375,7 @@
       <a class="btn btn-red btn-lg" href="#jvlink">Request Front End Affiliate Link →</a>
       <a class="btn btn-dark btn-lg" href="#jvlink">Request Bundle Affiliate Link →</a>
     </div>
-    <p style="font-size:13px;margin-top:14px">Two products, two approvals — request both and promote the full path.</p>
+    <p style="font-size:13px;margin-top:14px">Two products, two approvals — request both and promote the full path.<br>Not ready to request yet? <a href="join.html" style="color:var(--red);font-weight:600;text-decoration:none">Join the JV list</a> for launch updates.</p>
 
     <div class="window">
       <div class="win-col">
@@ -651,11 +710,159 @@
   </div>
 </section>
 
+<!-- ============ RECIPROCATION ============
+     The one section about our side rather than the product: if you mail for us,
+     do we mail for you. Every board below is another vendor's contest, not a
+     Tally screenshot — Tally has not launched, so it has no record of its own
+     and this section must never imply otherwise. The notice under the grid is
+     load-bearing: seven #1 finishes is capability, not a commitment, and the
+     commitment is agreed per partner in writing. -->
+<section id="reciprocity">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">06 / Reciprocation</div>
+      <h2>The list behind this launch<br>has finished #1 seven times.</h2>
+      <p class="lead">You're being asked to mail for a first-time product, so here's the record on the other side of that. Goodluck Efe finished <b>#1 on all seven boards below</b> — every one of them someone else's launch.</p>
+    </div>
+
+    <div class="rstats">
+      <div><b>7</b><span>boards, six vendors</span></div>
+      <div><b>#1</b><span>on every board shown</span></div>
+      <div><b>$3,000</b><span>largest single contest won</span></div>
+      <div><b>$6,227</b><span>commissions on one launch</span></div>
+    </div>
+
+    <div class="boards">
+      <figure class="board board-wide">
+        <a href="assets/img/support/board-jvzoo-3000.png" target="_blank" rel="noopener" aria-label="Open the full-size JVZoo affiliate contest leaderboard">
+          <img src="assets/img/support/board-jvzoo-3000-thumb.png"
+               srcset="assets/img/support/board-jvzoo-3000-thumb.png 320w, assets/img/support/board-jvzoo-3000.png 1180w"
+               sizes="(max-width:700px) 90vw, 46vw"
+               alt="JVZoo affiliate contest leaderboard. Rank #1, GOODLUCK EFE — circled in red — winnings $3000.00, marked currently winning, earnings $6,227.00. Rank #2 TheGrowth Lab, $1500.00 and $4,211.00."
+               width="1180" height="380" loading="lazy" decoding="async">
+          <span class="zoom" aria-hidden="true">Enlarge</span>
+        </a>
+        <figcaption>
+          <b>#1 — $3,000.00 won</b>
+          <span class="bv">JVZoo · affiliate contest</span>
+          <span class="bn">$6,227.00 in commissions generated, against a $3,000.00 first prize. Second place did $4,211.00.</span>
+        </figcaption>
+      </figure>
+
+      <figure class="board">
+        <a href="assets/img/support/board-jvzoo-1500.png" target="_blank" rel="noopener" aria-label="Open the full-size JVZoo $1,500 first prize leaderboard">
+          <img src="assets/img/support/board-jvzoo-1500-thumb.png"
+               srcset="assets/img/support/board-jvzoo-1500-thumb.png 320w, assets/img/support/board-jvzoo-1500.png 940w"
+               sizes="(max-width:700px) 90vw, 31vw"
+               alt="JVZoo contest page showing a $1500.00 first prize, $700.00 second and $300.00 third above a leaderboard. Rank #1 is GOODLUCK EFE, circled in red, winnings $1500.00, currently winning."
+               width="940" height="582" loading="lazy" decoding="async">
+          <span class="zoom" aria-hidden="true">Enlarge</span>
+        </a>
+        <figcaption>
+          <b>#1 — top of a $1,500 / $700 / $300 podium</b>
+          <span class="bv">JVZoo · $1,500 first prize</span>
+          <span class="bn">The podium and the board in one shot: first place on the trophy, first place on the table.</span>
+        </figcaption>
+      </figure>
+
+      <figure class="board">
+        <a href="assets/img/support/board-mobile-700.png" target="_blank" rel="noopener" aria-label="Open the full-size JVZoo leaderboard as seen on mobile">
+          <img src="assets/img/support/board-mobile-700-thumb.png"
+               srcset="assets/img/support/board-mobile-700-thumb.png 320w, assets/img/support/board-mobile-700.png 760w"
+               sizes="(max-width:700px) 90vw, 31vw"
+               alt="Mobile screenshot of the JVZoo affiliate leaderboard. Rank #1 GOODLUCK EFE, circled in red, winnings $700.00 currently winning, earnings $1,612.90. Below, #2 Seun Ogundele and #3 Pallab Ghosal."
+               width="760" height="568" loading="lazy" decoding="async">
+          <span class="zoom" aria-hidden="true">Enlarge</span>
+        </a>
+        <figcaption>
+          <b>#1 — $700.00 won, $1,612.90 earned</b>
+          <span class="bv">JVZoo · live on mobile</span>
+          <span class="bn">Same board, taken on a phone at jvzoo.com — the dashboard as it looked, not a rendering of it.</span>
+        </figcaption>
+      </figure>
+
+      <figure class="board">
+        <a href="assets/img/support/board-jvzoo-1000.png" target="_blank" rel="noopener" aria-label="Open the full-size JVZoo $1,000 first prize leaderboard">
+          <img src="assets/img/support/board-jvzoo-1000-thumb.png"
+               srcset="assets/img/support/board-jvzoo-1000-thumb.png 320w, assets/img/support/board-jvzoo-1000.png 940w"
+               sizes="(max-width:700px) 90vw, 31vw"
+               alt="JVZoo affiliate contest leaderboard. Rank #1, GOODLUCK EFE — circled in red — winnings $1000.00, marked currently winning, above #2 Pranshu Gupta at $500.00 and #3 Vijay Pratap Singh at $100.00."
+               width="940" height="796" loading="lazy" decoding="async">
+          <span class="zoom" aria-hidden="true">Enlarge</span>
+        </a>
+        <figcaption>
+          <b>#1 — $1,000.00 won</b>
+          <span class="bv">JVZoo · $1,000 first prize</span>
+          <span class="bn">Top of a $1,000 / $500 / $100 podium, ahead of six named affiliates.</span>
+        </figcaption>
+      </figure>
+
+      <figure class="board">
+        <a href="assets/img/support/board-domainrack.png" target="_blank" rel="noopener" aria-label="Open the full-size DomainRack main contest leaderboard">
+          <img src="assets/img/support/board-domainrack-thumb.png"
+               srcset="assets/img/support/board-domainrack-thumb.png 320w, assets/img/support/board-domainrack.png 535w"
+               sizes="(max-width:700px) 90vw, 31vw"
+               alt="DomainRack main contest Top Affiliates table. Rank 1 is GOODLUCK-EFE, circled in red, ahead of Calin Ioan, Radu Heracle, Anirudh Baavra and Michael McKay."
+               width="535" height="342" loading="lazy" decoding="async">
+          <span class="zoom" aria-hidden="true">Enlarge</span>
+        </a>
+        <figcaption>
+          <b>#1 of the Top Affiliates table</b>
+          <span class="bv">DomainRack · main contest</span>
+          <span class="bn">Top of the board for the DomainRack launch, ahead of the vendor's own house affiliate.</span>
+        </figcaption>
+      </figure>
+
+      <figure class="board">
+        <a href="assets/img/support/board-marketbooks.png" target="_blank" rel="noopener" aria-label="Open the full-size MarketBooks AI opening contest leaderboard">
+          <img src="assets/img/support/board-marketbooks-thumb.png"
+               srcset="assets/img/support/board-marketbooks-thumb.png 320w, assets/img/support/board-marketbooks.png 790w"
+               sizes="(max-width:700px) 90vw, 31vw"
+               alt="MarketBooks AI opening contest Top Affiliates table. Rank 1 is GOODLUCK-EFE, circled in red, above Radu Heracle, Launchpad, Michael McKay and Cyril Agi."
+               width="790" height="497" loading="lazy" decoding="async">
+          <span class="zoom" aria-hidden="true">Enlarge</span>
+        </a>
+        <figcaption>
+          <b>#1 of the whole board</b>
+          <span class="bv">MarketBooks AI · opening contest</span>
+          <span class="bn">A commissions-only, solo-entry contest — no team pooling, so the rank is one person's work.</span>
+        </figcaption>
+      </figure>
+
+      <figure class="board">
+        <a href="assets/img/support/board-superstars.png" target="_blank" rel="noopener" aria-label="Open the full-size Early Superstars leaderboard for Advance AI">
+          <img src="assets/img/support/board-superstars-thumb.png"
+               srcset="assets/img/support/board-superstars-thumb.png 320w, assets/img/support/board-superstars.png 850w"
+               sizes="(max-width:700px) 90vw, 31vw"
+               alt="Early Superstars contest leaderboard for Advance AI. Participant 1 is GOODLUCK EFE, circled in red, above Seyi Adeleke and Akshat Gupta."
+               width="850" height="453" loading="lazy" decoding="async">
+          <span class="zoom" aria-hidden="true">Enlarge</span>
+        </a>
+        <figcaption>
+          <b>#1 participant</b>
+          <span class="bv">Early Superstars · Advance AI</span>
+          <span class="bn">Top of the leaderboard on a contest whose own terms offered 2X reciprocation — earned on someone else's launch.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <div class="info-note" style="margin-top:30px">
+      <span class="info-ico" aria-hidden="true">i</span>
+      <div>
+        <h3 style="font-size:16px;margin-bottom:5px">What the boards above do and don't tell you</h3>
+        <p style="font-size:14px;margin-bottom:9px"><b style="color:var(--ink)">They show capability, not a promise.</b> Seven #1 finishes on other vendors' launches is evidence that the list behind this launch performs when it mails — which is the fair question to ask about a product that hasn't launched before. It is not, by itself, a reciprocation commitment.</p>
+        <p style="font-size:14px;margin-bottom:9px"><b style="color:var(--ink)">Reciprocation is agreed per partner, in writing, by date.</b> Message Goodluck with your launch date and what you need, and you get a specific answer — a date we can commit to, or a straight no — <b style="color:var(--ink)">before</b> you commit a send to us. Nothing on this page should be read as an offer of a reciprocal mail until you have that reply.</p>
+        <p style="font-size:14px">What we will never do is quote you a number. No guaranteed sales, no guaranteed EPC, no "we'll do X for you". The boards show what has happened on other launches; your decision should rest on that and on the offer, not on a projection we invented.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ============ TOOLS ============ -->
 <section id="tools" style="background:var(--soft);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
   <div class="wrap">
     <div class="sec-head">
-      <div class="eyebrow">06 / Your promo desk</div>
+      <div class="eyebrow">07 / Your promo desk</div>
       <h2>Everything written for you.</h2>
     </div>
     <div class="grid-2">
@@ -663,6 +870,7 @@
       <div class="card" id="jvdoc" style="scroll-margin-top:92px"><h3>JV document</h3><p>Dates, funnel, commissions and the full contest rules in one reference.</p><a class="btn btn-ghost" style="margin-top:16px" href="#jvlink">Open JV doc</a></div>
       <div class="card"><h3>Demo video &amp; graphics</h3><p>Walkthrough recording, banners and social creative, sized and ready.</p><span class="todo" style="margin-top:16px">COMING SOON</span></div>
       <div class="card"><h3>Review access</h3><p>Hands-on account so you can mail honestly. Ask and it's yours.</p><a class="btn btn-ghost" style="margin-top:16px" href="#contact">Request access</a></div>
+      <div class="card"><h3>Launch updates by email</h3><p>Funnel, swipes, contest standings and a reminder before the cart opens.</p><a class="btn btn-red" style="margin-top:16px" href="join.html">Join the JV list →</a></div>
     </div>
   </div>
 </section>
@@ -671,7 +879,7 @@
 <section id="contact">
   <div class="wrap">
     <div class="sec-head center">
-      <div class="eyebrow">07 / The team</div>
+      <div class="eyebrow">08 / The team</div>
       <h2>Let's make your promo count.</h2>
     </div>
     <div class="grid-3">
@@ -743,6 +951,20 @@
   <div class="wrap">
     <div class="eyebrow">October 20 · 11:00 AM EDT</div>
     <h2>Give your list a channel<br>that runs itself.</h2>
+
+    <!-- Marketplace card. Names the platform, and separates it from the vendor
+         in the same breath — JVZoo operates the checkout, Geecore Limited is
+         who the buyer actually contracts with. The long-form version of this is
+         the JVZoo disclaimer in the footer. -->
+    <div class="market">
+      <p class="market-k">Marketplace</p>
+      <img src="assets/logos/jvzoo-logo.png" alt="JVZoo" width="124" height="60" loading="lazy" decoding="async">
+      <p class="market-p">
+        Vendor of record: <b>Geecore Limited</b>. JVZoo is the platform operator, not the
+        seller — your buyer's contract for any purchase is with Geecore Limited.
+      </p>
+    </div>
+
     <div class="cta-row" style="margin-top:30px">
       <a class="btn btn-red btn-lg" href="#" id="jv-fe">Request Front End Affiliate Link →</a>
       <a class="btn btn-dark btn-lg" href="#" id="jv-bundle">Request Bundle Affiliate Link →</a>

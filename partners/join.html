@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join the Tally AI JV List — Launch Updates</title>
+<meta name="description" content="Get the Tally AI launch details first: funnel, swipes, contest standings and a reminder before the cart opens on October 20, 2026.">
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  /* Tokens copied from index.html rather than shared, because both pages are
+     deliberately single-file and portable — there is no build step here. If the
+     palette changes, it changes in two places. */
+  :root{
+    --red:#FF0000;
+    --red-dark:#CC0000;
+    --ink:#0F0F0F;
+    --gray:#606060;
+    --line:#E5E5E5;
+    --soft:#F9F9F9;
+    --white:#FFFFFF;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:Roboto,-apple-system,Segoe UI,sans-serif;
+    color:var(--ink);background:var(--soft);
+    line-height:1.6;-webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{line-height:1.15;letter-spacing:-.02em}
+  p{color:var(--gray)}
+  a{color:var(--red)}
+
+  /* ---------- shell ---------- */
+  .shell{max-width:1000px;margin:0 auto;padding:30px 24px 60px}
+  .top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:34px}
+  .logo{display:flex;align-items:center;gap:9px;font-weight:900;font-size:21px;letter-spacing:-.02em;text-decoration:none;color:var(--ink)}
+  .play{
+    width:30px;height:21px;background:var(--red);border-radius:6px;position:relative;flex:none
+  }
+  .play::after{
+    content:"";position:absolute;top:50%;left:50%;transform:translate(-45%,-50%);
+    border-left:8px solid #fff;border-top:5px solid transparent;border-bottom:5px solid transparent
+  }
+  .back{font-size:14px;font-weight:600;text-decoration:none;color:var(--gray)}
+  .back:hover{color:var(--ink)}
+
+  /* ---------- two columns ---------- */
+  .split{display:grid;grid-template-columns:1fr 420px;gap:34px;align-items:start}
+  @media(max-width:880px){.split{grid-template-columns:1fr}}
+
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;background:#FFF0F0;color:var(--red);
+    font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+    padding:8px 15px;border-radius:999px;margin-bottom:20px
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--red)}
+  h1{font-size:clamp(31px,4.6vw,46px);font-weight:900;margin-bottom:16px}
+  h1 em{font-style:normal;color:var(--red)}
+  .lead{font-size:17px;max-width:520px}
+
+  /* launch window — the same three facts as the JV page hero */
+  .win{
+    display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin:26px 0
+  }
+  .win div{background:#fff;padding:16px 18px}
+  .win dt{font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--red);margin-bottom:5px}
+  .win b{display:block;font-size:19px;font-weight:900}
+  .win span{font-size:12.5px;color:var(--gray)}
+
+  .perks{list-style:none;display:grid;gap:11px;margin-top:4px}
+  .perks li{display:flex;gap:11px;font-size:15px;color:var(--ink)}
+  .tick{color:var(--red);font-weight:900;flex:none}
+
+  .stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:26px}
+  .stats span{
+    background:#fff;border:1px solid var(--line);border-radius:999px;
+    padding:8px 15px;font-size:13px;font-weight:700
+  }
+
+  /* ---------- form card ---------- */
+  .card{
+    background:#fff;border:1px solid var(--line);border-radius:var(--radius);
+    padding:28px;position:sticky;top:30px
+  }
+  @media(max-width:880px){.card{position:static}}
+  .card h2{font-size:22px;font-weight:900;margin-bottom:7px}
+  .card .sub{font-size:14px;margin-bottom:22px}
+
+  .field{margin-bottom:16px}
+  label{display:block;font-size:13px;font-weight:700;margin-bottom:6px}
+  input{
+    width:100%;font:inherit;font-size:15px;color:var(--ink);
+    padding:13px 15px;border:1.5px solid var(--line);border-radius:10px;background:#fff
+  }
+  input:focus{outline:none;border-color:var(--ink)}
+  input[aria-invalid="true"]{border-color:var(--red)}
+  .err{display:block;min-height:17px;font-size:12.5px;font-weight:600;color:var(--red);margin-top:4px}
+
+  .btn{
+    width:100%;display:inline-flex;align-items:center;justify-content:center;gap:9px;
+    padding:16px 30px;border:none;border-radius:999px;background:var(--red);color:#fff;
+    font:inherit;font-size:16px;font-weight:700;cursor:pointer;transition:.18s
+  }
+  .btn:hover{background:var(--red-dark)}
+  .btn[aria-disabled="true"]{opacity:.65;pointer-events:none}
+
+  .fine{font-size:12px;line-height:1.5;color:var(--gray);margin-top:14px}
+
+  /* success state — replaces the form body in place */
+  .ok{display:none;text-align:center;padding:14px 0}
+  .ok-ico{
+    width:52px;height:52px;border-radius:50%;background:var(--red);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:25px;font-weight:900;
+    margin:0 auto 16px
+  }
+  .ok h3{font-size:20px;margin-bottom:8px}
+  .ok p{font-size:14px}
+  form.done .fbody{display:none}
+  form.done .ok{display:block}
+
+  /* marketplace card, same component as the JV page */
+  .market{
+    background:var(--soft);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px 20px;margin-top:22px;text-align:center
+  }
+  .market-k{font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--gray);margin-bottom:11px}
+  .market img{display:block;height:auto;max-width:106px;margin:0 auto 12px}
+  .market p{font-size:12.5px;line-height:1.5}
+  .market b{color:var(--ink)}
+
+  .todo{
+    display:inline-block;background:#FFF0F0;color:var(--red);
+    font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    padding:3px 9px;border-radius:5px
+  }
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--line);margin-top:46px;padding-top:24px}
+  footer p{font-size:12px;line-height:1.6;max-width:820px}
+  footer p + p{margin-top:9px}
+  .hp{position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <div class="top">
+    <a class="logo" href="index.html"><span class="play"></span>Tally<span style="color:var(--red)">AI</span></a>
+    <a class="back" href="index.html">← Back to the JV page</a>
+  </div>
+
+  <div class="split">
+
+    <!-- ============ LEFT: why join ============ -->
+    <div>
+      <div class="pill"><span class="dot"></span>JV &amp; Affiliate Launch Updates</div>
+      <h1>Get every launch<br>detail <em>first</em>.</h1>
+      <p class="lead">
+        50% commission and $5,000 in contest cash are locked. Join the list for the final funnel,
+        the finished swipes and the leaderboard — before the cart opens.
+      </p>
+
+      <dl class="win">
+        <div>
+          <dt>Cart opens</dt>
+          <b>Tue, Oct 20</b>
+          <span>11:00 AM EDT</span>
+        </div>
+        <div>
+          <dt>Cart closes</dt>
+          <b>Sun, Oct 25</b>
+          <span>11:59 PM EDT</span>
+        </div>
+      </dl>
+
+      <ul class="perks">
+        <li><span class="tick">✓</span> 50% commission across the funnel — confirmed</li>
+        <li><span class="tick">✓</span> The full OTO ladder and prices before cart open</li>
+        <li><span class="tick">✓</span> Email swipes, banners and the screenshot pack</li>
+        <li><span class="tick">✓</span> $5,000 in contest cash across two leaderboards</li>
+        <li><span class="tick">✓</span> Review access, on request, ahead of launch day</li>
+        <li><span class="tick">✓</span> A reminder before the cart opens — and before it closes</li>
+      </ul>
+
+      <div class="stats">
+        <span>50% all products</span>
+        <span>$37 front end</span>
+        <span>$497/yr Bundle</span>
+        <span>$5,000 prize pool</span>
+      </div>
+    </div>
+
+    <!-- ============ RIGHT: the form ============ -->
+    <div class="card">
+      <h2>Join the JV list</h2>
+      <p class="sub">Two fields. Unsubscribe any time.</p>
+
+      <form id="jvform" novalidate>
+        <div class="fbody">
+          <div class="field">
+            <label for="name">Your name</label>
+            <input type="text" id="name" name="name" required autocomplete="name" placeholder="Jordan Ellis">
+            <span class="err" data-err-for="name"></span>
+          </div>
+
+          <div class="field">
+            <label for="email">Email address</label>
+            <input type="email" id="email" name="email" required autocomplete="email" placeholder="you@yourdomain.com">
+            <span class="err" data-err-for="email"></span>
+          </div>
+
+          <!-- Honeypot: hidden from real users, catches bots that fill every
+               field they find. Not a substitute for server-side checking. -->
+          <div class="hp" aria-hidden="true">
+            <label for="company">Leave this field blank</label>
+            <input type="text" id="company" name="company" tabindex="-1" autocomplete="off">
+          </div>
+
+          <button class="btn" type="submit">Send Me Launch Updates →</button>
+
+          <p class="fine">
+            Launch communications about Tally AI only. No affiliate earnings are promised or
+            implied. Joining this list is not an affiliate approval — request your links on the
+            <a href="index.html#jvlink">JV page</a>.
+          </p>
+        </div>
+
+        <div class="ok">
+          <div class="ok-ico" aria-hidden="true">✓</div>
+          <h3>You're on the list</h3>
+          <p>
+            We'll mail you the funnel, the swipes and a reminder before 11:00 AM EDT on
+            October&nbsp;20. Next step: <a href="index.html#jvlink">request your affiliate links</a>.
+          </p>
+        </div>
+      </form>
+
+      <div class="market">
+        <p class="market-k">Marketplace</p>
+        <img src="assets/logos/jvzoo-logo.png" alt="JVZoo" width="106" height="51" loading="lazy" decoding="async">
+        <p>
+          Vendor of record: <b>Geecore Limited</b>. JVZoo is the platform operator, not the seller.
+        </p>
+      </div>
+    </div>
+
+  </div>
+
+  <p style="margin-top:26px;font-size:13px">
+    <span class="todo">TO CONFIRM</span>
+    &nbsp;This form has no endpoint yet. It validates and shows the success state, but
+    <b>nothing is stored and no email is sent</b> — wire <code>SUBSCRIBE_ENDPOINT</code> in the
+    script below to your list provider before sending traffic here.
+  </p>
+
+  <footer>
+    <p>
+      <b>JVZoo disclaimer.</b> Tally AI is sold through JVZoo, an online marketplace platform. JVZoo is
+      a platform operator and technology provider and is not the seller, author or publisher of this
+      product. The contractual relationship for any purchase is solely between the buyer and Geecore
+      Limited as vendor. JVZoo does not review, endorse, warrant or guarantee this product or any result
+      from it. The name JVZoo and JVZoo.com is a trademark of BBC Systems Inc., a Florida corporation
+      located at 1809 E. Broadway Street, Suite 125, Oviedo, FL 32765, USA, used here for identification only.
+    </p>
+    <p>
+      <b>Earnings disclaimer.</b> Nothing on this page is a promise or projection of affiliate earnings.
+      No EPC, conversion rate or affiliate income figure is quoted anywhere, because this is a first
+      launch and none exists. Results depend on your list, your traffic and your promotion — including
+      earning nothing.
+    </p>
+    <p>
+      <b>Platform independence.</b> Tally AI is not affiliated with, endorsed by, or sponsored by YouTube,
+      Google LLC or any of their subsidiaries. YouTube is a trademark of Google LLC, used here for
+      identification only.
+    </p>
+    <p style="margin-top:13px;color:#9A9A9A">
+      JV &amp; affiliate information only — not an offer to the public. © 2026 Geecore Limited.
+      All rights reserved.
+    </p>
+  </footer>
+
+</div>
+
+<script>
+  /* Set this to your list provider's endpoint and the form POSTs for real.
+     Left null deliberately: a hard-coded placeholder URL would fail silently at
+     the one moment a partner is handing over their email, and a success screen
+     over a failed POST is worse than no form at all. While it is null the form
+     validates, shows the success state, and says so on the page. */
+  var SUBSCRIBE_ENDPOINT = null;
+
+  var form = document.getElementById("jvform");
+
+  function fail(input, message) {
+    input.setAttribute("aria-invalid", "true");
+    var slot = form.querySelector('[data-err-for="' + input.id + '"]');
+    if (slot) slot.textContent = message;
+  }
+
+  function clearErr(input) {
+    input.removeAttribute("aria-invalid");
+    var slot = form.querySelector('[data-err-for="' + input.id + '"]');
+    if (slot) slot.textContent = "";
+  }
+
+  Array.prototype.forEach.call(form.querySelectorAll("input"), function (input) {
+    input.addEventListener("input", function () { clearErr(input); });
+  });
+
+  /* Deliberately loose: something@something.something. Anything stricter
+     rejects real addresses, and the list provider validates properly anyway. */
+  function emailLooksReal(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (form.getAttribute("aria-busy") === "true") return;
+
+    var name = document.getElementById("name");
+    var email = document.getElementById("email");
+    var first = null;
+
+    if (!name.value.trim()) { fail(name, "Tell us your name."); first = first || name; }
+    if (!email.value.trim()) {
+      fail(email, "We need an email to send updates to.");
+      first = first || email;
+    } else if (!emailLooksReal(email.value.trim())) {
+      fail(email, "That doesn't look like an email address.");
+      first = first || email;
+    }
+    if (first) { first.focus(); return; }
+
+    // Honeypot filled = bot. Show success and drop it, so it doesn't retry.
+    if (document.getElementById("company").value) { form.classList.add("done"); return; }
+
+    var btn = form.querySelector('button[type="submit"]');
+    var idle = btn.textContent;
+
+    function busy(on) {
+      if (on) { form.setAttribute("aria-busy", "true"); btn.setAttribute("aria-disabled", "true"); btn.textContent = "Sending…"; }
+      else { form.removeAttribute("aria-busy"); btn.removeAttribute("aria-disabled"); btn.textContent = idle; }
+    }
+
+    function succeed() { busy(false); form.classList.add("done"); }
+
+    if (!SUBSCRIBE_ENDPOINT) { busy(true); setTimeout(succeed, 600); return; }
+
+    busy(true);
+    fetch(SUBSCRIBE_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: name.value.trim(),
+        email: email.value.trim(),
+        list: "tally-jv-launch"
+      })
+    }).then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      succeed();
+    }).catch(function () {
+      // Never a success screen over a failed POST — say it failed and let them retry.
+      busy(false);
+      fail(email, "That didn't send. Try again, or email us from the JV page.");
+      email.focus();
+    });
+  });
+</script>
+
+</body>
+</html>
