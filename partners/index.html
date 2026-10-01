@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tally AI — JV &amp; Affiliate Partners</title>
+<meta name="description" content="Tally AI launches October 20, 2026, 11:00 AM EDT. 5-day lifetime launch. 50% commissions across the funnel.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --red:#FF0000;
+    --red-dark:#CC0000;
+    --ink:#0F0F0F;
+    --gray:#606060;
+    --line:#E5E5E5;
+    --soft:#F9F9F9;
+    --white:#FFFFFF;
+    --radius:14px;
+    --max:1120px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:Roboto,-apple-system,Segoe UI,sans-serif;
+    color:var(--ink);background:var(--white);
+    line-height:1.6;-webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+  section{padding:84px 0}
+  h1,h2,h3{line-height:1.15;letter-spacing:-.02em}
+  h1{font-size:clamp(34px,5.4vw,62px);font-weight:900}
+  h2{font-size:clamp(27px,3.6vw,42px);font-weight:900}
+  h3{font-size:19px;font-weight:700}
+  p{color:var(--gray)}
+  .eyebrow{
+    font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--red);margin-bottom:14px
+  }
+  .lead{font-size:18px;max-width:600px}
+  .center{text-align:center}
+  .center .lead{margin-left:auto;margin-right:auto}
+
+  /* ---------- buttons ---------- */
+  .btn{
+    display:inline-flex;align-items:center;gap:9px;
+    padding:15px 30px;border-radius:999px;font-weight:700;font-size:15px;
+    text-decoration:none;border:2px solid transparent;transition:.18s;cursor:pointer
+  }
+  .btn-red{background:var(--red);color:#fff}
+  .btn-red:hover{background:var(--red-dark);transform:translateY(-1px)}
+  .btn-ghost{border-color:var(--line);color:var(--ink);background:#fff}
+  .btn-ghost:hover{border-color:var(--ink)}
+  .btn-dark{background:var(--ink);color:#fff}
+  .btn-dark:hover{background:#000;transform:translateY(-1px)}
+  .btn-lg{padding:18px 40px;font-size:17px}
+
+  /* ---------- nav ---------- */
+  header{
+    position:sticky;top:0;z-index:60;background:rgba(255,255,255,.94);
+    backdrop-filter:blur(12px);border-bottom:1px solid var(--line)
+  }
+  nav{display:flex;align-items:center;justify-content:space-between;height:70px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:900;font-size:21px;letter-spacing:-.03em}
+  .play{
+    width:34px;height:24px;background:var(--red);border-radius:7px;
+    display:grid;place-items:center;flex:none
+  }
+  .play::after{content:"";width:0;height:0;border-left:9px solid #fff;border-top:5.5px solid transparent;border-bottom:5.5px solid transparent;margin-left:2px}
+  .nav-links{display:flex;gap:30px;align-items:center}
+  .nav-links a{color:var(--gray);text-decoration:none;font-size:14px;font-weight:500}
+  .nav-links a:hover{color:var(--red)}
+  @media(max-width:900px){.nav-links{display:none}}
+
+  /* ---------- hero ---------- */
+  .hero{padding:72px 0 64px;text-align:center}
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;background:#FFF0F0;color:var(--red-dark);
+    border:1px solid #FFD6D6;padding:8px 17px;border-radius:999px;
+    font-size:13px;font-weight:700;margin-bottom:26px
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--red);animation:pulse 1.6s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+  h1 .hl{color:var(--red)}
+  .hero .lead{margin:22px auto 32px;font-size:19px}
+  .cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+
+  /* ---------- hero launch window ---------- */
+  .window{
+    display:grid;grid-template-columns:1fr auto 1fr;gap:18px;align-items:center;
+    margin-top:46px;border:2px solid var(--ink);border-radius:18px;
+    padding:28px 34px;background:#fff;text-align:left
+  }
+  .win-col{display:grid;gap:3px}
+  .win-end{text-align:right}
+  .win-k{font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--red)}
+  .win-d{font-size:clamp(24px,3.2vw,34px);font-weight:900;letter-spacing:-.03em;line-height:1.1}
+  .win-t{font-size:14px;font-weight:700;color:var(--gray)}
+  .win-arrow{display:grid;gap:7px;justify-items:center;min-width:132px}
+  .win-days{
+    font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+    background:var(--red);color:#fff;padding:5px 13px;border-radius:999px;white-space:nowrap
+  }
+  .win-line{width:100%;height:2px;background:linear-gradient(90deg,var(--ink),var(--red));border-radius:2px}
+  @media(max-width:760px){
+    .window{grid-template-columns:1fr;text-align:center;padding:24px;gap:14px}
+    .win-col,.win-end{text-align:center;justify-items:center}
+    .win-line{width:60px}
+  }
+
+  /* ---------- stat strip ---------- */
+  .stats{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-top:56px
+  }
+  .stat{background:#fff;padding:26px 16px;text-align:center}
+  .stat b{display:block;font-size:30px;font-weight:900;letter-spacing:-.03em}
+  .stat span{font-size:12px;font-weight:600;color:var(--gray);text-transform:uppercase;letter-spacing:.09em}
+  @media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+  /* ---------- countdown ---------- */
+  .count-wrap{background:var(--ink);border-radius:20px;padding:46px 30px;text-align:center;color:#fff}
+  .count-wrap .eyebrow{color:#FF5B5B}
+  .count{display:flex;gap:14px;justify-content:center;margin-top:8px;flex-wrap:wrap}
+  .cbox{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:18px 10px;min-width:92px}
+  .cbox b{display:block;font-size:40px;font-weight:900;line-height:1;font-variant-numeric:tabular-nums}
+  .cbox span{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#AAA;font-weight:600}
+
+  /* ---------- dates ---------- */
+  .dates{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+  .drow{display:grid;grid-template-columns:62px 1fr 150px 128px;gap:18px;align-items:center;padding:20px 24px;border-bottom:1px solid var(--line)}
+  .drow:last-child{border-bottom:0}
+  .drow.live{background:#FFF8F8}
+  .dnum{font-size:13px;font-weight:900;color:var(--red);letter-spacing:.1em}
+  .dtitle{font-weight:700;font-size:16px}
+  .dtitle small{display:block;font-weight:400;color:var(--gray);font-size:13.5px;letter-spacing:0}
+  .ddate{font-weight:700;font-size:15px}
+  .dtime{font-size:14px;color:var(--gray);font-weight:500}
+  .tag{display:inline-block;background:var(--red);color:#fff;font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:999px;letter-spacing:.07em;margin-left:7px;vertical-align:middle}
+  @media(max-width:820px){
+    .drow{grid-template-columns:46px 1fr;row-gap:6px}
+    .ddate,.dtime{grid-column:2;font-size:14px}
+  }
+
+  /* ---------- funnel ---------- */
+  .funnel{display:grid;gap:18px}
+  .tier{
+    border:1px solid var(--line);border-radius:var(--radius);padding:30px;
+    display:grid;grid-template-columns:148px 1fr 190px;gap:30px;align-items:center;transition:.18s
+  }
+  .tier:hover{border-color:#CFCFCF;box-shadow:0 6px 26px rgba(0,0,0,.055)}
+  .tier.feature{border:2px solid var(--red);background:#FFFCFC;position:relative}
+  .badge-top{
+    position:absolute;top:-12px;left:30px;background:var(--red);color:#fff;
+    font-size:11px;font-weight:800;padding:5px 14px;border-radius:999px;letter-spacing:.09em
+  }
+  .tlabel{font-size:11.5px;font-weight:800;letter-spacing:.13em;color:var(--red);text-transform:uppercase}
+  .tname{font-size:21px;font-weight:900;margin:5px 0 3px;letter-spacing:-.02em}
+  .tsub{font-size:14px;color:var(--gray)}
+  .tprice{text-align:right}
+  .tprice b{font-size:32px;font-weight:900;letter-spacing:-.03em;display:block;line-height:1.1}
+  .tprice span{font-size:13px;color:var(--gray);font-weight:500}
+  .tlist{list-style:none;display:grid;gap:7px}
+  .tlist li{font-size:14.5px;color:#3C3C3C;display:flex;gap:9px;align-items:flex-start}
+  .tick{color:var(--red);font-weight:900;flex:none}
+  @media(max-width:880px){
+    .tier{grid-template-columns:1fr;gap:18px;text-align:left}
+    .tprice{text-align:left}
+  }
+
+  /* ---------- generic cards ---------- */
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+  .grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+  .card{border:1px solid var(--line);border-radius:var(--radius);padding:28px;background:#fff}
+  .card h3{margin-bottom:8px}
+  .card p{font-size:14.5px}
+  .icon{
+    width:46px;height:46px;border-radius:11px;background:#FFF0F0;color:var(--red);
+    display:grid;place-items:center;margin-bottom:16px;font-size:21px;font-weight:900
+  }
+  @media(max-width:880px){.grid-3,.grid-2{grid-template-columns:1fr}}
+
+  /* ---------- media ---------- */
+  figure{margin:0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);background:var(--soft)}
+  figure img{width:100%;height:100%;object-fit:cover;display:block;aspect-ratio:3/2}
+  figcaption{font-size:12.5px;color:var(--gray);padding:12px 16px;border-top:1px solid var(--line);background:#fff}
+  .shot{display:grid;grid-template-columns:1.05fr .95fr;gap:44px;align-items:center}
+  @media(max-width:880px){.shot{grid-template-columns:1fr;gap:28px}}
+
+  /* ---------- contest ---------- */
+  .prize{background:var(--ink);color:#fff;border-radius:20px;padding:52px 40px;text-align:center}
+  .prize h2{color:#fff}
+  .prize p{color:#B0B0B0}
+  .pgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:34px;text-align:left}
+  .pcard{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.13);border-radius:13px;padding:26px}
+  .pcard b{display:block;font-size:26px;font-weight:900;color:#fff;margin-bottom:5px}
+  .pcard span{font-size:13.5px;color:#AAA}
+  .tba{display:inline-block;margin-top:14px;font-size:11px;font-weight:800;letter-spacing:.1em;color:#FF5B5B;border:1px solid rgba(255,91,91,.4);padding:4px 11px;border-radius:999px}
+  @media(max-width:700px){.pgrid{grid-template-columns:1fr}}
+
+  /* contest timeline */
+  .tl{display:grid;grid-template-columns:3fr 2fr;gap:6px;margin-top:34px}
+  .tl-seg{border-radius:9px;padding:11px 14px;font-size:12.5px;font-weight:800;letter-spacing:.03em}
+  .tl-1{background:var(--red);color:#fff}
+  .tl-2{background:rgba(255,255,255,.13);color:#fff;border:1px solid rgba(255,255,255,.2)}
+  @media(max-width:700px){.tl{grid-template-columns:1fr}}
+
+  .pool{margin-top:30px;border:1px solid rgba(255,255,255,.16);border-radius:15px;padding:26px;background:rgba(255,255,255,.05)}
+  .pool span{font-size:11.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:#FF8A84}
+  .pool strong{display:block;font-size:52px;font-weight:900;letter-spacing:-.04em;line-height:1.05;margin:4px 0 8px;color:#fff}
+  .pool small{font-size:13.5px;color:#B0B0B0;display:block;max-width:460px;margin:0 auto}
+  .pool small b{color:#fff}
+
+  .boards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:26px;text-align:left}
+  .board{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.13);border-radius:14px;padding:22px}
+  .bh{font-size:15px;font-weight:800;color:#fff;margin-bottom:16px;line-height:1.3}
+  .bh span{display:block;font-size:11.5px;font-weight:600;color:#9A9A9A;letter-spacing:.02em;margin-top:3px}
+  .spoke{display:grid;grid-template-columns:28px 1fr auto;gap:11px;align-items:center;padding:12px 0;border-top:1px solid rgba(255,255,255,.09)}
+  .spoke i{font-style:normal;font-size:18px}
+  .spoke b{display:block;font-size:14px;color:#fff;font-weight:700}
+  .spoke em{display:block;font-size:11.5px;color:#9A9A9A;font-style:normal;margin-top:1px}
+  .spoke strong{font-size:21px;font-weight:900;color:#fff;letter-spacing:-.02em}
+  .spoke.top strong{color:#FF8A84}
+  @media(max-width:760px){.boards{grid-template-columns:1fr}}
+
+  /* qualification */
+  .qual{margin-top:26px;border:1px solid var(--line);border-radius:var(--radius);padding:28px;background:#fff}
+  .qual-head{display:flex;gap:14px;align-items:flex-start}
+  .qual-head h3{margin-bottom:6px}
+  .qb{border:1px solid var(--line);border-radius:12px;padding:20px;background:var(--soft)}
+  .qbh{font-size:14px;margin-bottom:14px;line-height:1.35}
+  .qbh span{display:block;font-size:11.5px;color:var(--gray);font-weight:600;margin-top:2px}
+  .qt{display:grid;gap:1px;padding:11px 0;border-top:1px solid var(--line)}
+  .qt b{font-size:19px;font-weight:900;letter-spacing:-.02em}
+  .qt span{font-size:12.5px;color:#4A4A4A}
+  .qt .gross{font-size:11.5px;color:#9A9A9A}
+
+  /* ---------- faq ---------- */
+  details{border-bottom:1px solid var(--line);padding:19px 0}
+  summary{font-weight:700;font-size:16px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:16px;align-items:center}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";color:var(--red);font-size:22px;font-weight:700;flex:none}
+  details[open] summary::after{content:"–"}
+  details p{margin-top:11px;font-size:14.5px;max-width:760px}
+
+  /* ---------- contacts ---------- */
+  .person{text-align:center;border:1px solid var(--line);border-radius:var(--radius);padding:30px 20px}
+  .avatar{width:74px;height:74px;border-radius:50%;background:var(--soft);margin:0 auto 14px;display:grid;place-items:center;font-size:24px;font-weight:900;color:var(--red);border:1px solid var(--line)}
+  .person b{display:block;font-size:16px}
+  .person span{font-size:13px;color:var(--gray)}
+  .person a{color:var(--red);text-decoration:none;font-weight:600;word-break:break-word}
+  .person a:hover{text-decoration:underline}
+  .person-lead{border-color:var(--red);background:#FFFCFC}
+  .avatar-photo{padding:0;overflow:hidden}
+  .avatar-photo img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%}
+  .avatar-photo a{display:block;width:100%;height:100%;line-height:0}
+  .avatar-mark{background:#FFF0F0}
+  .pdl{margin-top:16px;display:grid;gap:9px;text-align:left}
+  .pdl > div{display:grid;grid-template-columns:72px 1fr;gap:10px;align-items:baseline}
+  .pdl dt{font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#9A9A9A}
+  .pdl dd{margin:0;font-size:13.5px;color:#3C3C3C}
+  .info-note{
+    display:flex;gap:14px;align-items:flex-start;margin-top:26px;
+    background:var(--soft);border:1px solid var(--line);border-left:3px solid var(--red);
+    border-radius:11px;padding:20px 22px;text-align:left
+  }
+  .info-ico{
+    width:24px;height:24px;border-radius:50%;background:var(--red);color:#fff;flex:none;
+    display:grid;place-items:center;font-size:13px;font-weight:900;font-style:italic
+  }
+  code{background:var(--soft);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12px}
+
+  /* ---------- final ---------- */
+  .final{background:var(--soft);border-top:1px solid var(--line);text-align:center}
+  footer{padding:44px 0 34px;border-top:1px solid var(--line);font-size:13px;color:var(--gray)}
+  .legal{margin-top:34px;padding-top:26px;border-top:1px solid var(--line);display:grid;gap:13px}
+  .legal p{font-size:11.5px;line-height:1.65;color:#8A8A8A}
+  .legal b{color:#5A5A5A}
+  .fbar{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin-top:22px;font-size:13px;font-weight:600;color:var(--ink)}
+  .fbar span{background:#fff;border:1px solid var(--line);padding:8px 16px;border-radius:999px}
+
+  .note{font-size:12.5px;color:#8A8A8A;margin-top:18px;max-width:760px}
+  .todo{background:#FFFBEA;border:1px solid #F5E6A8;color:#7A5C00;font-size:12.5px;font-weight:600;padding:3px 9px;border-radius:5px;display:inline-block}
+  .sec-head{margin-bottom:42px}
+</style>
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<header>
+  <div class="wrap">
+    <nav>
+      <div class="logo"><span class="play"></span>Tally<span style="color:var(--red)">AI</span></div>
+      <div class="nav-links">
+        <a href="#dates">Dates</a>
+        <a href="#product">Product</a>
+        <a href="#funnel">Funnel</a>
+        <a href="#contest">Contest</a>
+        <a href="#jvdoc">JV Doc</a>
+        <a href="#tools">Swipes</a>
+        <a href="#contact">Contact</a>
+      </div>
+      <a class="btn btn-red" href="#jvlink">Get JV Link</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ============ HERO ============ -->
+<div class="hero">
+  <div class="wrap">
+    <div class="pill"><span class="dot"></span>OCTOBER 20 · 11:00 AM EDT · 5-DAY LAUNCH</div>
+    <h1>One keyword in.<br>A finished YouTube video<br><span class="hl">published out.</span></h1>
+    <p class="lead">Tally AI researches the niche, writes the script, generates the voiceover, visuals, music and captions, renders the video, designs the thumbnail — and publishes it to a real YouTube channel. Hands off.</p>
+    <div class="cta-row">
+      <a class="btn btn-red btn-lg" href="#jvlink">Request Front End Affiliate Link →</a>
+      <a class="btn btn-dark btn-lg" href="#jvlink">Request Bundle Affiliate Link →</a>
+    </div>
+    <p style="font-size:13px;margin-top:14px">Two products, two approvals — request both and promote the full path.</p>
+
+    <div class="window">
+      <div class="win-col">
+        <span class="win-k">Launch opens</span>
+        <b class="win-d">Tue, Oct 20</b>
+        <span class="win-t">11:00 AM EDT</span>
+      </div>
+      <div class="win-arrow" aria-hidden="true">
+        <span class="win-days">5-day launch</span>
+        <span class="win-line"></span>
+      </div>
+      <div class="win-col win-end">
+        <span class="win-k">Launch closes</span>
+        <b class="win-d">Sat, Oct 24</b>
+        <span class="win-t">11:59 PM EDT</span>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><b>50%</b><span>All products</span></div>
+      <div class="stat"><b>$37</b><span>Front end</span></div>
+      <div class="stat"><b>$497</b><span>Bundle / yr</span></div>
+      <div class="stat"><b>$5,000</b><span>Prize pool</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ COUNTDOWN + DATES ============ -->
+<section id="dates" style="padding-top:28px">
+  <div class="wrap">
+    <div class="count-wrap">
+      <div class="eyebrow">Until the cart opens</div>
+      <div class="count" id="countdown">
+        <div class="cbox"><b id="cd">00</b><span>Days</span></div>
+        <div class="cbox"><b id="ch">00</b><span>Hours</span></div>
+        <div class="cbox"><b id="cm">00</b><span>Minutes</span></div>
+        <div class="cbox"><b id="cs">00</b><span>Seconds</span></div>
+      </div>
+    </div>
+
+    <div class="sec-head" style="margin-top:72px">
+      <div class="eyebrow">01 / Plan your campaign</div>
+      <h2>Five days. All times EDT.</h2>
+    </div>
+
+    <div class="dates">
+      <div class="drow">
+        <div class="dnum">01</div>
+        <div class="dtitle">Pre-launch opens<small>Swipes live — start warming your list</small></div>
+        <div class="ddate">Thu, Oct 15</div>
+        <div class="dtime">—</div>
+      </div>
+      <div class="drow live">
+        <div class="dnum">02</div>
+        <div class="dtitle">Cart opens <span class="tag">DAY 1</span><small>Full funnel live, early-bird pricing</small></div>
+        <div class="ddate">Tue, Oct 20</div>
+        <div class="dtime">11:00 AM EDT</div>
+      </div>
+      <div class="drow">
+        <div class="dnum">03</div>
+        <div class="dtitle">Mid-launch push<small>Price step-up — use the urgency swipes</small></div>
+        <div class="ddate">Thu, Oct 22</div>
+        <div class="dtime">11:00 AM EDT</div>
+      </div>
+      <div class="drow">
+        <div class="dnum">04</div>
+        <div class="dtitle">Last call<small>Final 24 hours — your biggest mailing day</small></div>
+        <div class="ddate">Fri, Oct 23</div>
+        <div class="dtime">11:59 PM EDT</div>
+      </div>
+      <div class="drow">
+        <div class="dnum">05</div>
+        <div class="dtitle">Launch closes<small>Cart down, lifetime deal gone</small></div>
+        <div class="ddate">Sat, Oct 24</div>
+        <div class="dtime">11:59 PM EDT</div>
+      </div>
+    </div>
+    <p class="note">5-day launch window: Tuesday October 20 through Saturday October 24, 2026.</p>
+  </div>
+</section>
+
+<!-- ============ PRODUCT ============ -->
+<section id="product" style="background:var(--soft);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <div class="wrap">
+    <div class="sec-head center">
+      <div class="eyebrow">02 / What they're buying</div>
+      <h2>Nothing faked in between.</h2>
+      <p class="lead">Every stage is real work by a real provider — and your buyer watches it happen.</p>
+    </div>
+
+    <div class="shot">
+      <figure>
+        <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=1200&q=80" alt="Analytics dashboard open on a laptop">
+        <figcaption>Research → script → voiceover → visuals → render → publish, in one dashboard.</figcaption>
+      </figure>
+      <div>
+        <h2 style="font-size:28px;margin-bottom:16px">The full pipeline, not a prompt box.</h2>
+        <ul class="tlist" style="gap:11px">
+          <li><span class="tick">✓</span> Niche research that finds the opportunity first</li>
+          <li><span class="tick">✓</span> Original scripts — written for retention, not word count</li>
+          <li><span class="tick">✓</span> AI voiceover, b-roll, music and burned-in captions</li>
+          <li><span class="tick">✓</span> Four video models, 720p to 4K</li>
+          <li><span class="tick">✓</span> Thumbnail design with A/B testing</li>
+          <li><span class="tick">✓</span> Direct publish to a real YouTube channel</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="grid-3" style="margin-top:56px">
+      <div class="card">
+        <div class="icon">1</div>
+        <h3>Pick a niche</h3>
+        <p>Tally researches demand, competition and the gap worth filling — then suggests the video.</p>
+      </div>
+      <div class="card">
+        <div class="icon">2</div>
+        <h3>Approve the script</h3>
+        <p>Edit a line or hit go. Voice, visuals, music and captions generate from there.</p>
+      </div>
+      <div class="card">
+        <div class="icon">3</div>
+        <h3>Publish or schedule</h3>
+        <p>Straight to YouTube with title, description, tags and thumbnail already done.</p>
+      </div>
+    </div>
+
+    <div class="grid-3" style="margin-top:20px">
+      <figure>
+        <img src="https://images.unsplash.com/photo-1611162616475-46b635cb6868?w=800&q=80" alt="YouTube play button icon">
+        <figcaption>Publishes to a real YouTube channel.</figcaption>
+      </figure>
+      <figure>
+        <img src="https://images.unsplash.com/photo-1551650975-87deedd944c3?w=800&q=80" alt="Performance dashboards on a phone and desktop">
+        <figcaption>Cross-channel analytics on Bundle.</figcaption>
+      </figure>
+      <figure>
+        <img src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=800&q=80" alt="Team working together on laptops">
+        <figcaption>Scales to client work on Agency.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FUNNEL ============ -->
+<section id="funnel">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">03 / The offer path</div>
+      <h2>Lifetime front end. Four upgrades.</h2>
+      <p class="lead">50% commission on every product below, front end to last OTO.</p>
+    </div>
+
+    <div class="funnel">
+
+      <div class="tier">
+        <div>
+          <div class="tlabel">Front end</div>
+          <div class="tname">Tally AI<br>Commercial</div>
+          <div class="tsub">Lifetime access</div>
+        </div>
+        <ul class="tlist">
+          <li><span class="tick">✓</span> 1 YouTube channel</li>
+          <li><span class="tick">✓</span> 10 videos per month</li>
+          <li><span class="tick">✓</span> 300 credits monthly</li>
+          <li><span class="tick">✓</span> Tal 1.0 + Tal 2.0 video models, up to 1080p</li>
+          <li><span class="tick">✓</span> Research, scripts, voiceover, captions, thumbnails</li>
+          <li><span class="tick">✓</span> Commercial licence — sell what you make</li>
+        </ul>
+        <div class="tprice"><b>$37</b><span>one-time · rises in launch</span></div>
+      </div>
+
+      <div class="tier feature">
+        <div class="badge-top">OTO 1 · BEST VALUE</div>
+        <div>
+          <div class="tlabel">OTO 1 — Bundle</div>
+          <div class="tname">Unlimited<br>Bundle</div>
+          <div class="tsub">Everything, one payment</div>
+        </div>
+        <ul class="tlist">
+          <li><span class="tick">✓</span> <b>Every OTO on this page included</b></li>
+          <li><span class="tick">✓</span> Unlimited channels &amp; unlimited videos</li>
+          <li><span class="tick">✓</span> <b>10,000 credits that reset every month</b> — no roll-over needed</li>
+          <li><span class="tick">✓</span> All four models incl. Tal 3.1 Ultra, up to 4K</li>
+          <li><span class="tick">✓</span> Automation, agency workspaces, priority render queue</li>
+          <li><span class="tick">✓</span> Top-up packs available any time you burn through early</li>
+        </ul>
+        <div class="tprice"><b>$497</b><span>per year</span></div>
+      </div>
+
+      <div class="tier">
+        <div>
+          <div class="tlabel">OTO 2</div>
+          <div class="tname">Tally AI<br>Pro</div>
+          <div class="tsub">Lift the limits</div>
+        </div>
+        <ul class="tlist">
+          <li><span class="tick">✓</span> Unlimited videos, 3 channels</li>
+          <li><span class="tick">✓</span> 3,000 credits monthly</li>
+          <li><span class="tick">✓</span> Tal 3.0 Cinematic + Tal 3.1 Ultra unlocked</li>
+          <li><span class="tick">✓</span> 4K rendering &amp; thumbnail A/B testing</li>
+          <li><span class="tick">✓</span> Continuity engine — characters that stay consistent</li>
+        </ul>
+        <div class="tprice"><b>$97</b><span>one-time · $67 downsell</span></div>
+      </div>
+
+      <div class="tier">
+        <div>
+          <div class="tlabel">OTO 3</div>
+          <div class="tname">Autopilot<br>Engine</div>
+          <div class="tsub">Set it and walk away</div>
+        </div>
+        <ul class="tlist">
+          <li><span class="tick">✓</span> Full channel automation on a cadence you set</li>
+          <li><span class="tick">✓</span> Auto-publish &amp; scheduling queue</li>
+          <li><span class="tick">✓</span> Hands-off daily or weekly uploads</li>
+          <li><span class="tick">✓</span> Automated analytics refresh &amp; reporting</li>
+        </ul>
+        <div class="tprice"><b>$67</b><span>one-time · $47 downsell</span></div>
+      </div>
+
+      <div class="tier">
+        <div>
+          <div class="tlabel">OTO 4</div>
+          <div class="tname">Agency<br>&amp; Reseller</div>
+          <div class="tsub">Turn it into a service</div>
+        </div>
+        <ul class="tlist">
+          <li><span class="tick">✓</span> 10 client workspaces, separated data</li>
+          <li><span class="tick">✓</span> Per-client credit pools &amp; reporting</li>
+          <li><span class="tick">✓</span> Client sub-logins, read-only access</li>
+          <li><span class="tick">✓</span> Reseller licence &amp; done-for-you client contracts</li>
+        </ul>
+        <div class="tprice"><b>$197</b><span>one-time · $147 downsell</span></div>
+      </div>
+
+    </div>
+
+    <div class="card" style="margin-top:28px;background:var(--soft)">
+      <h3 style="margin-bottom:10px">How credits work <span style="font-weight:400;color:var(--gray);font-size:14px">— worth knowing before you mail</span></h3>
+      <p style="font-size:14.5px;max-width:860px">Generation is metered in credits, because a cinematic 4K scene costs real provider money and a 720p one doesn't. Every tier gets a monthly allowance that <b>resets each month</b> — the Unlimited Bundle resets at 10,000. If a buyer burns through early and won't wait for the reset, top-up packs are one click away. That's the built-in repeat revenue after launch week.</p>
+    </div>
+    <p class="note">Two paths to the same place: <b>$37 → $497 Bundle</b> (one decision, everything unlocked), or <b>$37 → $97 → $67 → $197</b> stacked individually (<b>$398</b>). Price points step up during the 5-day window — lead with the front end and let the funnel do the rest.</p>
+  </div>
+</section>
+
+<!-- ============ WHY PROMOTE ============ -->
+<section style="background:var(--soft);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <div class="wrap">
+    <div class="sec-head center">
+      <div class="eyebrow">04 / Why it converts</div>
+      <h2>Why promote Tally AI?</h2>
+    </div>
+    <div class="grid-3">
+      <div class="card"><div class="icon">▶</div><h3>A demo that sells itself</h3><p>Keyword in, finished video out. One screen recording and the offer is made.</p></div>
+      <div class="card"><div class="icon">∞</div><h3>Faceless YouTube is hot</h3><p>The angle your list already wants, without a camera, mic or on-screen presence.</p></div>
+      <div class="card"><div class="icon">%</div><h3>50% on everything</h3><p>Flat across the front end and all four OTOs. Nothing clawed back at OTO level.</p></div>
+      <div class="card"><div class="icon">↻</div><h3>Credits = back-end</h3><p>Top-up packs keep earning after the cart closes, not just during launch week.</p></div>
+      <div class="card"><div class="icon">⚑</div><h3>Multiple angles</h3><p>Creators, faceless channel builders, agencies, affiliates, local video services.</p></div>
+      <div class="card"><div class="icon">✦</div><h3>Real software</h3><p>Publishes to an actual YouTube channel. Review access available before you mail.</p></div>
+    </div>
+    <p class="note" style="margin-left:auto;margin-right:auto;text-align:center">Nothing on this page is an earnings or conversion guarantee. Results depend on your list, your angle and your timing.</p>
+  </div>
+</section>
+
+<!-- ============ CONTEST ============ -->
+<section id="contest">
+  <div class="wrap">
+    <div class="prize">
+      <div class="eyebrow">05 / Contest &amp; prizes</div>
+      <h2>$5,000 in JV cash,<br>across two contests.</h2>
+      <p style="max-width:600px;margin:14px auto 0">Two separate leaderboards, back to back. The opening board rewards whoever hits hardest out of the gate; the closing board is a fresh start for anyone who keeps mailing to the deadline.</p>
+
+      <div class="tl">
+        <div class="tl-seg tl-1"><span>Opening contest · $3,000</span></div>
+        <div class="tl-seg tl-2"><span>Closing contest · $2,000</span></div>
+      </div>
+
+      <div class="pool">
+        <span>Total prize pool</span>
+        <strong>$5,000</strong>
+        <small>Six cash places across two boards — paid <b>on top of</b> your 50% commission, never out of it.</small>
+      </div>
+
+      <div class="boards">
+        <div class="board">
+          <p class="bh">Opening board<span>Tue Oct 20, 11:00 AM → Thu Oct 22, 11:59 PM EDT</span></p>
+          <div class="spoke top"><i>🥇</i><span><b>1st place</b><em>Needs $2,000+ in commissions</em></span><strong>$2,000</strong></div>
+          <div class="spoke"><i>🥈</i><span><b>2nd place</b><em>Needs $700+ in commissions</em></span><strong>$700</strong></div>
+          <div class="spoke"><i>🥉</i><span><b>3rd place</b><em>Needs $300+ in commissions</em></span><strong>$300</strong></div>
+        </div>
+        <div class="board">
+          <p class="bh">Closing board<span>Fri Oct 23, 12:00 AM → Sat Oct 24, 11:59 PM EDT</span></p>
+          <div class="spoke top"><i>🥇</i><span><b>1st place</b><em>Needs $1,000+ in commissions</em></span><strong>$1,000</strong></div>
+          <div class="spoke"><i>🥈</i><span><b>2nd place</b><em>Needs $700+ in commissions</em></span><strong>$700</strong></div>
+          <div class="spoke"><i>🥉</i><span><b>3rd place</b><em>Needs $300+ in commissions</em></span><strong>$300</strong></div>
+        </div>
+      </div>
+
+      <div style="margin-top:34px"><a class="btn btn-red" href="#jvlink">Request your affiliate link →</a></div>
+    </div>
+
+    <div class="qual">
+      <div class="qual-head">
+        <span class="info-ico" style="font-style:normal">!</span>
+        <div>
+          <h3>How you qualify — read this before you plan your promo</h3>
+          <p style="font-size:14.5px">A place on the board isn't enough on its own. <b style="color:var(--ink)">To take a prize in full, your commissions must at least equal the prize you're competing for.</b> Miss the threshold and you don't lose everything — you drop to the next prize down whose threshold you <em>have</em> cleared.</p>
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top:22px">
+        <div class="qb">
+          <p class="qbh"><b>Opening board</b> <span>Tue Oct 20, 11:00 AM → Thu Oct 22, 11:59 PM EDT</span></p>
+          <div class="qt"><b>$2,000</b><span>1st · needs $2,000+ in commissions</span><span class="gross">≈ $4,000 in sales at 50%</span></div>
+          <div class="qt"><b>$700</b><span>2nd · needs $700+ in commissions</span><span class="gross">≈ $1,400 in sales at 50%</span></div>
+          <div class="qt"><b>$300</b><span>3rd · needs $300+ in commissions</span><span class="gross">≈ $600 in sales at 50%</span></div>
+        </div>
+        <div class="qb">
+          <p class="qbh"><b>Closing board</b> <span>Fri Oct 23, 12:00 AM → Sat Oct 24, 11:59 PM EDT</span></p>
+          <div class="qt"><b>$1,000</b><span>1st · needs $1,000+ in commissions</span><span class="gross">≈ $2,000 in sales at 50%</span></div>
+          <div class="qt"><b>$700</b><span>2nd · needs $700+ in commissions</span><span class="gross">≈ $1,400 in sales at 50%</span></div>
+          <div class="qt"><b>$300</b><span>3rd · needs $300+ in commissions</span><span class="gross">≈ $600 in sales at 50%</span></div>
+        </div>
+      </div>
+      <p class="note">Commissions counted are net of refunds and chargebacks. Prize cash is paid on top of commission, after the refund window closes. Both boards run on the same affiliate link — front end and bundle sales both count.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TOOLS ============ -->
+<section id="tools" style="background:var(--soft);border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="eyebrow">06 / Your promo desk</div>
+      <h2>Everything written for you.</h2>
+    </div>
+    <div class="grid-2">
+      <div class="card"><h3>Email swipes</h3><p>Launch day, demo, mid-launch, last call. Copy, paste, send.</p><a class="btn btn-ghost" style="margin-top:16px" href="#jvlink">Open swipes</a></div>
+      <div class="card" id="jvdoc" style="scroll-margin-top:92px"><h3>JV document</h3><p>Dates, funnel, commissions and the full contest rules in one reference.</p><a class="btn btn-ghost" style="margin-top:16px" href="#jvlink">Open JV doc</a></div>
+      <div class="card"><h3>Demo video &amp; graphics</h3><p>Walkthrough recording, banners and social creative, sized and ready.</p><span class="todo" style="margin-top:16px">COMING SOON</span></div>
+      <div class="card"><h3>Review access</h3><p>Hands-on account so you can mail honestly. Ask and it's yours.</p><a class="btn btn-ghost" style="margin-top:16px" href="#contact">Request access</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CONTACT ============ -->
+<section id="contact">
+  <div class="wrap">
+    <div class="sec-head center">
+      <div class="eyebrow">07 / The team</div>
+      <h2>Let's make your promo count.</h2>
+    </div>
+    <div class="grid-3">
+
+      <div class="person">
+        <div class="avatar avatar-mark"><span class="play" style="width:30px;height:21px"></span></div>
+        <b>Launch &amp; JV Support</b>
+        <span>Primary contact</span>
+        <dl class="pdl">
+          <div><dt>Email</dt><dd><a href="mailto:support@tally.com">support@tally.com</a></dd></div>
+          <div><dt>For</dt><dd>Approval, tracking links, general launch questions</dd></div>
+        </dl>
+      </div>
+
+      <div class="person person-lead">
+        <div class="avatar avatar-photo">
+          <a href="https://teams.live.com/l/invite/FEAdc6Z288fh8Q2mQ?v=g1" target="_blank" rel="noopener noreferrer" aria-label="Chat with Goodluck Efe on Microsoft Teams" title="Chat with Goodluck Efe on Microsoft Teams">
+            <img src="assets/img/goodluck-efe-portrait.png" alt="Goodluck Efe" width="74" height="74" loading="lazy" decoding="async">
+          </a>
+        </div>
+        <b>Goodluck Efe</b>
+        <span>Founder &amp; JV Manager</span>
+        <dl class="pdl">
+          <div><dt>Teams</dt><dd><a href="https://teams.live.com/l/invite/FEAdc6Z288fh8Q2mQ?v=g1" target="_blank" rel="noopener noreferrer">Chat on Teams</a></dd></div>
+          <div><dt>Facebook</dt><dd><a href="https://web.facebook.com/medics.goodluck/" target="_blank" rel="noopener noreferrer">Chat on Facebook</a></dd></div>
+          <div><dt>For</dt><dd>JV questions, promo plans, anything you want to run past a person</dd></div>
+        </dl>
+      </div>
+
+      <div class="person">
+        <div class="avatar avatar-photo"><img src="assets/img/geecore-mark.png" alt="Geecore Limited" width="74" height="74" loading="lazy" decoding="async"></div>
+        <b>Geecore Limited</b>
+        <span>Vendor of record</span>
+        <dl class="pdl">
+          <div><dt>Legal</dt><dd><a href="mailto:admin@geecorelimited.com">admin@geecorelimited.com</a></dd></div>
+          <div><dt>For</dt><dd>Legal, licensing and compliance questions</dd></div>
+        </dl>
+      </div>
+
+    </div>
+
+    <div class="info-note">
+      <span class="info-ico" aria-hidden="true">i</span>
+      <div>
+        <h3 style="font-size:16px;margin-bottom:5px">Reach Goodluck directly</h3>
+        <p style="font-size:14px">Goodluck Efe is your JV manager for this launch — the Teams and Facebook links on his card both go straight to him. For approval, tracking links and anything else the launch team handles, <a href="mailto:support@tally.com" style="color:var(--red);font-weight:600">support@tally.com</a> is the faster route.</p>
+      </div>
+    </div>
+    <p class="note" style="text-align:center;margin-left:auto;margin-right:auto"><span class="todo">TO CONFIRM</span> &nbsp;Partner support inbox — <code>support@tally.com</code> is a placeholder until you confirm the real address.</p>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section style="background:var(--soft);border-top:1px solid var(--line)">
+  <div class="wrap" style="max-width:860px">
+    <div class="sec-head center"><div class="eyebrow">Before you mail</div><h2>Partner essentials</h2></div>
+    <details open><summary>Where do I get my affiliate link?</summary><p>Two approvals on JVZoo — one for the <b>$37 front end</b> and one for the <b>$497 Unlimited Bundle</b>. Request both from the buttons on this page. Product IDs: <span class="todo">TO FILL</span>. Approval is manual; the front-end link carries all four OTOs and their downsells.</p></details>
+    <details><summary>What's the commission?</summary><p>A flat 50% on every product in the funnel, front end through OTO 4, including downsells. Contest cash is paid <b>on top of</b> commission, never out of it.</p></details>
+    <details><summary>How does the $5,000 contest work?</summary><p>Two back-to-back leaderboards: a <b>$3,000 opening board</b> (Oct 20, 11:00 AM → Oct 22, 11:59 PM EDT) and a <b>$2,000 closing board</b> (Oct 23, 12:00 AM → Oct 24, 11:59 PM EDT), with three cash places on each. To take a prize in full your commissions must at least equal the prize — miss the threshold and you drop to the next prize down you have cleared.</p></details>
+    <details><summary>Which price do I lead with?</summary><p>The $37 front end. The Unlimited Bundle at $497/yr is presented immediately after purchase and is where most of your commission will come from.</p></details>
+    <details><summary>Why is the Bundle yearly when everything else is one-time?</summary><p>Because it resets 10,000 credits every month. That recurring generation allowance is a real provider cost, so it's priced annually rather than as a single payment.</p></details>
+    <details><summary>Is there a money-back guarantee?</summary><p><span class="todo">TO CONFIRM</span> — confirm the refund window before you mail, and match the wording on the sales page.</p></details>
+    <details><summary>Can I get review access?</summary><p>Yes. Message <b>Goodluck Efe</b> on Teams or Facebook — links in the <a href="#contact" style="color:var(--red);font-weight:600;text-decoration:none">contact section</a> — and we'll set up a hands-on account before launch day.</p></details>
+  </div>
+</section>
+
+<!-- ============ FINAL CTA ============ -->
+<section class="final" id="jvlink">
+  <div class="wrap">
+    <div class="eyebrow">October 20 · 11:00 AM EDT</div>
+    <h2>Give your list a channel<br>that runs itself.</h2>
+    <div class="cta-row" style="margin-top:30px">
+      <a class="btn btn-red btn-lg" href="#" id="jv-fe">Request Front End Affiliate Link →</a>
+      <a class="btn btn-dark btn-lg" href="#" id="jv-bundle">Request Bundle Affiliate Link →</a>
+    </div>
+    <p class="note" style="margin:22px auto 0;text-align:center"><span class="todo">TO FILL</span> &nbsp;Two JVZoo approval URLs — one for the <b>$37 front end</b>, one for the <b>$497 Unlimited Bundle</b>. Point each button at its own product ID.</p>
+    <div class="fbar">
+      <span>50% commissions</span>
+      <span>$5,000 prize pool</span>
+      <span>$37 front end</span>
+      <span>$497/yr Bundle</span>
+      <span>Oct 20 → Oct 24</span>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="center">
+      <div class="logo" style="justify-content:center;margin-bottom:12px"><span class="play"></span>Tally<span style="color:var(--red)">AI</span></div>
+      <p style="font-size:13.5px;max-width:560px;margin:0 auto">
+        AI YouTube automation — research a niche, write the script, generate the video, publish the channel.
+        Tally AI is a product of <b style="color:var(--ink)">Geecore Limited</b>.
+      </p>
+      <p style="font-size:12.5px;margin-top:10px">Partner support: <a href="mailto:support@tally.com" style="color:var(--red);font-weight:600;text-decoration:none">support@tally.com</a> &nbsp;·&nbsp; Legal: <a href="mailto:admin@geecorelimited.com" style="color:var(--red);font-weight:600;text-decoration:none">admin@geecorelimited.com</a></p>
+    </div>
+
+    <div class="legal">
+      <p>
+        <b>JVZoo disclaimer.</b> Tally AI is sold through JVZoo, an online marketplace platform. JVZoo is a
+        platform operator and technology provider and is not the seller, author or publisher of this product.
+        The contractual relationship for any purchase is solely between the buyer and Geecore Limited as
+        vendor; JVZoo is not a party to that contract. Depending on the transaction flow, a third-party
+        payment facilitator, JVZoo, or the vendor may act as merchant of record for a given transaction.
+        JVZoo does not review, endorse, warrant or guarantee this product or any result from it. All product
+        claims, support, delivery and refunds are the responsibility of Geecore Limited. The name JVZoo and
+        JVZoo.com is a trademark of BBC Systems Inc., a Florida corporation located at 1809 E. Broadway
+        Street, Suite 125, Oviedo, FL 32765, USA, used here for identification only.
+      </p>
+      <p>
+        <b>Earnings disclaimer.</b> Nothing on this page is a promise or projection of affiliate earnings.
+        No EPC, conversion rate, refund rate or affiliate income figure is quoted anywhere on this page.
+        Affiliate results depend on your list, your traffic, your promotion and factors outside anyone's
+        control, including earning nothing.
+      </p>
+      <p>
+        <b>Platform independence.</b> Tally AI is not affiliated with, endorsed by, or sponsored by YouTube,
+        Google LLC or any of their subsidiaries. YouTube is a trademark of Google LLC, used here for
+        identification only. Publishing to YouTube requires the customer's own channel and is subject to
+        YouTube's terms and policies.
+      </p>
+      <p style="margin-top:14px;color:#9A9A9A">
+        JV &amp; affiliate information only — not an offer to the public. Figures marked “to confirm” are
+        not final. © 2026 Geecore Limited. All rights reserved.
+      </p>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Cart opens Tue 20 Oct 2026, 11:00 AM EDT (UTC-4)
+  var TARGET = new Date("2026-10-20T11:00:00-04:00").getTime();
+  var pad = function(n){ return String(n).padStart(2,"0"); };
+  function tick(){
+    var diff = TARGET - Date.now();
+    if (diff < 0) diff = 0;
+    var s = Math.floor(diff/1000);
+    document.getElementById("cd").textContent = pad(Math.floor(s/86400));
+    document.getElementById("ch").textContent = pad(Math.floor(s%86400/3600));
+    document.getElementById("cm").textContent = pad(Math.floor(s%3600/60));
+    document.getElementById("cs").textContent = pad(s%60);
+  }
+  tick();
+  setInterval(tick, 1000);
+</script>
+</body>
+</html>
