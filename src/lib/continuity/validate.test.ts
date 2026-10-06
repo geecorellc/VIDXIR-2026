@@ -1235,7 +1235,7 @@ describe("voice continuity", () => {
      * §25's guarantee, asserted as an equality rather than as a range.
      *
      * The same states and prompts, with and without a voice on Mara and with no voice
-     * records either way. If the voice check ever contributed to the tally for an
+     * records either way. If the voice check ever contributed to the vidxir for an
      * unvoiced project these two numbers would diverge, and every existing project's
      * score would have silently moved.
      */
@@ -1271,7 +1271,7 @@ describe("voice continuity", () => {
     expect(issue?.entityId).toBe("mara");
     expect(report.score).toBeLessThan(100);
     // The provider voice id is never in the message: it is meaningless to an operator
-    // and it is the vendor's token, not Tally's.
+    // and it is the vendor's token, not Vidxir AI's.
     expect(issue?.message).not.toContain(OTHER);
     expect(issue?.message).not.toContain(CANONICAL);
   });
@@ -1380,7 +1380,7 @@ describe("voice continuity", () => {
   });
 
   it("warns rather than fails for a character with no canonical voice", () => {
-    // A gap, not a break: the project voice narrated the scene, which is what Tally
+    // A gap, not a break: the project voice narrated the scene, which is what Vidxir AI
     // has always done. Failing it would spend a regeneration on business as usual.
     const states: IndexedSceneState[] = [
       {

@@ -78,7 +78,7 @@ suite("project lifecycle (integration)", () => {
   describe("creation", () => {
     it("starts in IDEA with a trace id and an opening audit event", async () => {
       const { listEvents } = await import("@/lib/projects/service");
-      const { project, user } = await newProject("create@tally.test");
+      const { project, user } = await newProject("create@vidxir.test");
 
       expect(project.status).toBe("IDEA");
       expect(project.progress).toBe(0);
@@ -98,7 +98,7 @@ suite("project lifecycle (integration)", () => {
         "@/lib/projects/service"
       );
 
-      const { user, channelId } = await newProject("counter@tally.test");
+      const { user, channelId } = await newProject("counter@vidxir.test");
       await createProject({
         userId: user.id,
         channelId,
@@ -122,7 +122,7 @@ suite("project lifecycle (integration)", () => {
   describe("transitions", () => {
     it("walks the whole MVP path and persists every step", async () => {
       const { listEvents, transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("walk@tally.test");
+      const { user, project } = await newProject("walk@vidxir.test");
 
       for (const next of HAPPY_PATH) {
         const current = await transition(user.id, project.id, next);
@@ -140,7 +140,7 @@ suite("project lifecycle (integration)", () => {
 
     it("refuses to skip stages", async () => {
       const { getProject, transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("skip@tally.test");
+      const { user, project } = await newProject("skip@vidxir.test");
 
       await expect(
         transition(user.id, project.id, "RENDERING"),
@@ -153,7 +153,7 @@ suite("project lifecycle (integration)", () => {
 
     it("records the stage and message on the event row", async () => {
       const { listEvents, transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("stage@tally.test");
+      const { user, project } = await newProject("stage@vidxir.test");
 
       await transition(user.id, project.id, "SCRIPT_GENERATING", {
         stage: "SCRIPT",
@@ -172,7 +172,7 @@ suite("project lifecycle (integration)", () => {
 
     it("accepts a no-op re-assertion so a duplicated job delivery is not an error", async () => {
       const { transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("idempotent@tally.test");
+      const { user, project } = await newProject("idempotent@vidxir.test");
 
       await transition(user.id, project.id, "SCRIPT_GENERATING");
       // A worker that receives the same message twice must not fail the project.
@@ -183,7 +183,7 @@ suite("project lifecycle (integration)", () => {
 
     it("loses the race rather than double-applying a concurrent transition", async () => {
       const { getProject, transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("race@tally.test");
+      const { user, project } = await newProject("race@vidxir.test");
       await transition(user.id, project.id, "SCRIPT_GENERATING");
       await transition(user.id, project.id, "SCRIPT_READY");
 
@@ -204,7 +204,7 @@ suite("project lifecycle (integration)", () => {
   describe("failure and retry", () => {
     it("stores the failing stage, code and message so the UI never sticks on 'Generating'", async () => {
       const { failProject, transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("fail@tally.test");
+      const { user, project } = await newProject("fail@vidxir.test");
 
       await advanceTo(user.id, project.id, "SCRIPT_READY");
       await transition(user.id, project.id, "ASSETS_GENERATING", {
@@ -227,7 +227,7 @@ suite("project lifecycle (integration)", () => {
 
     it("clears the previous error and counts the attempt on retry", async () => {
       const { failProject, transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("retry@tally.test");
+      const { user, project } = await newProject("retry@vidxir.test");
 
       await advanceTo(user.id, project.id, "ASSETS_GENERATING");
       await failProject(user.id, project.id, {
@@ -256,7 +256,7 @@ suite("project lifecycle (integration)", () => {
       const { failProject, listEvents, transition } = await import(
         "@/lib/projects/service"
       );
-      const { user, project } = await newProject("audit@tally.test");
+      const { user, project } = await newProject("audit@vidxir.test");
 
       await transition(user.id, project.id, "SCRIPT_GENERATING");
       await failProject(user.id, project.id, {
@@ -288,7 +288,7 @@ suite("project lifecycle (integration)", () => {
         "RENDERING",
         "PUBLISHING",
       ] as const) {
-        const { user, project } = await newProject(`anyfail-${stop}@tally.test`);
+        const { user, project } = await newProject(`anyfail-${stop}@vidxir.test`);
         for (const status of HAPPY_PATH.slice(0, HAPPY_PATH.indexOf(stop) + 1)) {
           await transition(user.id, project.id, status);
         }
@@ -305,7 +305,7 @@ suite("project lifecycle (integration)", () => {
   describe("PUBLISHED is only reachable from a confirmed upload (§42)", () => {
     it("cannot jump to PUBLISHED from READY_TO_PUBLISH", async () => {
       const { getProject, transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("publish@tally.test");
+      const { user, project } = await newProject("publish@vidxir.test");
 
       await advanceTo(user.id, project.id, "READY_TO_PUBLISH");
       expect((await getProject(user.id, project.id)).status).toBe(
@@ -321,7 +321,7 @@ suite("project lifecycle (integration)", () => {
 
     it("lets a failed upload go to FAILED but not quietly back to ready", async () => {
       const { transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("upload-fail@tally.test");
+      const { user, project } = await newProject("upload-fail@vidxir.test");
 
       await advanceTo(user.id, project.id, "PUBLISHING");
 
@@ -340,7 +340,7 @@ suite("project lifecycle (integration)", () => {
 
     it("allows an explicit retry of the upload from FAILED", async () => {
       const { failProject, transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("upload-retry@tally.test");
+      const { user, project } = await newProject("upload-retry@vidxir.test");
 
       await advanceTo(user.id, project.id, "PUBLISHING");
       await failProject(user.id, project.id, {
@@ -358,7 +358,7 @@ suite("project lifecycle (integration)", () => {
 
     it("treats PUBLISHED as terminal", async () => {
       const { transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("terminal@tally.test");
+      const { user, project } = await newProject("terminal@vidxir.test");
 
       await advanceTo(user.id, project.id, "PUBLISHED");
 
@@ -374,7 +374,7 @@ suite("project lifecycle (integration)", () => {
   describe("scheduling", () => {
     it("can schedule and unschedule without touching PUBLISHED", async () => {
       const { transition } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("schedule@tally.test");
+      const { user, project } = await newProject("schedule@vidxir.test");
 
       await advanceTo(user.id, project.id, "READY_TO_PUBLISH");
       await expect(
@@ -409,7 +409,7 @@ suite("project lifecycle (integration)", () => {
 
     it("persists progress and clamps out-of-range values", async () => {
       const { getProject, setProgress } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("progress@tally.test");
+      const { user, project } = await newProject("progress@vidxir.test");
 
       await setProgress(user.id, project.id, 42.6);
       expect((await getProject(user.id, project.id)).progress).toBe(43);
@@ -423,7 +423,7 @@ suite("project lifecycle (integration)", () => {
 
     it("reports sidebar reach from the persisted status, not from client state", async () => {
       const { reachOf } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("reach@tally.test");
+      const { user, project } = await newProject("reach@vidxir.test");
 
       expect(await reachOf(user.id)).toBe("idea");
 
@@ -436,7 +436,7 @@ suite("project lifecycle (integration)", () => {
 
     it("reports no reach once the active project is published", async () => {
       const { reachOf } = await import("@/lib/projects/service");
-      const { user, project } = await newProject("published-reach@tally.test");
+      const { user, project } = await newProject("published-reach@vidxir.test");
 
       await advanceTo(user.id, project.id, "PUBLISHED");
       // `getActiveProject` excludes PUBLISHED, so the studio starts clean for

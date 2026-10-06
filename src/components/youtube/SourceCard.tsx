@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * "SOURCE ANALYSIS" — what Tally understood about the pasted video (§5, §18, §22).
+ * "SOURCE ANALYSIS" — what Vidxir AI understood about the pasted video (§5, §18, §22).
  *
  * Read-only, metadata only, and deliberately unable to be anything else: it takes
  * a `SourceView`, whose fields are numbers, strings and a thumbnail *URL*. There
@@ -13,7 +13,7 @@
  * facts (§42). And the transcript line says why there is no transcript rather than
  * implying one was read: `captions.download` needs the video owner's own OAuth
  * credentials, so a third party cannot legitimately read another creator's
- * captions, and Tally does not try.
+ * captions, and Vidxir AI does not try.
  */
 import { Clock, Eye, MessageSquare, ThumbsUp, Youtube } from "lucide-react";
 import type { ReactNode } from "react";
@@ -51,7 +51,7 @@ const UNKNOWN_TRANSCRIPT = "YouTube did not say whether this video has captions.
 const TRANSCRIPT_NOTE: Record<string, string> = {
   owner_only:
     "This video has captions, but YouTube only serves them to the channel that " +
-    "owns it. Tally does not read another creator's captions.",
+    "owns it. Vidxir AI does not read another creator's captions.",
   none: "YouTube reports no captions on this video.",
   unknown: UNKNOWN_TRANSCRIPT,
 };
@@ -63,7 +63,7 @@ export function SourceCard({ source }: { source: SourceCardData }) {
         {source.thumbnailUrl && (
           /*
             Displayed straight from YouTube's own CDN, exactly as an embed would.
-            Tally never fetches, stores or re-encodes it (§22), which is also why
+            Vidxir AI never fetches, stores or re-encodes it (§22), which is also why
             this is a plain <img>: next/image would proxy and cache the bytes.
           */
           // eslint-disable-next-line @next/next/no-img-element -- remote YouTube thumbnail, displayed not stored (§22)
@@ -185,7 +185,7 @@ export function SourceCard({ source }: { source: SourceCardData }) {
               marginBottom: 9,
             }}
           >
-            Topic Tally will research
+            Topic Vidxir AI will research
           </div>
 
           {source.niche && (
@@ -233,7 +233,7 @@ export function SourceCard({ source }: { source: SourceCardData }) {
         {(source.transcript === null
           ? UNKNOWN_TRANSCRIPT
           : TRANSCRIPT_NOTE[source.transcript]) ?? UNKNOWN_TRANSCRIPT}{" "}
-        Tally researches the topic and writes something original — it never
+        Vidxir AI researches the topic and writes something original — it never
         reproduces this video&apos;s script, title or footage.
       </p>
 

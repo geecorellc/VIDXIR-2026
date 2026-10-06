@@ -23,7 +23,7 @@ import { realPublishBlocked } from "@/lib/env";
 import { signedReadUrl } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 
-export const metadata = { title: "Publish — Tally" };
+export const metadata = { title: "Publish — Vidxir AI" };
 
 export default async function PublishPage({
   searchParams,

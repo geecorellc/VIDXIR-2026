@@ -1,12 +1,12 @@
 /**
- * The Tally Opportunity Score (§8).
+ * The Vidxir AI Opportunity Score (§8).
  *
  * Six components, each 0-100, combined into one weighted figure. Deliberately
  * pure functions over a plain input struct: scoring is the part of the product
  * most likely to be argued about, and an argument you can settle with a unit test
  * is cheaper than one you settle by reading a database.
  *
- * **This is Tally's own score, not a YouTube metric.** §8 is explicit about that,
+ * **This is Vidxir AI's own score, not a YouTube metric.** §8 is explicit about that,
  * and the UI says so wherever the number appears. Nothing here comes from a
  * YouTube ranking signal; it is our own read of observable public data.
  *
@@ -79,7 +79,7 @@ export interface ComponentScores {
 
 export interface ScoredOpportunity extends ComponentScores {
   /** The weighted composite, 0-100. */
-  tallyScore: number;
+  vidxirScore: number;
   /** Weights actually used, stored so a historical score stays explainable. */
   weights: ScoreWeights;
 }
@@ -325,7 +325,7 @@ export function scoreOpportunity(input: ScoreInput): ScoredOpportunity {
     audienceFit: audienceFitScore(input.fit),
   };
 
-  const tallyScore = round1(
+  const vidxirScore = round1(
     clamp(
       components.trend * weights.trend +
         components.velocity * weights.velocity +
@@ -336,7 +336,7 @@ export function scoreOpportunity(input: ScoreInput): ScoredOpportunity {
     ),
   );
 
-  return { ...components, tallyScore, weights };
+  return { ...components, vidxirScore, weights };
 }
 
 /**

@@ -289,7 +289,7 @@ export interface JsonSuccess<T> {
 export interface HandlerContext {
   /**
    * The id already on every log line for this request, and returned as
-   * `x-tally-trace-id`.
+   * `x-vidxir-trace-id`.
    *
    * Handlers that enqueue work pass it to `enqueue()` so a job's logs join up
    * with the request that created it — §41 asks for one traceable identifier
@@ -320,12 +320,12 @@ export async function handle<T>(
     assertSameOrigin(request);
     const result = await fn({ traceId });
     if (result instanceof NextResponse) {
-      result.headers.set("x-tally-trace-id", traceId);
+      result.headers.set("x-vidxir-trace-id", traceId);
       return result;
     }
     return NextResponse.json(
       { data: result } satisfies JsonSuccess<T>,
-      { headers: { "x-tally-trace-id": traceId } },
+      { headers: { "x-vidxir-trace-id": traceId } },
     );
   } catch (error) {
     if (isAppError(error)) {
@@ -340,7 +340,7 @@ export async function handle<T>(
       });
       const response = NextResponse.json(error.toResponseBody(), {
         status: error.status,
-        headers: { "x-tally-trace-id": traceId },
+        headers: { "x-vidxir-trace-id": traceId },
       });
       if (error.retryAfterSeconds) {
         response.headers.set("retry-after", String(error.retryAfterSeconds));
@@ -357,7 +357,7 @@ export async function handle<T>(
           details: { traceId },
         },
       },
-      { status: 500, headers: { "x-tally-trace-id": traceId } },
+      { status: 500, headers: { "x-vidxir-trace-id": traceId } },
     );
   }
 }

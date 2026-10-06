@@ -2,7 +2,7 @@
  * Compositing a thumbnail image (§16, §22, §42).
  *
  * Takes a background frame and a concept, and returns the JPEG bytes YouTube will
- * receive. It is the only place in Tally that produces a picture a viewer sees
+ * receive. It is the only place in Vidxir AI that produces a picture a viewer sees
  * before the video itself, so the constraints are YouTube's, not ours:
  *
  *  - 1280×720, 16:9. Smaller is upscaled by YouTube and looks it.
@@ -38,7 +38,7 @@
  * There is no "mock compositor". ffmpeg is a real encoder producing a real image,
  * exactly as the render stage treats it — with a mock background frame in
  * development, this still produces a genuine composited JPEG, so there is no state
- * where Tally claims a thumbnail exists that does not. When no font file can be
+ * where Vidxir AI claims a thumbnail exists that does not. When no font file can be
  * found the call throws `NotConfiguredError` naming `THUMBNAIL_FONT_FILE`; drawing
  * the headline in whatever face happened to be lying around is the silent
  * substitution §48 forbids.
@@ -102,7 +102,7 @@ const LINE_SPACING = 6;
 /**
  * Accent colour per emotion, as ffmpeg colour literals.
  *
- * Tally red leads because it is the product's accent and the design direction
+ * Vidxir AI red leads because it is the product's accent and the design direction
  * (§3) is not up for renegotiation by a thumbnail. The others are deliberately
  * few and deliberately high-contrast against a dark scrim: this is the subline
  * colour, read at 320px wide, not a palette.
@@ -215,7 +215,7 @@ export async function composite(
     });
   }
 
-  const dir = await mkdtemp(join(tmpdir(), "tally-thumb-"));
+  const dir = await mkdtemp(join(tmpdir(), "vidxir-thumb-"));
 
   try {
     // The extension matters — it is how ffmpeg picks a demuxer for a still — but

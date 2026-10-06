@@ -20,7 +20,7 @@ import { generateToken, hashToken } from "@/lib/crypto";
 import { isProduction } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
-export const SESSION_COOKIE = "tally_session";
+export const SESSION_COOKIE = "vidxir_session";
 /** 30 days. Refreshed on activity, so an active user is not logged out. */
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** Re-issue the expiry when less than this remains. */

@@ -53,7 +53,7 @@ export function ProgressBar({
           borderRadius: radius.pill,
           transition: indeterminate ? undefined : "width 420ms ease",
           animation: indeterminate
-            ? "tally-indeterminate 1.4s ease-in-out infinite"
+            ? "vidxir-indeterminate 1.4s ease-in-out infinite"
             : undefined,
         }}
       />
@@ -61,7 +61,7 @@ export function ProgressBar({
         <style
           // Static keyframes — no interpolated user input.
           dangerouslySetInnerHTML={{
-            __html: `@keyframes tally-indeterminate {
+            __html: `@keyframes vidxir-indeterminate {
               0% { transform: translateX(-120%); }
               100% { transform: translateX(340%); }
             }`,

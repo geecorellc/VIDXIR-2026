@@ -1,11 +1,11 @@
 /**
- * YouTubeProvider — the only place Tally talks to Google (§6, §32).
+ * YouTubeProvider — the only place Vidxir AI talks to Google (§6, §32).
  *
- * Everything above this module deals in Tally's own types. That boundary is what
+ * Everything above this module deals in Vidxir AI's own types. That boundary is what
  * makes the rest of the codebase testable without a Google account, and it is
  * where three of the spec's hard rules are enforced:
  *
- *  - §6 Tally never sees a YouTube password. The user authorises Google, Google
+ *  - §6 Vidxir AI never sees a YouTube password. The user authorises Google, Google
  *    hands us tokens, and those tokens live encrypted in Postgres. This module
  *    receives an access token as an argument and never reads the database.
  *  - §42 There is no mock. YouTube is the one capability that cannot be faked:
@@ -14,7 +14,7 @@
  *    NotConfiguredError, which the API layer renders as a 503 configuration
  *    state naming GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET.
  *  - §40 Upload and publish additionally refuse to run while
- *    TALLY_BLOCK_REAL_PUBLISH is set, so local work cannot touch a real channel.
+ *    VIDXIR_BLOCK_REAL_PUBLISH is set, so local work cannot touch a real channel.
  *
  * Errors are translated into the taxonomy in lib/errors, because the caller's
  * decision — retry, surface, or force re-authorisation — depends on the class of
@@ -51,7 +51,7 @@ export const YOUTUBE_PROVIDER = "google";
  *
  * Deliberately NOT requested: `youtube.force-ssl` beyond what we need, and any
  * monetary-analytics scope. Revenue figures would require
- * `yt-analytics-monetary.readonly`; Tally does not ask for it, so it does not
+ * `yt-analytics-monetary.readonly`; Vidxir AI does not ask for it, so it does not
  * display revenue it cannot measure (§42).
  */
 export const YOUTUBE_SCOPES = [
@@ -71,7 +71,7 @@ const REQUIRED_SCOPES = [
  *
  * Named here, and checked before any revenue query is issued, because the
  * failure mode without it is the one §7 of Phase 9 singles out: a monetised
- * channel silently reporting $0.00. Tally does not request this scope at consent
+ * channel silently reporting $0.00. Vidxir AI does not request this scope at consent
  * (see `YOUTUBE_SCOPES`), so in practice `revenueState` is `scope_missing` — an
  * explicit permission state, not an earnings figure.
  */
@@ -154,7 +154,7 @@ function oauthClient(): OAuth2Client {
  *  - `oauth` acts **as a channel**. Required for anything about the user's own
  *    channel — analytics, uploads, captions they own — and it is the only
  *    credential that exists in Phases 1-10.
- *  - `api_key` acts as **the Tally project** with no user identity. It can read
+ *  - `api_key` acts as **the Vidxir AI project** with no user identity. It can read
  *    public data only: `videos.list` on a public id, `search.list`, the
  *    most-popular chart. That is exactly what link mode needs, and it is why link
  *    mode does not require a connected channel (§2B).
@@ -425,7 +425,7 @@ export interface YouTubeChannel {
  * The channel belonging to the authorising account (`mine: true`).
  *
  * Returns null when the Google account has no YouTube channel at all, which is a
- * real and common case: the user has to create one before Tally can help.
+ * real and common case: the user has to create one before Vidxir AI can help.
  */
 export async function fetchMyChannel(
   accessToken: string,
@@ -752,9 +752,9 @@ export async function fetchVideosByIdsAs(
  *
  *  - No transcript. `captions.download` requires the video owner's OAuth
  *    credentials, so a third-party video's captions are not legitimately
- *    available to Tally at all. `captionsAvailable` reports whether YouTube says
+ *    available to Vidxir AI at all. `captionsAvailable` reports whether YouTube says
  *    the video has captions, which is an honest signal about the source and not a
- *    promise that Tally can read them (§42).
+ *    promise that Vidxir AI can read them (§42).
  *  - No media. §22 makes the source a research input; there is no code path here
  *    that downloads the video, its audio or its thumbnail file.
  */
@@ -1104,7 +1104,7 @@ export interface AnalyticsRow {
  *
  * Thumbnail impressions and impression click-through rate are deliberately
  * absent: YouTube Analytics API v2 does not expose them (they exist only in
- * Studio). Tally therefore leaves `ctr` null rather than estimating it — an
+ * Studio). Vidxir AI therefore leaves `ctr` null rather than estimating it — an
  * invented CTR would poison the scoring loop in §8 and violate §42.
  */
 const ANALYTICS_METRICS = [
@@ -1529,7 +1529,7 @@ interface GoogleApiErrorShape {
 }
 
 /**
- * Map a Google failure onto Tally's taxonomy.
+ * Map a Google failure onto Vidxir AI's taxonomy.
  *
  * The distinctions that matter to callers:
  *  - 401 / invalid_credentials → the access token is stale; refresh and retry.

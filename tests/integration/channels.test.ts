@@ -2,10 +2,10 @@
  * YouTube connection integration tests (§39, §6, §34, §42).
  *
  * The YouTube provider is mocked at the module boundary — and only there. Google
- * is the one dependency that cannot be exercised in CI, but everything on Tally's
+ * is the one dependency that cannot be exercised in CI, but everything on Vidxir AI's
  * side of the boundary is real: real Postgres, real AES-256-GCM, real HMAC state
  * signing, real session cookies. The mock returns token sets and channel payloads
- * shaped exactly as Google's, so what is under test is Tally's handling of them.
+ * shaped exactly as Google's, so what is under test is Vidxir AI's handling of them.
  *
  * The properties these tests exist to pin down:
  *
@@ -176,8 +176,8 @@ suite("youtube channel connection (integration)", () => {
       const { issueOAuthState, consumeOAuthState } = await import(
         "@/lib/channels/oauth-state"
       );
-      const victim = await createUser({ email: "victim@tally.test" });
-      const attacker = await createUser({ email: "attacker@tally.test" });
+      const victim = await createUser({ email: "victim@vidxir.test" });
+      const attacker = await createUser({ email: "attacker@vidxir.test" });
 
       // The attacker starts the flow, so the signature and the cookie are valid.
       const { state } = await issueOAuthState({ userId: attacker.id });
@@ -405,8 +405,8 @@ suite("youtube channel connection (integration)", () => {
 
     it("refuses a reconnect of a channel belonging to another user", async () => {
       const { connectChannel } = await import("@/lib/channels/service");
-      const owner = await createUser({ email: "owner@tally.test" });
-      const other = await createUser({ email: "other@tally.test" });
+      const owner = await createUser({ email: "owner@vidxir.test" });
+      const other = await createUser({ email: "other@vidxir.test" });
       const ownedId = await createChannel(owner.id);
 
       await expect(
@@ -421,8 +421,8 @@ suite("youtube channel connection (integration)", () => {
 
     it("lets two users connect the same YouTube channel independently", async () => {
       const { connectChannel } = await import("@/lib/channels/service");
-      const a = await createUser({ email: "a@tally.test" });
-      const b = await createUser({ email: "b@tally.test" });
+      const a = await createUser({ email: "a@vidxir.test" });
+      const b = await createUser({ email: "b@vidxir.test" });
 
       // The unique index is (user_id, youtube_channel_id), not youtube_channel_id
       // alone — an agency and a creator may both connect the same channel.
@@ -482,8 +482,8 @@ suite("youtube channel connection (integration)", () => {
 
     it("does not return another user's channel", async () => {
       const { getChannel } = await import("@/lib/channels/service");
-      const owner = await createUser({ email: "owner@tally.test" });
-      const other = await createUser({ email: "other@tally.test" });
+      const owner = await createUser({ email: "owner@vidxir.test" });
+      const other = await createUser({ email: "other@vidxir.test" });
       const channelId = await createChannel(owner.id);
 
       await expect(getChannel(owner.id, channelId)).resolves.toMatchObject({
@@ -665,8 +665,8 @@ suite("youtube channel connection (integration)", () => {
 
     it("refuses to run for a channel belonging to another user", async () => {
       const { withChannelToken } = await import("@/lib/channels/service");
-      const owner = await createUser({ email: "owner@tally.test" });
-      const other = await createUser({ email: "other@tally.test" });
+      const owner = await createUser({ email: "owner@vidxir.test" });
+      const other = await createUser({ email: "other@vidxir.test" });
       const channelId = await createChannel(owner.id);
 
       await expect(
@@ -852,8 +852,8 @@ suite("youtube channel connection (integration)", () => {
 
     it("does not disconnect another user's channel", async () => {
       const { disconnectChannel } = await import("@/lib/channels/service");
-      const owner = await createUser({ email: "owner@tally.test" });
-      const other = await createUser({ email: "other@tally.test" });
+      const owner = await createUser({ email: "owner@vidxir.test" });
+      const other = await createUser({ email: "other@vidxir.test" });
       const channelId = await createChannel(owner.id);
 
       await expect(
@@ -970,7 +970,7 @@ suite("youtube channel connection (integration)", () => {
       expect(rows[0]?.views).toBe(1200);
 
       // §42: the Analytics API does not expose impressions or impression CTR —
-      // those are Studio-only — and Tally does not request the monetary scope.
+      // those are Studio-only — and Vidxir AI does not request the monetary scope.
       // Deriving a plausible figure would poison the §8 scoring loop.
       expect(rows[0]?.ctr).toBeNull();
       expect(rows[0]?.impressions).toBeNull();
@@ -1049,7 +1049,7 @@ suite("youtube channel connection (integration)", () => {
       google.fetchAnalytics.mockImplementation(
         async (_token: string, query: { byVideo?: boolean }) =>
           query.byVideo
-            ? [{ ...channelDaily[0], videoId: "vid-not-published-by-tally" }]
+            ? [{ ...channelDaily[0], videoId: "vid-not-published-by-vidxir" }]
             : channelDaily,
       );
 
@@ -1058,10 +1058,10 @@ suite("youtube channel connection (integration)", () => {
         endDate: "2026-08-11",
       });
 
-      // §42: a `published_videos` row is the record that Tally really uploaded
+      // §42: a `published_videos` row is the record that Vidxir AI really uploaded
       // something. Creating one to satisfy a foreign key would claim it did.
       expect(result.videoRows).toBe(0);
-      expect(result.unmatchedVideoIds).toEqual(["vid-not-published-by-tally"]);
+      expect(result.unmatchedVideoIds).toEqual(["vid-not-published-by-vidxir"]);
     });
 
     it("records an ingest in api_usage for cost attribution", async () => {
@@ -1099,8 +1099,8 @@ suite("youtube channel connection (integration)", () => {
 
     it("does not ingest into another user's channel", async () => {
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
-      const owner = await createUser({ email: "owner@tally.test" });
-      const other = await createUser({ email: "other@tally.test" });
+      const owner = await createUser({ email: "owner@vidxir.test" });
+      const other = await createUser({ email: "other@vidxir.test" });
       const channelId = await createChannel(owner.id);
 
       await expect(

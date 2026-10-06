@@ -24,7 +24,7 @@
  *    1. stock is selectable on every plan, with no AI provider configured
  *    2. unconfigured providers report NOT_CONFIGURED and cannot be reached
  *    3. unknown providers, invented model ids and invented modes are refused
- *    4. the four branded Tally models exist, each on one vendor and one credential
+ *    4. the four branded Vidxir AI models exist, each on one vendor and one credential
  *    5. no vendor name reaches a customer-facing label, and no client string
  *       reaches a vendor URL
  *    6. the capability matrix is declared rather than assumed, and an unsupported
@@ -44,7 +44,7 @@
  * Steps 4-6 are the branded model layer's own invariants (Phase 12 §2, §3, §4,
  * §16), and they are the ones that cannot be checked any other way. Whether the
  * cinematic model actually renders is the vendor's business; whether *selecting*
- * Tal 3.0 reaches that vendor rather than another is Tally's, and a mistake there
+ * Tal 3.0 reaches that vendor rather than another is Vidxir AI's, and a mistake there
  * generates successfully, bills correctly and produces the wrong model's output
  * with nothing to indicate it. §3's rule is checked in the same place because it
  * has the same shape: a leak is invisible in review and obvious to a scan.
@@ -144,7 +144,7 @@ async function main(): Promise<void> {
    * gated on a video-gen provider existing, and asking for it must never reach the
    * registry at all.
    */
-  process.env["TALLY_USE_MOCK_PROVIDERS"] = "false";
+  process.env["VIDXIR_USE_MOCK_PROVIDERS"] = "false";
   resetEnvCache();
 
   {
@@ -720,7 +720,7 @@ async function main(): Promise<void> {
       );
 
       /**
-       * Every quality Tally knows, asked of every model. A declared one resolves to
+       * Every quality Vidxir AI knows, asked of every model. A declared one resolves to
        * itself; an undeclared one is refused rather than snapped to the nearest,
        * because §12 quotes a credit price from the resolution and snapping is only
        * ever correct for an *absent* choice.
@@ -1035,7 +1035,7 @@ async function main(): Promise<void> {
 
     must(
       !usingMockProviders(),
-      "TALLY_USE_MOCK_PROVIDERS is still on in this step; the check would be vacuous.",
+      "VIDXIR_USE_MOCK_PROVIDERS is still on in this step; the check would be vacuous.",
     );
     must(
       !videoGenProviderIds().includes("mock"),
@@ -1073,7 +1073,7 @@ async function main(): Promise<void> {
     must(
       !forced.includes("mock"),
       "`mock` in VIDEO_GEN_PROVIDERS enabled it with mock mode off; the mock must be " +
-        "reachable only through TALLY_USE_MOCK_PROVIDERS.",
+        "reachable only through VIDXIR_USE_MOCK_PROVIDERS.",
     );
     for (const dropped of ["nonexistent-vendor", "fal"]) {
       must(
@@ -1113,7 +1113,7 @@ async function main(): Promise<void> {
    * fields — is the real code, which is exactly the layer where the defects that
    * matter live.
    */
-  process.env["TALLY_USE_MOCK_PROVIDERS"] = "true";
+  process.env["VIDXIR_USE_MOCK_PROVIDERS"] = "true";
   resetEnvCache();
 
   {
@@ -1346,7 +1346,7 @@ async function main(): Promise<void> {
    * cannot drift. Names and states only — §20 forbids printing a value, and this
    * script never reads one for display.
    */
-  process.env["TALLY_USE_MOCK_PROVIDERS"] = "false";
+  process.env["VIDXIR_USE_MOCK_PROVIDERS"] = "false";
   resetEnvCache();
 
   {
@@ -1487,7 +1487,7 @@ async function main(): Promise<void> {
     `\n${step}/${TOTAL_STEPS} checks passed — stock footage is selectable on every plan ` +
       `with nothing configured, AI selection resolves mode/model/format to a usable plan, ` +
       `unconfigured providers report NOT_CONFIGURED and cannot be reached, invented ` +
-      `provider and model names are refused with 400, the four branded Tally models ` +
+      `provider and model names are refused with 400, the four branded Vidxir AI models ` +
       `each sit on one vendor and one credential with no vendor name in any ` +
       `customer-facing payload, an undeclared resolution is refused rather than ` +
       `snapped, plan entitlements gate AI video and the premium models server-side, ` +

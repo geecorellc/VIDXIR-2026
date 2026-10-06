@@ -23,7 +23,7 @@ import { capabilityStatus } from "@/lib/providers/config";
 import { signedReadUrl } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 
-export const metadata = { title: "Thumbnail — Tally" };
+export const metadata = { title: "Thumbnail — Vidxir AI" };
 
 export default async function ThumbnailPage({
   searchParams,

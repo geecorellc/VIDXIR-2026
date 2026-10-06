@@ -24,7 +24,7 @@ import { capabilityStatus } from "@/lib/providers/config";
 import { signedReadUrl } from "@/lib/storage";
 import { logger } from "@/lib/logger";
 
-export const metadata = { title: "Video — Tally" };
+export const metadata = { title: "Video — Vidxir AI" };
 
 export default async function VideoPage({
   searchParams,

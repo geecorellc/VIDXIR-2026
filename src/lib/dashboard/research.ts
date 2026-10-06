@@ -33,7 +33,7 @@ export interface IdeaRow {
   angle: string | null;
   rationale: string | null;
   topic: string | null;
-  tallyScore: number | null;
+  vidxirScore: number | null;
   scores: {
     trend: number | null;
     opportunity: number | null;
@@ -128,7 +128,7 @@ export async function getResearchData(
         angle: ideas.angle,
         rationale: ideas.rationale,
         topic: ideas.topic,
-        tallyScore: ideas.tallyScore,
+        vidxirScore: ideas.vidxirScore,
         trendScore: ideas.trendScore,
         opportunityScore: ideas.opportunityScore,
         competitionScore: ideas.competitionScore,
@@ -146,7 +146,7 @@ export async function getResearchData(
           ne(ideas.state, "rejected"),
         ),
       )
-      .orderBy(desc(ideas.tallyScore), desc(ideas.createdAt))
+      .orderBy(desc(ideas.vidxirScore), desc(ideas.createdAt))
       .limit(40),
   ]);
 
@@ -168,7 +168,7 @@ export async function getResearchData(
       angle: i.angle,
       rationale: i.rationale,
       topic: i.topic,
-      tallyScore: i.tallyScore,
+      vidxirScore: i.vidxirScore,
       scores: {
         trend: i.trendScore,
         opportunity: i.opportunityScore,

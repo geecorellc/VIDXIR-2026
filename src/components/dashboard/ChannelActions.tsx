@@ -121,7 +121,7 @@ export function ChannelActions({ channelId, channelTitle }: ChannelActionsProps)
             color: color.textFaint,
           }}
         >
-          Revokes Tally&apos;s access to {channelTitle} at Google. Videos already
+          Revokes Vidxir AI&apos;s access to {channelTitle} at Google. Videos already
           published stay on YouTube, and their history stays here.
         </p>
       )}

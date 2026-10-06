@@ -14,7 +14,7 @@
  * for a path containing a comma or an apostrophe, because the graph parser splits
  * on `,` and `:` before it honours quotes. The thumbnail compositor hit that limit
  * and stopped putting paths in filter graphs entirely — it spawns ffmpeg with `cwd`
- * and names bare files. `render.ts`'s path is `<tmp>/tally-render-XXXXXX/subs.ass`,
+ * and names bare files. `render.ts`'s path is `<tmp>/vidxir-render-XXXXXX/subs.ass`,
  * so the remaining exposure is a username with a comma or apostrophe in it; if that
  * ever surfaces, the fix is the compositor's, not a cleverer escape.
  */

@@ -7,7 +7,7 @@
  *  - **Claim more than the check measured.** The validator reads prompts, not frames
  *    (there is no vision capability in this repository), so the copy says "prompt"
  *    wherever it means prompt. A panel that said "characters look consistent" would be
- *    asserting something nothing in Tally verified.
+ *    asserting something nothing in Vidxir AI verified.
  *  - **Invent a state.** No bible means "no continuity for this video", which is the
  *    correct state for every project built before this layer and for every stock-footage
  *    project. The panel says the level and the reason rather than showing an empty score.

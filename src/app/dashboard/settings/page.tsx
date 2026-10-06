@@ -19,7 +19,7 @@ import { planByTier } from "@/lib/plans";
 import { getChannelConfig, type ChannelConfig } from "@/lib/settings/service";
 import { logger } from "@/lib/logger";
 
-export const metadata = { title: "Settings — Tally" };
+export const metadata = { title: "Settings — Vidxir AI" };
 
 export default async function SettingsPage({
   searchParams,

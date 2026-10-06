@@ -38,7 +38,7 @@ if (TEST_DATABASE_URL) {
    *
    * Defined there rather than here so that the code which *deletes* the namespace and the
    * code which *creates* it cannot disagree about what it is called. A duplicated
-   * `"tally-test"` on both sides would be one careless edit away from a harness that
+   * `"vidxir-test"` on both sides would be one careless edit away from a harness that
    * writes to one namespace and a teardown that sweeps another — leaving the leak in
    * place while reporting a clean sweep.
    */
@@ -48,7 +48,7 @@ if (TEST_DATABASE_URL) {
   // Console email is a real delivery channel in tests: assertions read the
   // token out of the database, not out of an inbox.
   process.env["EMAIL_PROVIDER"] = "console";
-  process.env["TALLY_USE_MOCK_PROVIDERS"] = "true";
+  process.env["VIDXIR_USE_MOCK_PROVIDERS"] = "true";
   process.env["LOG_LEVEL"] ??= "error";
 }
 
@@ -162,7 +162,7 @@ export async function prepareDatabase(): Promise<void> {
  * not silently start leaking rows between tests.
  *
  * `billing_events` is listed explicitly even though it references `users`,
- * because that FK is `ON DELETE set null`: a webhook event Tally could not match
+ * because that FK is `ON DELETE set null`: a webhook event Vidxir AI could not match
  * to an account has a null `user_id`, so the cascade from `users` would never
  * reach it and its unique (provider, event id) row would survive into the next
  * test — where a redelivery assertion would then see a "duplicate" that belongs
@@ -304,7 +304,7 @@ export async function createUser(
   const { signup } = await import("@/lib/auth/service");
   userCounter += 1;
   const user: Omit<TestUser, "id"> = {
-    email: overrides.email ?? `user${userCounter}@tally.test`,
+    email: overrides.email ?? `user${userCounter}@vidxir.test`,
     password: overrides.password ?? "Integration-Test-Pass-1",
     name: overrides.name ?? `User ${userCounter}`,
   };

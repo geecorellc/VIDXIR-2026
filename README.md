@@ -1,12 +1,12 @@
-# Tally
+# Vidxir AI
 
 AI YouTube automation platform. Research a niche, find an opportunity, write an
 original script, generate voiceover, visuals, music and captions, render a video,
 design a thumbnail, write metadata, and publish to a real YouTube channel — with
 progress you can trust and nothing faked in between.
 
-The UI is a direct port of the Tally design prototype: dark charcoal surfaces,
-Tally red `#E8332B`, Oswald display / Inter body, compact creator-studio layout.
+The UI is a direct port of the Vidxir AI design prototype: dark charcoal surfaces,
+Vidxir AI red `#E8332B`, Oswald display / Inter body, compact creator-studio layout.
 
 ---
 
@@ -78,11 +78,11 @@ npm run scheduler
 
 ### Development mode (§40)
 
-`TALLY_USE_MOCK_PROVIDERS=true` and `TALLY_BLOCK_REAL_PUBLISH=true` in
+`VIDXIR_USE_MOCK_PROVIDERS=true` and `VIDXIR_BLOCK_REAL_PUBLISH=true` in
 `.env.local` keep local work from spending provider credits or touching a real
 channel. **Production refuses to boot with either of these set** — that check
 lives in `src/lib/env.ts` and is deliberate, not a bug. If `next start` fails
-with *"TALLY_USE_MOCK_PROVIDERS must be false in production"*, you are running a
+with *"VIDXIR_USE_MOCK_PROVIDERS must be false in production"*, you are running a
 production build against a development env file.
 
 ### Missing credentials
@@ -141,7 +141,7 @@ produced the row, so provenance survives a later change of configuration (§29).
 
 Three things are worth knowing before switching to Bedrock.
 
-**Credentials never enter Tally's configuration.** There is no
+**Credentials never enter Vidxir AI's configuration.** There is no
 `BEDROCK_ACCESS_KEY_ID`. The client is constructed without credentials, which is
 what selects the standard AWS chain — environment variables,
 `~/.aws/credentials`, an SSO cache, or an instance/container role (§33). The IAM
@@ -180,7 +180,7 @@ the transport and model that answered.
 
 ## Connecting YouTube
 
-Tally reaches YouTube through Google OAuth. It never asks for a YouTube password
+Vidxir AI reaches YouTube through Google OAuth. It never asks for a YouTube password
 and never stores one.
 
 Two credentials are required:
@@ -209,7 +209,7 @@ Scopes requested at consent:
 | `auth/youtube.upload` | upload the rendered video |
 | `auth/yt-analytics.readonly` | daily metrics for the analytics feedback loop |
 
-`yt-analytics-monetary.readonly` is deliberately **not** requested, so Tally does
+`yt-analytics-monetary.readonly` is deliberately **not** requested, so Vidxir AI does
 not display revenue — a figure it cannot measure is a figure it will not show.
 The Analytics API likewise has no impressions or impression-CTR metric (those are
 Studio-only), so those columns stay null rather than being estimated.
@@ -239,7 +239,7 @@ browser being open: expired-session pruning (hourly), channel statistics refresh
 
 ---
 
-## Research and the Tally Opportunity Score
+## Research and the Vidxir AI Opportunity Score
 
 A research run is a background job, not a request. `POST /api/research/run`
 validates, records a `research_runs` row, enqueues, and returns a run id and job
@@ -262,7 +262,7 @@ What a run actually does:
    channel's region and the channel's own recent uploads. Statistics are then read
    in batches of 50, because search results carry no view counts and without them
    there is no velocity and no engagement — i.e. no scoring input at all.
-2. **Score** each observation on six factors, then combine them into the **Tally
+2. **Score** each observation on six factors, then combine them into the **Vidxir AI
    Opportunity Score**. Weights live in `channel_settings.score_weights` and
    default to trend .22, velocity .22, competition .18, audience fit .18,
    opportunity .12, freshness .08.
@@ -272,7 +272,7 @@ What a run actually does:
    the `research_results` rows it came from, and an idea whose title overlaps a
    source title by more than 60% of content words is rejected as derivative.
 
-The score is **Tally's own metric, not a YouTube one**, and the README says so
+The score is **Vidxir AI's own metric, not a YouTube one**, and the README says so
 because the UI does too. `competition` is inverted — high means easy to win.
 `freshness` decays linearly over 30 days and is 0, not a guess, when a date is
 missing. The "search demand" series plots observed weekly view totals: there is no
@@ -418,7 +418,7 @@ renderer** — even a development build produces a real, playable MP4 (§42):
   writes the provider's own percentage to `renders.progress`.
 - **`remotion-lambda`** — your own render farm. `REMOTION_AWS_REGION`,
   `REMOTION_LAMBDA_FUNCTION_NAME` and `REMOTION_SERVE_URL`; the deployed site must
-  expose a composition named `TallyVideo` that accepts Tally's timeline document as
+  expose a composition named `VidxirVideo` that accepts Vidxir AI's timeline document as
   its input props.
 
 A local encode is a single pass: stills are looped for their scene's slot, scaled
@@ -454,7 +454,7 @@ instead of failing three stages later.
 | `TRANSCRIPTION_PROVIDER` + `OPENAI_API_KEY` / `DEEPGRAM_API_KEY` | Captions | Rendered without captions |
 | `RENDER_PROVIDER` (+ per-provider keys) | Render | `ffmpeg` needs no credential at all |
 
-`TALLY_USE_MOCK_PROVIDERS=true` makes every provider synthetic — real PNG and WAV
+`VIDXIR_USE_MOCK_PROVIDERS=true` makes every provider synthetic — real PNG and WAV
 bytes, generated in-process — and is the only way tests obtain assets. It is
 refused when `NODE_ENV=production`, so it cannot be the reason a paying user's
 video is silence over a solid colour (§40).
@@ -551,7 +551,7 @@ the page and comes back is still on Starter, which is the correct outcome (§24,
 The body names a **tier**, never a price id; price ids come from the server's
 environment, since a caller who could name a price could name a free one.
 
-`src/lib/billing/webhook.ts` is the only code in Tally that can write
+`src/lib/billing/webhook.ts` is the only code in Vidxir AI that can write
 `subscriptions.tier`. Four properties, each corresponding to a way real webhooks go
 wrong:
 
@@ -567,7 +567,7 @@ wrong:
   `subscriptions.last_event_at` comparison lives **inside** the UPDATE's `WHERE`, so
   an older `customer.subscription.updated` arriving after a newer one is recorded and
   skipped rather than silently reverting the tier.
-- **Tier from the price, not from metadata.** `tallyTier` metadata is written at
+- **Tier from the price, not from metadata.** `vidxirTier` metadata is written at
   checkout and is only a hint; the authoritative tier is whichever configured price
   the subscription is actually on. If the two disagree — someone switched plans in the
   portal — the price wins, because that is what the customer is being charged for. A
@@ -595,9 +595,9 @@ so an operator who sets it recovers the backlog; **500** when a genuine event fa
 to process, so Stripe retries with backoff for up to three days.
 
 Card changes, invoices, plan switches and cancellation all happen on Stripe's hosted
-pages via `POST /api/billing/portal`. That is deliberate rather than lazy: Tally never
+pages via `POST /api/billing/portal`. That is deliberate rather than lazy: Vidxir AI never
 receives a card number, so there is no cardholder data in this codebase to protect,
-and cancellation is always available without Tally mediating it. A second checkout for
+and cancellation is always available without Vidxir AI mediating it. A second checkout for
 an account that already pays is refused with `409` — Stripe would happily bill two
 subscriptions in parallel — so plan *changes* go through the portal, which swaps the
 price on the existing subscription.
@@ -615,7 +615,7 @@ price on the existing subscription.
 `canUpgrade()` requires the **webhook secret** as well as the key and the prices,
 because checkout without a verified webhook is the worst available state: the customer
 is charged and nothing ever grants them the plan. Better to offer no button and say
-which variable is missing (§48). `TALLY_USE_MOCK_PROVIDERS=true` resolves billing to
+which variable is missing (§48). `VIDXIR_USE_MOCK_PROVIDERS=true` resolves billing to
 `mock`, which never reports configured — a development build must not be able to hand
 out paid tiers (§40).
 
@@ -646,8 +646,8 @@ Integration tests need a **separate** database, because they `TRUNCATE` between
 tests:
 
 ```bash
-docker exec tally-postgres createdb -U tally tally_test
-TEST_DATABASE_URL=postgresql://tally:tally@localhost:5432/tally_test \
+docker exec vidxir-postgres createdb -U vidxir vidxir_test
+TEST_DATABASE_URL=postgresql://vidxir:vidxir@localhost:5432/vidxir_test \
   npm run test:integration
 ```
 
@@ -664,7 +664,7 @@ transaction, the state machine and every ownership predicate. `googleapis` is
 externalised in `vitest.config.ts`; it is a barrel over thousands of modules and
 running it through Vite's transform pipeline costs minutes per file.
 
-Integration runs use their own Redis namespace (`QUEUE_PREFIX=tally-test`, set in
+Integration runs use their own Redis namespace (`QUEUE_PREFIX=vidxir-test`, set in
 `tests/integration/setup.ts`). Without it a test run enqueues real BullMQ messages
 into the development namespace and then truncates the `jobs` rows they point at,
 so a developer's worker wakes up to hundreds of jobs it can never complete.
@@ -714,7 +714,7 @@ defects lived in that gap: every shared module carried `import "server-only"`
 (whose Node implementation throws unconditionally), and `ffmpegBinary()` used a
 bare `require`, which is undefined under ESM. The worker could not start, and once
 it could, it reported `render: not_configured` on a machine with a working
-encoder. 541 tests were green throughout. It uses `QUEUE_PREFIX=tally-verify` and
+encoder. 541 tests were green throughout. It uses `QUEUE_PREFIX=vidxir-verify` and
 obliterates the queue afterwards.
 
 **`verify:providers`** makes one cheap real call per provider — a sentence of
@@ -722,7 +722,7 @@ narration, a two-second clip, one search page. The unit tests pin every adapter
 against recorded responses, which proves the parsing and the error taxonomy; they
 cannot prove a key is accepted, an account is funded, a model id still exists, or
 that a response shape has not drifted since the fixture was recorded. It reads
-`.env.local` exactly as the app does, overrides `TALLY_USE_MOCK_PROVIDERS` for the
+`.env.local` exactly as the app does, overrides `VIDXIR_USE_MOCK_PROVIDERS` for the
 run (verifying a mock would prove nothing — §42), and leaves the per-provider
 selectors alone, so `VOICE_PROVIDER=mock` honestly reports *not configured* rather
 than silently upgrading to a paid provider. Exit is non-zero only for a
@@ -858,7 +858,7 @@ has no mock branch, so calling it would be a real billable request. The bible an
 states are seeded directly instead.
 
 **`verify:abandoned-source`** answers a question a fixture cannot: "is that raw video id
-still on my screen?" The distinction it enforces is *a user submitted a URL* ≠ *Tally
+still on my screen?" The distinction it enforces is *a user submitted a URL* ≠ *Vidxir AI
 successfully analysed the source* — `projects.source_video_id` is written the moment a
 link is pasted, before any worker runs, so its presence proves the first and never the
 second. It loads real rows through the same server functions the pages call —
@@ -931,23 +931,23 @@ would paper over.
 
 `npm audit` is not clean, and that is a considered position rather than neglect. Every
 advisory below was checked for reachability in this codebase; the deciding question was
-always whether the vulnerable code path is one Tally executes.
+always whether the vulnerable code path is one Vidxir AI executes.
 
 **Runtime, not reachable:**
 
 - **`drizzle-orm` <0.45.2 — high, SQL injection via improperly escaped identifiers.**
-  Requires attacker-controlled SQL *identifiers* (table or column names). Tally has
+  Requires attacker-controlled SQL *identifiers* (table or column names). Vidxir AI has
   zero `sql.identifier` and zero `sql.raw` calls; every identifier is a compile-time
   constant from `lib/db/schema`, and every value is a bound parameter. See below for
   why the fix is not applied.
 - **`sharp` <0.35.0 — high, inherited libvips CVEs**, via `next`. Reached only through
-  the `next/image` optimizer, which Tally does not use — nothing imports the component
+  the `next/image` optimizer, which Vidxir AI does not use — nothing imports the component
   and no `images` config is set. (`_next/image` appears in the `middleware.ts` matcher
   as an exclusion, and `next.config.ts` computes a CSP `img-src` list; neither invokes
-  the optimizer.) Thumbnail rendering uses Tally's own direct `sharp` dependency, on
-  images Tally generated itself.
+  the optimizer.) Thumbnail rendering uses Vidxir AI's own direct `sharp` dependency, on
+  images Vidxir AI generated itself.
 - **`uuid` <11.1.1 — moderate, missing buffer bounds check**, via `googleapis`. Only
-  affects v3/v5/v6 with a caller-supplied `buf`. Tally calls `randomUUID()` from
+  affects v3/v5/v6 with a caller-supplied `buf`. Vidxir AI calls `randomUUID()` from
   `node:crypto`.
 - **`postcss` — path traversal via `sourceMappingURL`**, via `next`. A build-time CSS
   processing path, on CSS in this repository.
@@ -988,7 +988,7 @@ upgrade will see these two properties break immediately rather than in productio
 
 ## Deployment
 
-Tally is three processes against three stateful dependencies. Nothing here assumes a
+Vidxir AI is three processes against three stateful dependencies. Nothing here assumes a
 particular host: they are ordinary Node processes and can run wherever that works.
 
 | Process | Command | Scale | Notes |
@@ -1025,7 +1025,7 @@ re-authorise the entire user base.
 Four further guards apply in production only, each a refusal to start rather than a
 warning, because none of these is visible in a smoke test:
 
-- `TALLY_USE_MOCK_PROVIDERS` must be `false`. Otherwise Tally fabricates voiceovers
+- `VIDXIR_USE_MOCK_PROVIDERS` must be `false`. Otherwise Vidxir AI fabricates voiceovers
   and visuals for paying customers (§40).
 - `EMAIL_PROVIDER` must not be `console`, which prints every verification and reset
   email to stdout.
@@ -1078,7 +1078,7 @@ otherwise, and unconfigured *optional* providers never make an instance unready 
 unset ElevenLabs key is a product state, not an outage.
 
 The response carries dependency names and statuses only. Set `HEALTH_PROBE_TOKEN` and
-pass it as `x-tally-probe-token` to see the `detail` strings and mode flags; without
+pass it as `x-vidxir-probe-token` to see the `detail` strings and mode flags; without
 it, in production, they are withheld. Neither endpoint ever includes a connection
 string, a token or an environment value.
 
@@ -1145,7 +1145,7 @@ jobs, which are visible in `jobs` and can be requeued; it loses no durable state
 
 - **YouTube OAuth.** Grants live in the restored rows, so they survive — but only
   while the Google client credentials are unchanged. Restoring against a different
-  OAuth client, or a revoked one, means every channel needs reconnecting. Tally
+  OAuth client, or a revoked one, means every channel needs reconnecting. Vidxir AI
   handles this honestly rather than silently: a rejected refresh sets the re-auth flag
   and the UI prompts, so the failure mode is a reconnect prompt rather than silent
   breakage.
@@ -1176,7 +1176,7 @@ These are enforced in code, not by convention:
 - **Passwords** are scrypt hashes with per-user salts. The plaintext is never
   stored, logged, or recoverable.
 - **OAuth tokens** are AES-256-GCM encrypted at rest and never serialised to the
-  frontend. Tally asks for a Google authorisation, never a YouTube password.
+  frontend. Vidxir AI asks for a Google authorisation, never a YouTube password.
 - **Provider API keys** are server-side only. Nothing that reads `env()` can be
   imported into a client component — the `no-restricted-imports` rule in
   `eslint.config.mjs` makes that a lint error. See
@@ -1187,7 +1187,7 @@ These are enforced in code, not by convention:
   confirmed the upload. The state machine makes any other path unwritable.
 - **Progress** always reflects real job state. Where a provider reports no
   percentage the UI shows an indeterminate indicator rather than an invented one.
-- **Originality**: Tally generates original content from trend research. It does
+- **Originality**: Vidxir AI generates original content from trend research. It does
   not download or republish other people's videos.
 - **Tenant isolation** is part of every query predicate, and covered by tests
   that hold a valid id from another account and confirm it is refused.

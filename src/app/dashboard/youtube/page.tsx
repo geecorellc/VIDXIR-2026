@@ -23,7 +23,7 @@ import { getLinkStudioData, latestLinkProjectId } from "@/lib/dashboard/link-stu
 import { loadStudioScript } from "@/lib/dashboard/studio-script";
 import { capabilityStatus } from "@/lib/providers/config";
 
-export const metadata = { title: "Create from YouTube — Tally" };
+export const metadata = { title: "Create from YouTube — Vidxir AI" };
 
 export default async function YouTubePage({
   searchParams,
@@ -57,7 +57,7 @@ export default async function YouTubePage({
       <SectionHeader
         eyebrow="Any video"
         title="Create from a YouTube link"
-        sub="Paste a link to any public video. Tally researches the topic and writes something original — no channel connection needed."
+        sub="Paste a link to any public video. Vidxir AI researches the topic and writes something original — no channel connection needed."
       />
       <LinkStudio
         data={data}

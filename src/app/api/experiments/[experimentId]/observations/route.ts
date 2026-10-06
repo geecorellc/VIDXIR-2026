@@ -1,7 +1,7 @@
 /**
  * POST /api/experiments/:id/observations — record per-arm figures (Phase 9 §8).
  *
- * This endpoint exists because **YouTube does not give Tally the data.** The
+ * This endpoint exists because **YouTube does not give Vidxir AI the data.** The
  * Analytics API v2 exposes no thumbnail impressions and no impression CTR — those
  * live only in Studio's own A/B feature — so there is no provider ingest that can
  * fill these rows. Rather than derive a plausible number (§6 forbids it) or leave

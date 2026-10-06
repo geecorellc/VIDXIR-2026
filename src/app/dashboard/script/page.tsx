@@ -20,7 +20,7 @@ import { getStageContext } from "@/lib/dashboard/stage";
 import { displayTitle } from "@/lib/projects/display-title";
 import { capabilityStatus } from "@/lib/providers/config";
 
-export const metadata = { title: "Script — Tally" };
+export const metadata = { title: "Script — Vidxir AI" };
 
 export default async function ScriptPage({
   searchParams,

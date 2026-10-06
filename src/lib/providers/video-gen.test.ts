@@ -1,5 +1,5 @@
 /**
- * The generation registry — Tally's branded models and the vendors under them
+ * The generation registry — Vidxir AI's branded models and the vendors under them
  * (Phase 12 §2–§5, §14–§16, §18 cases 1–7, 20–21, §19, §21).
  *
  * `generation-plan.test.ts` covers which model a *request* may select. This file
@@ -156,9 +156,9 @@ const {
 
 /** What `lib/env` needs before it will parse. Local placeholders only. */
 const BASE = {
-  DATABASE_URL: "postgresql://tally:tally@localhost:5432/tally_unit",
+  DATABASE_URL: "postgresql://vidxir:vidxir@localhost:5432/vidxir_unit",
   REDIS_URL: "redis://127.0.0.1:6379",
-  S3_BUCKET: "tally-unit",
+  S3_BUCKET: "vidxir-unit",
   S3_ACCESS_KEY_ID: "unit",
   S3_SECRET_ACCESS_KEY: "unit",
   ENCRYPTION_KEY: "a".repeat(64),
@@ -167,7 +167,7 @@ const BASE = {
 
 const MANAGED = [
   "NODE_ENV",
-  "TALLY_USE_MOCK_PROVIDERS",
+  "VIDXIR_USE_MOCK_PROVIDERS",
   "VIDEO_GEN_PROVIDERS",
   "DASHSCOPE_API_KEY",
   "DASHSCOPE_BASE_URL",
@@ -226,7 +226,7 @@ function configure(vars: Record<string, string | undefined>): void {
   setEnv("NODE_ENV", "test");
   resetEnvCache();
   for (const key of MANAGED) delete process.env[key];
-  const merged = { ...BASE, TALLY_USE_MOCK_PROVIDERS: "false", ...vars };
+  const merged = { ...BASE, VIDXIR_USE_MOCK_PROVIDERS: "false", ...vars };
   for (const [key, value] of Object.entries(merged)) {
     if (value === undefined) delete process.env[key];
     else setEnv(key, value);
@@ -515,12 +515,12 @@ describe("configuration reporting", () => {
   });
 
   it("cannot be talked into enabling the development placeholder in a real run", () => {
-    // `mock` is reachable only through TALLY_USE_MOCK_PROVIDERS, which `env.ts`
+    // `mock` is reachable only through VIDXIR_USE_MOCK_PROVIDERS, which `env.ts`
     // refuses in production. Naming it directly does nothing.
     configure({ VIDEO_GEN_PROVIDERS: "mock" });
     expect(videoGenProviderIds()).toEqual([]);
 
-    configure({ TALLY_USE_MOCK_PROVIDERS: "true", VIDEO_GEN_PROVIDERS: "seedance" });
+    configure({ VIDXIR_USE_MOCK_PROVIDERS: "true", VIDEO_GEN_PROVIDERS: "seedance" });
     // With mocks on, the placeholder *replaces* the list — a development run must
     // not reach a paid generation API by accident.
     expect(videoGenProviderIds()).toEqual(["mock"]);
@@ -866,7 +866,7 @@ describe("image generation (§5, §18 cases 5–6)", () => {
 
   it("refuses an unsupported image resolution, which differs from the video list", () => {
     const ultra = resolveModel("tal/3.1").model;
-    // The Ultra tier is the only 2K surface in Tally, and it is stills-only.
+    // The Ultra tier is the only 2K surface in Vidxir AI, and it is stills-only.
     expect(ultra.capabilities.imageQualities).toEqual(["1080p", "2k"]);
     expect(assertImageQuality(ultra, "2k")).toBe("2k");
     expect(() => assertImageQuality(ultra, "720p")).toThrow(ProviderError);
@@ -979,7 +979,7 @@ describe("Tal 1.0 on its vendor API", () => {
     // fills the remainder.
     expect(clip.durationMs).toBe(5_000);
     expect(clip.providerAssetId).toBe("qwen:task-1");
-    // Licence and attribution name the Tally model, never the vendor (§3).
+    // Licence and attribution name the Vidxir AI model, never the vendor (§3).
     expect(clip.license).toContain("Tal 1.0 — Fast Model");
     expect(clip.attribution).toBe("Generated with Tal 1.0 — Fast Model");
     for (const name of FORBIDDEN_NAMES) {
@@ -1358,7 +1358,7 @@ describe("Tal 3.0 on its vendor API", () => {
     /**
      * Audio off explicitly, because the vendor's default is on.
      *
-     * Tally lays its own narration over the clip. A vendor soundtrack baked into the
+     * Vidxir AI lays its own narration over the clip. A vendor soundtrack baked into the
      * video cannot be separated again, so omitting this field would silently ship
      * double audio — and `capabilities.audio` tells the pipeline the clip is silent.
      */
@@ -1427,7 +1427,7 @@ describe("Tal 3.0 on its vendor API", () => {
       { status: "succeeded", content: { video_url: "https://tos.volces.com/d.mp4" } },
     ];
     await generateClip(request({ modelId: "tal/3.0", quality: "draft" }), USAGE);
-    // 480p, not "draft" — the vocabulary is Tally's and the token is the vendor's.
+    // 480p, not "draft" — the vocabulary is Vidxir AI's and the token is the vendor's.
     expect(arkBody().resolution).toBe("480p");
   });
 
@@ -1725,7 +1725,7 @@ describe("Tal 3.1 on its vendor API (§15)", () => {
  * read the recorded request body and assert the bytes are in it.
  *
  * Every case is offline. `providers/http` is replaced at the top of this file, so the
- * only thing being asserted is what Tally *would* have sent — which is the strongest
+ * only thing being asserted is what Vidxir AI *would* have sent — which is the strongest
  * honest claim available without spending money, and the only one available at all here
  * since `GEMINI_API_KEY` is a placeholder. Whether the real vendor accepts this body is
  * `verify:video-providers`' question and is not answered anywhere in this file.
@@ -1816,7 +1816,7 @@ describe("continuity reference stills (§6)", () => {
       USAGE,
     );
 
-    // Tally's stills live in a private bucket. The alternative to inlining would be
+    // Vidxir AI's stills live in a private bucket. The alternative to inlining would be
     // handing the vendor a signed URL to object storage, which is a credential in a
     // request body by another name.
     const serialised = JSON.stringify((net.calls[0] as Call).body);
@@ -1941,7 +1941,7 @@ describe("continuity reference stills (§6)", () => {
 
     // The vendor documents `allow_adult` as the *only* accepted value once
     // `referenceImages` is present. `dont_allow` here would not be a stricter request —
-    // it would be a rejected one. Every still Tally sends was drawn from Tally's own
+    // it would be a rejected one. Every still Vidxir AI sends was drawn from Vidxir AI's own
     // story bible, so the subject preserved is a generated character.
     const withRefs = ((net.calls[0] as Call).body as {
       parameters: Record<string, unknown>;
@@ -2045,7 +2045,7 @@ describe("continuity reference stills (§6)", () => {
  * A separate block because nothing is shared with Veo's: this vendor takes the stills in
  * the multimodal `content` array beside the prompt, as `data:` URIs with a sibling `role`,
  * and resolves them positionally from the prompt text. Every case is offline — the HTTP
- * layer is replaced at the top of this file — so what is asserted is the body Tally
+ * layer is replaced at the top of this file — so what is asserted is the body Vidxir AI
  * *would* send. Whether the live vendor accepts it is `verify:video-providers`' question
  * and is not answered here.
  */
@@ -2159,7 +2159,7 @@ describe("continuity reference stills on Tal 3.0 (§6)", () => {
     );
 
     /**
-     * Tally's stills live in a private MinIO bucket the vendor cannot reach. The vendor
+     * Vidxir AI's stills live in a private MinIO bucket the vendor cannot reach. The vendor
      * also accepts a fetchable URL here, which is exactly the wrong choice: it would
      * mean either publishing the bucket or putting a signed storage URL in a third
      * party's request body, which is a credential by another name.
@@ -2445,7 +2445,7 @@ describe("credential handling (§21)", () => {
 
 describe("the development placeholder", () => {
   beforeEach(() => {
-    configure({ TALLY_USE_MOCK_PROVIDERS: "true" });
+    configure({ VIDXIR_USE_MOCK_PROVIDERS: "true" });
   });
 
   it("is honest about not being a video", async () => {

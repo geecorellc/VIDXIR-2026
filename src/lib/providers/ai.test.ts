@@ -52,9 +52,9 @@ function apiError(status: number, message: string, body?: unknown): APIError {
  * placeholders, not credentials — nothing here connects to anything.
  */
 const BASE = {
-  DATABASE_URL: "postgresql://tally:tally@localhost:5432/tally_unit",
+  DATABASE_URL: "postgresql://vidxir:vidxir@localhost:5432/vidxir_unit",
   REDIS_URL: "redis://127.0.0.1:6379",
-  S3_BUCKET: "tally-unit",
+  S3_BUCKET: "vidxir-unit",
   S3_ACCESS_KEY_ID: "unit",
   S3_SECRET_ACCESS_KEY: "unit",
   ENCRYPTION_KEY: "a".repeat(64),

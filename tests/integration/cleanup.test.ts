@@ -5,15 +5,15 @@
  * so it is tested from two directions:
  *
  *  - The **guard** is a pure function, so every refusal is asserted with no live
- *    connection in the assertion at all. That is where the `tally` / `tally-media` cases
+ *    connection in the assertion at all. That is where the `vidxir` / `vidxir-media` cases
  *    live: proving the sweep refuses those namespaces must not involve pointing it at
  *    them and checking afterwards.
  *  - The **sweep** is exercised against real Redis and real MinIO, because "deletes what
  *    it should and nothing else" is a property of the commands that actually run.
  *
- * The survivor keys these tests plant are named `tally:__cleanup_probe__:*` — inside the
+ * The survivor keys these tests plant are named `vidxir:__cleanup_probe__:*` — inside the
  * development prefix, so a sweep that ignored its own pattern would take them, but under
- * a segment nothing in Tally writes, so the five real queued development jobs are never
+ * a segment nothing in Vidxir AI writes, so the five real queued development jobs are never
  * what is being risked. They are removed by name in `afterAll`, never by pattern.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -35,31 +35,31 @@ describe("the namespace guard", () => {
   });
 
   it("refuses the development Redis prefix", () => {
-    // `tally` is what a developer's worker consumes and what the five queued
+    // `vidxir` is what a developer's worker consumes and what the five queued
     // development jobs live under. A sweep here would delete real work.
-    const issue = namespaceIssue("tally", TEST_BUCKET);
+    const issue = namespaceIssue("vidxir", TEST_BUCKET);
     expect(issue).toContain("refusing to delete Redis keys");
-    expect(issue).toContain("tally");
+    expect(issue).toContain("vidxir");
   });
 
   it("refuses the development media bucket", () => {
-    // `tally-media` holds ~2.2 GB of real rendered development media, including the
-    // export `verify:editor` reads. Note it shares a prefix with `tally-test`: a
+    // `vidxir-media` holds ~2.2 GB of real rendered development media, including the
+    // export `verify:editor` reads. Note it shares a prefix with `vidxir-test`: a
     // `startsWith` guard would have accepted it.
-    const issue = namespaceIssue(TEST_QUEUE_PREFIX, "tally-media");
+    const issue = namespaceIssue(TEST_QUEUE_PREFIX, "vidxir-media");
     expect(issue).toContain("refusing to delete objects");
-    expect(issue).toContain("tally-media");
+    expect(issue).toContain("vidxir-media");
   });
 
   it("refuses a namespace that merely starts with the test name", () => {
     // The reason the guard is equality and not a prefix match, stated as a test:
-    // `tally-test-staging` is somebody else's namespace.
-    expect(namespaceIssue("tally-test-staging", TEST_BUCKET)).not.toBeNull();
-    expect(namespaceIssue(TEST_QUEUE_PREFIX, "tally-test-2")).not.toBeNull();
+    // `vidxir-test-staging` is somebody else's namespace.
+    expect(namespaceIssue("vidxir-test-staging", TEST_BUCKET)).not.toBeNull();
+    expect(namespaceIssue(TEST_QUEUE_PREFIX, "vidxir-test-2")).not.toBeNull();
   });
 
   it("refuses an unset namespace rather than defaulting", () => {
-    // An undefined `QUEUE_PREFIX` means the application default `tally` is in force,
+    // An undefined `QUEUE_PREFIX` means the application default `vidxir` is in force,
     // which is the worst case, so it must not read as "nothing configured, safe".
     expect(namespaceIssue(undefined, TEST_BUCKET)).toContain("unset");
     expect(namespaceIssue(TEST_QUEUE_PREFIX, undefined)).toContain("unset");
@@ -78,8 +78,8 @@ describe("the namespace guard", () => {
 const describeLive = hasDatabase ? describe : describe.skip;
 
 describeLive("cleanupTestNamespace", () => {
-  /** A segment of the development prefix that no part of Tally writes. */
-  const PROBE = `tally:__cleanup_probe__`;
+  /** A segment of the development prefix that no part of Vidxir AI writes. */
+  const PROBE = `vidxir:__cleanup_probe__`;
   const probeKeys = [`${PROBE}:queue:wait`, `${PROBE}:ratelimit:read:u1`];
 
   let redis: import("ioredis").default;
@@ -99,8 +99,8 @@ describeLive("cleanupTestNamespace", () => {
         : {}),
       forcePathStyle: true,
       credentials: {
-        accessKeyId: process.env["S3_ACCESS_KEY_ID"] ?? "tallyminio",
-        secretAccessKey: process.env["S3_SECRET_ACCESS_KEY"] ?? "tallyminio",
+        accessKeyId: process.env["S3_ACCESS_KEY_ID"] ?? "vidxirminio",
+        secretAccessKey: process.env["S3_SECRET_ACCESS_KEY"] ?? "vidxirminio",
       },
     });
   });
@@ -171,7 +171,7 @@ describeLive("cleanupTestNamespace", () => {
     expect(await countObjects(TEST_BUCKET)).toBe(0);
   });
 
-  it("leaves development `tally:*` keys untouched", async () => {
+  it("leaves development `vidxir:*` keys untouched", async () => {
     await seed();
     await cleanupTestNamespace();
 
@@ -184,15 +184,15 @@ describeLive("cleanupTestNamespace", () => {
 
   it("leaves the development media bucket untouched", async () => {
     /**
-     * Counted, not modified. The sweep is aimed at `tally-test` by the environment, and
+     * Counted, not modified. The sweep is aimed at `vidxir-test` by the environment, and
      * the assertion is that a bucket it was never pointed at is the same size either
      * side of it — which is the only honest way to test this without writing to the
      * 2.2 GB of real development media.
      */
-    const before = await countObjects("tally-media").catch(() => null);
+    const before = await countObjects("vidxir-media").catch(() => null);
     await seed();
     await cleanupTestNamespace();
-    const after = await countObjects("tally-media").catch(() => null);
+    const after = await countObjects("vidxir-media").catch(() => null);
 
     expect(after).toBe(before);
   });
@@ -214,7 +214,7 @@ describeLive("cleanupTestNamespace", () => {
   it("deletes nothing when pointed outside the test namespace", async () => {
     await seed();
     const prefix = process.env["QUEUE_PREFIX"];
-    process.env["QUEUE_PREFIX"] = "tally";
+    process.env["QUEUE_PREFIX"] = "vidxir";
 
     try {
       const result = await cleanupTestNamespace();

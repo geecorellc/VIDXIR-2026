@@ -3,7 +3,7 @@
  *
  * When a capability has no credentials, the feature that depends on it says so —
  * naming the exact env vars an operator has to set. This is the visible half of
- * the rule that Tally never fakes success: an unconfigured provider produces a
+ * the rule that Vidxir AI never fakes success: an unconfigured provider produces a
  * banner and a disabled action, not a fabricated result.
  *
  * The mock state gets its own, louder treatment. Mock providers exist so the
@@ -55,7 +55,7 @@ export function ConfigNotice({ status }: { status: CapabilityStatus }) {
           >
             {mock ? (
               <>
-                Tally is using a development stand-in for {status.label.toLowerCase()}.
+                Vidxir AI is using a development stand-in for {status.label.toLowerCase()}.
                 Anything it produces is placeholder output and must not be treated
                 as a finished asset.
               </>

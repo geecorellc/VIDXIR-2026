@@ -132,7 +132,7 @@ const SOURCE_TITLE = "I wired twelve cheap sensors into one hallway";
  * Tags are the uploader's own statement of subject, so they decide both the niche
  * (longest multi-word tag) and the head of the topic seed — which is what the
  * research probes are built from. `captionsAvailable: true` is deliberate: it
- * becomes `owner_only`, never `available`, because captions existing and Tally
+ * becomes `owner_only`, never `available`, because captions existing and Vidxir AI
  * being able to read them are different facts (§5).
  */
 function sourceDetail(overrides: Record<string, unknown> = {}) {
@@ -590,7 +590,7 @@ suite("YouTube link mode (integration)", () => {
       );
       const { eq } = await import("drizzle-orm");
 
-      const { user, project } = await linkProject("research@tally.test");
+      const { user, project } = await linkProject("research@vidxir.test");
       const { runId, result, error } = await runLinkResearch(user.id, project.id);
 
       expect(error).toBeNull();
@@ -622,7 +622,7 @@ suite("YouTube link mode (integration)", () => {
 
       const analysis = run?.sourceAnalysis;
       expect(analysis).not.toBeNull();
-      // Never "available": captions existing and Tally being able to read them
+      // Never "available": captions existing and Vidxir AI being able to read them
       // are different facts, and only the first is knowable (§5).
       expect(analysis?.["transcript"]).toBe("owner_only");
       expect(analysis?.["categoryTitle"]).toBe("Science & Technology");
@@ -650,7 +650,7 @@ suite("YouTube link mode (integration)", () => {
       const { researchResults } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const { user, project } = await linkProject("seed@tally.test");
+      const { user, project } = await linkProject("seed@vidxir.test");
       const { runId } = await runLinkResearch(user.id, project.id);
 
       const evidence = await db
@@ -666,7 +666,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("derives the search language and region from the uploader's declaration", async () => {
-      const { user, project } = await linkProject("region@tally.test");
+      const { user, project } = await linkProject("region@vidxir.test");
       await runLinkResearch(user.id, project.id);
 
       // `defaultAudioLanguage: "en-GB"` — what is spoken wins over the metadata
@@ -685,7 +685,7 @@ suite("YouTube link mode (integration)", () => {
 
       google.isYouTubePublicReadConfigured.mockReturnValue(false);
 
-      const { user, project } = await linkProject("unconfigured@tally.test");
+      const { user, project } = await linkProject("unconfigured@vidxir.test");
       const { runId, error } = await runLinkResearch(user.id, project.id);
 
       // Rethrown so the worker can decide about a retry — and it must not retry a
@@ -716,7 +716,7 @@ suite("YouTube link mode (integration)", () => {
       // YouTube reports all four identically.
       google.fetchVideoDetailAs.mockResolvedValue(null);
 
-      const { user, project } = await linkProject("private@tally.test");
+      const { user, project } = await linkProject("private@vidxir.test");
       const { runId, error } = await runLinkResearch(user.id, project.id);
 
       expect(error).toMatchObject({ code: "not_found" });
@@ -749,7 +749,7 @@ suite("YouTube link mode (integration)", () => {
         }),
       );
 
-      const { user, project } = await linkProject("thin@tally.test");
+      const { user, project } = await linkProject("thin@vidxir.test");
       const { runId, error, result } = await runLinkResearch(user.id, project.id);
 
       expect(error).toBeNull();
@@ -782,7 +782,7 @@ suite("YouTube link mode (integration)", () => {
       const { ideas } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const { user, project } = await linkProject("angles@tally.test");
+      const { user, project } = await linkProject("angles@vidxir.test");
       const { runId } = await runLinkResearch(user.id, project.id);
 
       const angles = await db.select().from(ideas).where(eq(ideas.runId, runId));
@@ -797,7 +797,7 @@ suite("YouTube link mode (integration)", () => {
         // Provenance: which public videos informed this angle (§22).
         expect(angle.sourceResultIds.length).toBeGreaterThan(0);
         // Scored in code, not by the model.
-        expect(Number(angle.tallyScore)).toBeGreaterThan(0);
+        expect(Number(angle.vidxirScore)).toBeGreaterThan(0);
         expect(angle.scoreBreakdown).not.toBeNull();
         // The one thing §7 forbids outright.
         expect(angle.title).not.toBe(SOURCE_TITLE);
@@ -826,7 +826,7 @@ suite("YouTube link mode (integration)", () => {
         };
       });
 
-      const { user, project } = await linkProject("derivative@tally.test");
+      const { user, project } = await linkProject("derivative@vidxir.test");
       const { runId, result } = await runLinkResearch(user.id, project.id);
 
       expect(result?.ideaCount).toBe(1);
@@ -839,7 +839,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("never puts the source description or tags into the angle prompt (§22)", async () => {
-      const { user, project } = await linkProject("prompt@tally.test");
+      const { user, project } = await linkProject("prompt@vidxir.test");
       await runLinkResearch(user.id, project.id);
 
       const call = ai.generateJson.mock.calls.find(
@@ -868,7 +868,7 @@ suite("YouTube link mode (integration)", () => {
       const { jobs } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const { user, project } = await linkProject("jobrow@tally.test");
+      const { user, project } = await linkProject("jobrow@vidxir.test");
       const { startLinkResearchRun } = await import("@/lib/research/service");
 
       const { jobId, runId } = await startLinkResearchRun({
@@ -904,7 +904,7 @@ suite("YouTube link mode (integration)", () => {
       const { researchRuns } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const { user, project } = await linkProject("attribution@tally.test");
+      const { user, project } = await linkProject("attribution@vidxir.test");
       const { startLinkResearchRun } = await import("@/lib/research/service");
 
       const { runId } = await startLinkResearchRun({
@@ -935,7 +935,7 @@ suite("YouTube link mode (integration)", () => {
       const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
       const { createProject } = await import("@/lib/projects/service");
 
-      const { user, project: first } = await linkProject("samelink@tally.test");
+      const { user, project: first } = await linkProject("samelink@vidxir.test");
 
       // The first project researches the link and finishes.
       const firstRun = await runLinkResearch(user.id, first.id);
@@ -991,7 +991,7 @@ suite("YouTube link mode (integration)", () => {
       const { eq } = await import("drizzle-orm");
       const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
 
-      const { user, project } = await linkProject("legacyrun@tally.test");
+      const { user, project } = await linkProject("legacyrun@vidxir.test");
       const { runId } = await runLinkResearch(user.id, project.id);
 
       /**
@@ -1021,7 +1021,7 @@ suite("YouTube link mode (integration)", () => {
       const { eq } = await import("drizzle-orm");
       const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
 
-      const { user, project } = await linkProject("nosource@tally.test");
+      const { user, project } = await linkProject("nosource@vidxir.test");
       const { runId } = await runLinkResearch(user.id, project.id);
 
       /**
@@ -1035,7 +1035,7 @@ suite("YouTube link mode (integration)", () => {
        * The bug this pins: an id with no analysis behind it still produced a
        * `SourceView`, and the card fell back to the bare video id as its headline with
        * "not reported" under every figure. On screen that is indistinguishable from
-       * Tally having read the video and understood nothing about it (§42) — so the
+       * Vidxir AI having read the video and understood nothing about it (§42) — so the
        * panel has to be empty here, and say why.
        */
       await db
@@ -1064,7 +1064,7 @@ suite("YouTube link mode (integration)", () => {
       const { eq } = await import("drizzle-orm");
       const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
 
-      const { user, project } = await linkProject("partialsource@tally.test");
+      const { user, project } = await linkProject("partialsource@vidxir.test");
       const { runId } = await runLinkResearch(user.id, project.id);
 
       /**
@@ -1147,7 +1147,7 @@ suite("YouTube link mode (integration)", () => {
         const { getStageContext } = await import("@/lib/dashboard/stage");
         const { displayTitle } = await import("@/lib/projects/display-title");
 
-        const { user, project } = await abandoned("noscript@tally.test");
+        const { user, project } = await abandoned("noscript@vidxir.test");
         const context = await getStageContext(user.id, project.id);
 
         // No script exists, so the screen's empty state is what renders.
@@ -1162,7 +1162,7 @@ suite("YouTube link mode (integration)", () => {
         const { getStageContext } = await import("@/lib/dashboard/stage");
         const { displayTitle } = await import("@/lib/projects/display-title");
 
-        const { user, project } = await abandoned("nothumb@tally.test");
+        const { user, project } = await abandoned("nothumb@vidxir.test");
         const context = await getStageContext(user.id, project.id);
 
         expect(context.thumbnailVariants).toEqual([]);
@@ -1174,7 +1174,7 @@ suite("YouTube link mode (integration)", () => {
         const { buildBrief } = await import("@/lib/scripts/service");
         const { buildScriptPrompt } = await import("@/lib/scripts/prompt");
 
-        const { user, project } = await abandoned("noprompt@tally.test");
+        const { user, project } = await abandoned("noprompt@vidxir.test");
 
         /**
          * The brief and the rendered prompt, because this is the one path where the bug
@@ -1192,7 +1192,7 @@ suite("YouTube link mode (integration)", () => {
       it("shows the research run as failed without naming the id as its subject", async () => {
         const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
 
-        const { user, project, runId } = await abandoned("noresearch@tally.test");
+        const { user, project, runId } = await abandoned("noresearch@vidxir.test");
         const view = await getLinkStudioData(user.id, project.id);
 
         // The failure history is preserved rather than cleared — it is why the screen
@@ -1213,14 +1213,14 @@ suite("YouTube link mode (integration)", () => {
         const { getLinkStudioData } = await import("@/lib/dashboard/link-studio");
         const { displayTitle } = await import("@/lib/projects/display-title");
 
-        const { user, project } = await abandoned("nopayload@tally.test");
+        const { user, project } = await abandoned("nopayload@vidxir.test");
         const view = await getLinkStudioData(user.id, project.id);
 
         /**
          * Every string in the payload, checked at once.
          *
          * The two legitimate carriers are excluded by name: `project.sourceVideoId` is
-         * provenance §22 requires Tally to keep, and `project.title` is the stored row,
+         * provenance §22 requires Vidxir AI to keep, and `project.title` is the stored row,
          * which is not rewritten — the fix is that no screen renders it raw, which
          * `displayTitle` proves here. Anything *else* containing the id is a leak, and
          * scanning the whole object is how a field added later gets caught without
@@ -1236,7 +1236,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("refuses a second research run on the same project (§23 case 22)", async () => {
-      const { user, project } = await linkProject("dupe@tally.test");
+      const { user, project } = await linkProject("dupe@vidxir.test");
       const { startLinkResearchRun } = await import("@/lib/research/service");
 
       await startLinkResearchRun({
@@ -1262,7 +1262,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("still allows a different link to be researched concurrently", async () => {
-      const { user, project } = await linkProject("concurrent@tally.test");
+      const { user, project } = await linkProject("concurrent@vidxir.test");
       const { createProject } = await import("@/lib/projects/service");
       const { startLinkResearchRun } = await import("@/lib/research/service");
 
@@ -1342,7 +1342,7 @@ suite("YouTube link mode (integration)", () => {
       const { projects, researchRuns } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await linkUser("analyzeroute@tally.test");
+      const user = await linkUser("analyzeroute@vidxir.test");
       await signIn(user);
 
       const result = await call("youtube/analyze", { url: SOURCE_URL });
@@ -1374,7 +1374,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("reports a private or deleted video as a named state at 200", async () => {
-      const user = await linkUser("analyzegone@tally.test");
+      const user = await linkUser("analyzegone@vidxir.test");
       await signIn(user);
 
       // YouTube's empty `items` array: deleted, private, region-blocked or never
@@ -1399,7 +1399,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("names the variable when the API key is not configured (§48)", async () => {
-      const user = await linkUser("analyzenokey@tally.test");
+      const user = await linkUser("analyzenokey@vidxir.test");
       await signIn(user);
 
       google.isYouTubePublicReadConfigured.mockReturnValueOnce(false);
@@ -1414,7 +1414,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("names what a near-miss link actually is", async () => {
-      const user = await linkUser("analyzebad@tally.test");
+      const user = await linkUser("analyzebad@vidxir.test");
       await signIn(user);
 
       // A user who pasted a playlist, a channel or a search page has made an
@@ -1437,7 +1437,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("does not charge the research window for a link it never read", async () => {
-      const user = await linkUser("analyzefree@tally.test");
+      const user = await linkUser("analyzefree@vidxir.test");
       await signIn(user);
 
       /**
@@ -1462,7 +1462,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("refuses a lookalike host — the failure a suffix check would allow", async () => {
-      const user = await linkUser("analyzeevil@tally.test");
+      const user = await linkUser("analyzeevil@vidxir.test");
       await signIn(user);
 
       const result = await call("youtube/analyze", {
@@ -1487,7 +1487,7 @@ suite("YouTube link mode (integration)", () => {
       const { projects, researchRuns } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await linkUser("startroute@tally.test");
+      const user = await linkUser("startroute@vidxir.test");
       await signIn(user);
 
       const result = await call("projects/from-youtube", { url: SOURCE_URL });
@@ -1537,7 +1537,7 @@ suite("YouTube link mode (integration)", () => {
       const { projects } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await linkUser("startforms@tally.test");
+      const user = await linkUser("startforms@vidxir.test");
       // Unlimited videos: the four starts below would otherwise exhaust starter's
       // four-a-month allowance and the last one would 402 for the wrong reason.
       await setTier(user.id, "scale");
@@ -1572,7 +1572,7 @@ suite("YouTube link mode (integration)", () => {
       const { projects } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await linkUser("startbadmodel@tally.test");
+      const user = await linkUser("startbadmodel@vidxir.test");
       // Scale, so the refusal is about the model rather than the entitlement.
       await setTier(user.id, "scale");
       await signIn(user);
@@ -1600,7 +1600,7 @@ suite("YouTube link mode (integration)", () => {
 
       // Starter by default, and a real Tal model id: the refusal is the entitlement,
       // not the name.
-      const user = await linkUser("startstarterai@tally.test");
+      const user = await linkUser("startstarterai@vidxir.test");
       await signIn(user);
 
       const result = await call("projects/from-youtube", {
@@ -1618,7 +1618,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("refuses a real model whose provider this deployment has not configured (§21)", async () => {
-      const user = await linkUser("startunconfigured@tally.test");
+      const user = await linkUser("startunconfigured@vidxir.test");
       await setTier(user.id, "scale");
       await signIn(user);
 
@@ -1626,7 +1626,7 @@ suite("YouTube link mode (integration)", () => {
        * `tal/1.0` exists and this caller is on `scale`, so neither the name nor the
        * entitlement is what stops it.
        *
-       * What stops it is that the suite runs with `TALLY_USE_MOCK_PROVIDERS=true`, so
+       * What stops it is that the suite runs with `VIDXIR_USE_MOCK_PROVIDERS=true`, so
        * `DASHSCOPE_API_KEY` is not configured and the provider behind the model is not
        * one this deployment offers. No amount of request manipulation gets past that.
        */
@@ -1645,7 +1645,7 @@ suite("YouTube link mode (integration)", () => {
       const { eq } = await import("drizzle-orm");
 
       // Starter includes four videos a month.
-      const user = await linkUser("startallowance@tally.test");
+      const user = await linkUser("startallowance@vidxir.test");
       await signIn(user);
 
       for (let i = 0; i < 4; i += 1) {
@@ -1686,7 +1686,7 @@ suite("YouTube link mode (integration)", () => {
       const { researchRuns } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const { user, project } = await linkProject("handler@tally.test");
+      const { user, project } = await linkProject("handler@vidxir.test");
       const { startLinkResearchRun } = await import("@/lib/research/service");
       const { researchHandler } = await import("@/worker/handlers/research");
       const { markJobSucceeded } = await import("@/lib/queue/jobs");
@@ -1718,7 +1718,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("refuses a payload with neither a channel nor a source video", async () => {
-      const { user, project } = await linkProject("nopayload@tally.test");
+      const { user, project } = await linkProject("nopayload@vidxir.test");
       const { startLinkResearchRun } = await import("@/lib/research/service");
       const { researchHandler } = await import("@/worker/handlers/research");
 
@@ -1742,7 +1742,7 @@ suite("YouTube link mode (integration)", () => {
     });
 
     it("refuses a video id that is not a YouTube id, before any API call", async () => {
-      const { user, project } = await linkProject("badid@tally.test");
+      const { user, project } = await linkProject("badid@vidxir.test");
       const { startLinkResearchRun } = await import("@/lib/research/service");
       const { researchHandler } = await import("@/worker/handlers/research");
 
@@ -1771,7 +1771,7 @@ suite("YouTube link mode (integration)", () => {
       const { startResearchRun } = await import("@/lib/research/service");
       const { researchHandler } = await import("@/worker/handlers/research");
 
-      const user = await linkUser("mismatch@tally.test");
+      const user = await linkUser("mismatch@vidxir.test");
       const channelId = await createChannel(user.id);
       const started = await startResearchRun({
         userId: user.id,
@@ -1801,8 +1801,8 @@ suite("YouTube link mode (integration)", () => {
 
   describe("tenant isolation (§21, §23 case 17)", () => {
     it("refuses to execute another user's run with a valid run id", async () => {
-      const { user, project } = await linkProject("owner@tally.test");
-      const intruder = await linkUser("intruder@tally.test");
+      const { user, project } = await linkProject("owner@vidxir.test");
+      const intruder = await linkUser("intruder@vidxir.test");
       const { startLinkResearchRun, executeResearchRun } = await import(
         "@/lib/research/service"
       );
@@ -1832,14 +1832,14 @@ suite("YouTube link mode (integration)", () => {
       const { eq } = await import("drizzle-orm");
       const { configureProject } = await import("@/lib/projects/service");
 
-      const first = await linkProject("angleowner@tally.test");
+      const first = await linkProject("angleowner@vidxir.test");
       const { runId } = await runLinkResearch(first.user.id, first.project.id);
       const [angle] = await db
         .select({ id: ideas.id })
         .from(ideas)
         .where(eq(ideas.runId, runId));
 
-      const second = await linkProject("angleintruder@tally.test");
+      const second = await linkProject("angleintruder@vidxir.test");
 
       // Same message for "not yours" and "does not exist", so the endpoint cannot
       // be used to enumerate which idea ids are real.
@@ -1857,7 +1857,7 @@ suite("YouTube link mode (integration)", () => {
       const { ideas } = await import("@/lib/db/schema");
       const { configureProject } = await import("@/lib/projects/service");
 
-      const { user, project } = await linkProject("crosschannel@tally.test");
+      const { user, project } = await linkProject("crosschannel@vidxir.test");
       const channelId = await createChannel(user.id);
 
       // Same user, but an angle researched inside a channel's scope.
@@ -1868,7 +1868,7 @@ suite("YouTube link mode (integration)", () => {
           channelId,
           title: "An angle that belongs to a connected channel",
           topic: "channel scoped",
-          tallyScore: 50,
+          vidxirScore: 50,
         })
         .returning({ id: ideas.id });
 
@@ -1934,7 +1934,7 @@ suite("YouTube link mode (integration)", () => {
         "@/lib/projects/service"
       );
 
-      const { user, project } = await linkProject("script@tally.test");
+      const { user, project } = await linkProject("script@vidxir.test");
       const { runId } = await runLinkResearch(user.id, project.id);
 
       const [angle] = await db
@@ -2003,7 +2003,7 @@ suite("YouTube link mode (integration)", () => {
     }, 60_000);
 
     it("refuses a second script run while one is in flight", async () => {
-      const { user, project } = await linkProject("scriptdupe@tally.test");
+      const { user, project } = await linkProject("scriptdupe@vidxir.test");
       const { startScriptGeneration } = await import("@/lib/scripts/service");
 
       await startScriptGeneration({
@@ -2032,7 +2032,7 @@ suite("YouTube link mode (integration)", () => {
       const { startVideoBuild } = await import("@/lib/video/service");
       const { markJobSucceeded } = await import("@/lib/queue/jobs");
 
-      const { user, project } = await linkProject("stock@tally.test");
+      const { user, project } = await linkProject("stock@vidxir.test");
       await writeScript(user.id, project.id);
 
       const started = await startVideoBuild({
@@ -2085,12 +2085,12 @@ suite("YouTube link mode (integration)", () => {
 
       // Scale, because AI video is a paid entitlement and this must go through the
       // real check rather than around it (§19).
-      const { user, project } = await linkProject("aivideo@tally.test", "scale");
+      const { user, project } = await linkProject("aivideo@vidxir.test", "scale");
 
       /**
        * The mock model, not Seedance or Veo.
        *
-       * `TALLY_USE_MOCK_PROVIDERS=true` in the harness makes it the only enabled
+       * `VIDXIR_USE_MOCK_PROVIDERS=true` in the harness makes it the only enabled
        * provider, which is exactly what §23 asks for: the selection, the
        * entitlement, the plan resolution and the asset persistence are all real,
        * and no request reaches a paid generation API.
@@ -2242,7 +2242,7 @@ suite("YouTube link mode (integration)", () => {
         const { startVideoBuild } = await import("@/lib/video/service");
         const { markJobSucceeded } = await import("@/lib/queue/jobs");
 
-        const { user, project } = await linkProject("endtoend@tally.test");
+        const { user, project } = await linkProject("endtoend@vidxir.test");
 
         // 1. Paste → analyse → research → angles.
         const { runId, result } = await runLinkResearch(user.id, project.id);

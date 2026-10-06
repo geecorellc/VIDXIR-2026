@@ -2,7 +2,7 @@
  * Whether a project's stored title is a real title, and what to show when it is not.
  *
  * `projects.title` is `NOT NULL`, so a project started from a pasted link has to be
- * given something at insert time — long before Tally knows what the video is about.
+ * given something at insert time — long before Vidxir AI knows what the video is about.
  * `/api/projects/from-youtube` writes `New video from a YouTube link (<videoId>)`,
  * deliberately not the source video's own title, because naming a project after
  * somebody else's video is the first step of the copying §22 forbids. That placeholder
@@ -18,7 +18,7 @@
  * about to be sent to a provider as though it described the video.
  *
  * The distinction that fixes the whole class of problem is between **a URL the user
- * submitted** and **a source Tally successfully analysed**. `source_video_id` is written
+ * submitted** and **a source Vidxir AI successfully analysed**. `source_video_id` is written
  * on paste and proves only the former. So a placeholder title is not a title at all: it
  * is the absence of one, and `displayTitle()` returns null for it so each caller renders
  * its own honest empty state instead of quoting an internal string.

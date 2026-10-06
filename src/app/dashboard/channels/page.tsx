@@ -8,7 +8,7 @@
  * Changed: the prototype's six invented channels are gone. This lists the
  * channels actually connected through Google OAuth, with the plan's channel limit
  * enforced server-side (§23) and an explicit configuration state when the Google
- * credentials are absent (§48). Connecting happens by redirecting to Google — Tally
+ * credentials are absent (§48). Connecting happens by redirecting to Google — Vidxir AI
  * never asks for a YouTube password.
  */
 import { redirect } from "next/navigation";
@@ -33,7 +33,7 @@ import { color, font } from "@/lib/design/tokens";
 import { planByTier } from "@/lib/plans";
 import { capabilityStatus } from "@/lib/providers/config";
 
-export const metadata = { title: "Channels — Tally" };
+export const metadata = { title: "Channels — Vidxir AI" };
 
 /** A publish is "just published" for an hour, matching the prototype's banner. */
 const JUST_PUBLISHED_MS = 60 * 60 * 1000;
@@ -63,7 +63,7 @@ export default async function ChannelsPage({ searchParams }: PageProps) {
   // from the subscriptions table — never from the client (§23).
   const plan = planByTier(tier);
 
-  // Latest Tally-published video per channel, plus lifetime views from real
+  // Latest Vidxir AI-published video per channel, plus lifetime views from real
   // analytics snapshots. Both are left null when nothing has been measured.
   const [recent, viewTotals] = await Promise.all([
     db
@@ -146,7 +146,7 @@ export default async function ChannelsPage({ searchParams }: PageProps) {
           }}
         >
           <span
-            className="tally-dot"
+            className="vidxir-dot"
             style={{
               width: 8,
               height: 8,
@@ -171,8 +171,8 @@ export default async function ChannelsPage({ searchParams }: PageProps) {
           title="No channel connected"
           body={
             youtube.state === "not_configured"
-              ? "Tally connects to YouTube through Google OAuth. The server is missing its Google credentials, so the connect flow is unavailable until they are configured."
-              : "Connect a YouTube channel and Tally can read your niche, research what is breaking out, and publish on your behalf. You will be sent to Google to approve access — Tally never asks for your YouTube password."
+              ? "Vidxir AI connects to YouTube through Google OAuth. The server is missing its Google credentials, so the connect flow is unavailable until they are configured."
+              : "Connect a YouTube channel and Vidxir AI can read your niche, research what is breaking out, and publish on your behalf. You will be sent to Google to approve access — Vidxir AI never asks for your YouTube password."
           }
           action={
             youtube.state === "ready" ? <ConnectChannelCard variant="button" /> : undefined

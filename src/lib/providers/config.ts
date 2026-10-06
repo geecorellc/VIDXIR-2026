@@ -114,7 +114,7 @@ const SPECS: Spec[] = [
     hint:
       env().AI_PROVIDER === "bedrock"
         ? "Bedrock uses the standard AWS credential chain — no key is stored in " +
-          "Tally's configuration. Enable Claude model access in the AWS console."
+          "Vidxir AI's configuration. Enable Claude model access in the AWS console."
         : "Create a key at https://console.anthropic.com/settings/keys",
   },
   {
@@ -191,7 +191,7 @@ const SPECS: Spec[] = [
     required: () => videoGenRequiredEnvVars(),
     hint:
       "Set VIDEO_GEN_PROVIDERS to any of qwen,minimax,seedance,veo,runway — the " +
-      "four backends behind Tally's own video models, plus Runway. Each needs one " +
+      "four backends behind Vidxir AI's own video models, plus Runway. Each needs one " +
       "key: DASHSCOPE_API_KEY (https://bailian.console.aliyun.com), " +
       "MINIMAX_API_KEY (https://platform.minimaxi.chat), SEEDANCE_API_KEY " +
       "(https://console.volcengine.com/ark), GEMINI_API_KEY " +
@@ -223,7 +223,7 @@ const SPECS: Spec[] = [
     label: "Video rendering",
     optional: true,
     // Not mocked, even in development: `ffmpeg` is a real encoder producing a
-    // real MP4, so there is no state in which Tally claims to have rendered a
+    // real MP4, so there is no state in which Vidxir AI claims to have rendered a
     // video it did not render (§42).
     provider: () => env().RENDER_PROVIDER,
     required: (p) => {
@@ -250,7 +250,7 @@ const SPECS: Spec[] = [
     // tab is blocked.
     optional: true,
     // Never mocked. `drawtext` burns real type onto a real frame, so there is no
-    // state where Tally shows a thumbnail it did not composite (§42).
+    // state where Vidxir AI shows a thumbnail it did not composite (§42).
     provider: () => "ffmpeg-drawtext",
     // The requirement is a file on disk, not a credential — the env var is how an
     // operator points at one, but a system font satisfies it without any var set.

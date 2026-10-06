@@ -38,7 +38,7 @@
  */
 import "@/lib/load-env";
 
-const PREFIX = "tally-verify";
+const PREFIX = "vidxir-verify";
 process.env["QUEUE_PREFIX"] = PREFIX;
 
 const TOTAL_STEPS = 7;
@@ -190,7 +190,7 @@ async function main(): Promise<void> {
 
   // ---- 6. the publish guard ----------------------------------------------
   /**
-   * §40/§9 stated as a fact rather than glossed. With `TALLY_BLOCK_REAL_PUBLISH`
+   * §40/§9 stated as a fact rather than glossed. With `VIDXIR_BLOCK_REAL_PUBLISH`
    * set, `uploadVideo` throws `PublishBlockedError` before a byte leaves the
    * machine, so no local run of this script can upload — which is also why a real
    * end-to-end YouTube confirmation cannot be demonstrated here. The guard is
@@ -205,7 +205,7 @@ async function main(): Promise<void> {
   }
   ok(
     blocked
-      ? `real publishing is BLOCKED by TALLY_BLOCK_REAL_PUBLISH — uploadVideo() and ` +
+      ? `real publishing is BLOCKED by VIDXIR_BLOCK_REAL_PUBLISH — uploadVideo() and ` +
           `setThumbnail() throw ${guard.code} before any network call, so no ` +
           `end-to-end YouTube upload is verifiable in this environment`
       : `real publishing is ENABLED — uploadVideo() will reach youtube.com; ` +
@@ -236,7 +236,7 @@ async function main(): Promise<void> {
     `\n${step}/${TOTAL_STEPS} checks passed — the automation engine's queries, ` +
       `cadence maths, scope requirements and publish queue all work under real Node.` +
       (blocked
-        ? `\nNot verified: an actual YouTube upload. TALLY_BLOCK_REAL_PUBLISH ` +
+        ? `\nNot verified: an actual YouTube upload. VIDXIR_BLOCK_REAL_PUBLISH ` +
           `prevents it, and §9 forbids uploading test content to an unknown channel.`
         : "") +
       "\n",

@@ -44,7 +44,7 @@ export function DemandChart({ series }: DemandChartProps) {
           No demand data yet.
         </span>
         <span style={{ fontSize: 12, color: color.textFaint, maxWidth: 300, lineHeight: 1.55 }}>
-          Run research on a connected channel and Tally will chart real search
+          Run research on a connected channel and Vidxir AI will chart real search
           interest for your niche here.
         </span>
       </div>
@@ -55,7 +55,7 @@ export function DemandChart({ series }: DemandChartProps) {
     <ResponsiveContainer width="100%" height={200}>
       <AreaChart data={series}>
         <defs>
-          <linearGradient id="tally-demand" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id="vidxir-demand" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={color.accent} stopOpacity={0.35} />
             <stop offset="100%" stopColor={color.accent} stopOpacity={0} />
           </linearGradient>
@@ -88,7 +88,7 @@ export function DemandChart({ series }: DemandChartProps) {
           dataKey="value"
           name="Interest"
           stroke={color.accent}
-          fill="url(#tally-demand)"
+          fill="url(#vidxir-demand)"
           strokeWidth={2}
         />
       </AreaChart>

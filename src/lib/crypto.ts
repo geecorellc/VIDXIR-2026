@@ -227,7 +227,7 @@ export function decryptNullable(value: string | null | undefined): string | null
  */
 function derivedKey(purpose: string): Buffer {
   return createHmac("sha256", Buffer.from(env().SESSION_SECRET, "hex"))
-    .update(`tally:${purpose}`)
+    .update(`vidxir:${purpose}`)
     .digest();
 }
 

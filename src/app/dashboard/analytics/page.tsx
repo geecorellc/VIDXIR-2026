@@ -8,7 +8,7 @@
  * The governing rule is the same one as the rest of Phase 9: **absence is
  * rendered as absence.** Every tile here can show an em dash with a reason, and
  * the revenue tile in particular will normally say the YouTube monetary permission
- * is missing rather than "$0.00", because Tally does not request that scope at
+ * is missing rather than "$0.00", because Vidxir AI does not request that scope at
  * consent and a zero would be a claim about earnings rather than about access
  * (§7).
  *
@@ -41,7 +41,7 @@ import {
 import { decide, listExperiments } from "@/lib/analytics/experiments";
 import { color, font } from "@/lib/design/tokens";
 
-export const metadata = { title: "Analytics — Tally" };
+export const metadata = { title: "Analytics — Vidxir AI" };
 
 /** The reporting window. Matches the ingest's default retention expectations. */
 const WINDOW_DAYS = 28;
@@ -71,7 +71,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
         <EmptyCTA
           icon={<BarChart3 size={22} />}
           title="No channel connected"
-          body="Analytics are read from the YouTube channels you connect. Connect one and Tally starts collecting daily figures for it."
+          body="Analytics are read from the YouTube channels you connect. Connect one and Vidxir AI starts collecting daily figures for it."
         />
       </div>
     );
@@ -232,7 +232,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
             }}
           >
             {revenue.state === "scope_missing" || revenue.state === "not_requested"
-              ? "Earnings need the YouTube Analytics monetary permission, which this connection does not include. Tally shows no figure rather than a zero."
+              ? "Earnings need the YouTube Analytics monetary permission, which this connection does not include. Vidxir AI shows no figure rather than a zero."
               : "Earnings are YouTube's own estimates and are revised for several weeks after the fact."}
           </p>
         </Card>
@@ -242,7 +242,7 @@ export default async function AnalyticsPage({ searchParams }: PageProps) {
         <Heading>Per-video attribution</Heading>
         {videos.length === 0 ? (
           <p style={{ margin: 0, fontSize: 12.5, color: color.textDim }}>
-            Nothing published to this channel through Tally yet.
+            Nothing published to this channel through Vidxir AI yet.
           </p>
         ) : (
           <table

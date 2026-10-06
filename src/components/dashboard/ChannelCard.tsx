@@ -109,7 +109,7 @@ export function ChannelCard({ channel }: { channel: ChannelCardData }) {
               minHeight: 18,
             }}
           >
-            {channel.lastVideoTitle ?? "No videos published by Tally yet"}
+            {channel.lastVideoTitle ?? "No videos published by Vidxir AI yet"}
           </div>
           <div
             style={{

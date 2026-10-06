@@ -1,7 +1,7 @@
 /**
  * Video pipeline integration tests (§10, §20, §38, §39, §42).
  *
- * This is the test that decides whether Tally can actually make a video. Every
+ * This is the test that decides whether Vidxir AI can actually make a video. Every
  * other Phase 5 test asserts a part: `render.test.ts` the argument list,
  * `render.smoke.test.ts` that ffmpeg accepts our synthetic bytes, `timeline.test.ts`
  * the offsets. None of them run the pipeline. What is proven only here:
@@ -414,7 +414,7 @@ suite("video pipeline (integration)", () => {
     it(
       "carries an approved script through seven stages to a playable MP4",
       async () => {
-        const { user, project, channelId } = await fixture("pipeline@tally.test");
+        const { user, project, channelId } = await fixture("pipeline@vidxir.test");
         const context = { userId: user.id, projectId: project.id, channelId };
 
         ai.generateJson.mockImplementation(async () => direction(40));
@@ -554,7 +554,7 @@ suite("video pipeline (integration)", () => {
       const { persistScriptVersion } = await import("@/lib/scripts/service");
       const { eq } = await import("drizzle-orm");
 
-      const user = await createUser({ email: "unapproved@tally.test" });
+      const user = await createUser({ email: "unapproved@vidxir.test" });
       const channelId = await createChannel(user.id);
       await db.insert(channelSettings).values({
         channelId,
@@ -614,7 +614,7 @@ suite("video pipeline (integration)", () => {
     });
 
     it("refuses to render before any asset exists", async () => {
-      const { user, project, channelId } = await fixture("norender@tally.test");
+      const { user, project, channelId } = await fixture("norender@vidxir.test");
       const context = { userId: user.id, projectId: project.id, channelId };
 
       // A started build advanced to ASSETS_READY without any asset stage having
@@ -642,7 +642,7 @@ suite("video pipeline (integration)", () => {
     it("records a stage failure with the provider's real reason", async () => {
       // §30 and §42: the message an operator reads must be the actual cause, not
       // a generic "something went wrong".
-      const { user, project, channelId } = await fixture("aifail@tally.test");
+      const { user, project, channelId } = await fixture("aifail@vidxir.test");
       const context = { userId: user.id, projectId: project.id, channelId };
 
       await startBuild(context);
@@ -697,7 +697,7 @@ suite("video pipeline (integration)", () => {
     it("accumulates stage weights and never goes backwards", async () => {
       // §38's promise is that the number is a measurement. Asserting it only
       // rises is the observable form of "derived, never animated".
-      const { user, project, channelId } = await fixture("progress@tally.test");
+      const { user, project, channelId } = await fixture("progress@vidxir.test");
       const context = { userId: user.id, projectId: project.id, channelId };
 
       ai.generateJson.mockImplementation(async () => direction(40));

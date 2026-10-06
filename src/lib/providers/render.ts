@@ -191,7 +191,7 @@ export async function submitRender(
   // of an edited project honours the new order, positions and durations. What it cannot
   // express is a per-clip trim or two visuals stacked at one moment, because Shotstack's
   // and Remotion's schemas here take one visual per scene. Local ffmpeg is the renderer
-  // that reads the cut in full, and it is Tally's default (§40).
+  // that reads the cut in full, and it is Vidxir AI's default (§40).
   if (provider === "shotstack") return shotstackSubmit(timeline, assets);
   if (provider === "remotion-lambda") return remotionSubmit(timeline, assets);
   if (options.edit) return ffmpegRenderEdit(options.edit, options);
@@ -476,7 +476,7 @@ async function shotstackPoll(
  *
  * The operator's Remotion composition is expected to accept our timeline
  * document as its input props; the document is provider-neutral by design, which
- * is what makes that possible without a Tally-specific composition schema.
+ * is what makes that possible without a Vidxir AI-specific composition schema.
  */
 async function remotionSubmit(
   timeline: TimelineDocument,
@@ -496,7 +496,7 @@ async function remotionSubmit(
     body: {
       type: "start",
       serveUrl: e.REMOTION_SERVE_URL,
-      composition: "TallyVideo",
+      composition: "VidxirVideo",
       inputProps: { timeline: withSignedUrls(timeline, assets) },
       codec: "h264",
       imageFormat: "jpeg",
@@ -657,7 +657,7 @@ async function ffmpegRender(
     throw new RenderError("no ffmpeg binary is available", { retryable: false });
   }
 
-  const dir = await mkdtemp(join(tmpdir(), "tally-render-"));
+  const dir = await mkdtemp(join(tmpdir(), "vidxir-render-"));
 
   try {
     // Every input is pulled to disk first. ffmpeg can read HTTP, but a mid-encode
@@ -783,7 +783,7 @@ async function ffmpegRenderEdit(
     });
   }
 
-  const dir = await mkdtemp(join(tmpdir(), "tally-render-"));
+  const dir = await mkdtemp(join(tmpdir(), "vidxir-render-"));
 
   try {
     const inputs: string[] = [];

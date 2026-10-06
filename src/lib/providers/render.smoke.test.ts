@@ -51,7 +51,7 @@ const ENCODE_TIMEOUT_MS = 90_000;
 let dir: string;
 
 beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), "tally-smoke-"));
+  dir = await mkdtemp(join(tmpdir(), "vidxir-smoke-"));
 });
 
 afterAll(async () => {
@@ -496,7 +496,7 @@ suite("synthetic assets through ffmpeg", () => {
         slug: "captions",
         scenes: [{ index: 0, narrationMs: 1_500 }],
         captions: [
-          { startMs: 0, endMs: 900, text: "Tally renders captions" },
+          { startMs: 0, endMs: 900, text: "Vidxir AI renders captions" },
           { startMs: 900, endMs: 1_500, text: "on this machine" },
         ],
       });

@@ -5,7 +5,7 @@
  */
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { TallyLogo } from "@/components/ui/TallyLogo";
+import { VidxirLogo } from "@/components/ui/VidxirLogo";
 import { color, display, font, radius } from "@/lib/design/tokens";
 
 export interface AuthShellProps {
@@ -41,7 +41,7 @@ export function AuthShell({
         <div
           style={{ display: "flex", justifyContent: "center", marginBottom: 26 }}
         >
-          <TallyLogo size={17} />
+          <VidxirLogo size={17} />
         </div>
 
         <div

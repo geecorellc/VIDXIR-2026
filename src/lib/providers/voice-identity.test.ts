@@ -70,9 +70,9 @@ const { synthesize } = await import("@/lib/providers/voice");
 
 /** What `lib/env` needs before it will parse. Local placeholders only. */
 const BASE = {
-  DATABASE_URL: "postgresql://tally:tally@localhost:5432/tally_unit",
+  DATABASE_URL: "postgresql://vidxir:vidxir@localhost:5432/vidxir_unit",
   REDIS_URL: "redis://127.0.0.1:6379",
-  S3_BUCKET: "tally-unit",
+  S3_BUCKET: "vidxir-unit",
   S3_ACCESS_KEY_ID: "unit",
   S3_SECRET_ACCESS_KEY: "unit",
   ENCRYPTION_KEY: "a".repeat(64),
@@ -81,7 +81,7 @@ const BASE = {
 
 const MANAGED = [
   "NODE_ENV",
-  "TALLY_USE_MOCK_PROVIDERS",
+  "VIDXIR_USE_MOCK_PROVIDERS",
   "VOICE_PROVIDER",
   "ELEVENLABS_API_KEY",
   "ELEVENLABS_MODEL_ID",
@@ -105,7 +105,7 @@ function configure(vars: Record<string, string | undefined>): void {
   setEnv("NODE_ENV", "test");
   resetEnvCache();
   for (const key of MANAGED) delete process.env[key];
-  const merged = { ...BASE, TALLY_USE_MOCK_PROVIDERS: "false", ...vars };
+  const merged = { ...BASE, VIDXIR_USE_MOCK_PROVIDERS: "false", ...vars };
   for (const [key, value] of Object.entries(merged)) {
     if (value === undefined) delete process.env[key];
     else setEnv(key, value);
@@ -122,7 +122,7 @@ function withElevenLabs(): void {
 }
 
 function withMock(): void {
-  configure({ TALLY_USE_MOCK_PROVIDERS: "true" });
+  configure({ VIDXIR_USE_MOCK_PROVIDERS: "true" });
 }
 
 /** 40 frames of MPEG-1 Layer III, 128 kbps, 44.1 kHz — a measurable ~1 s. */
@@ -330,7 +330,7 @@ describe("provider-agnostic tuning", () => {
 
   it("sends the vendor's own defaults when the bible tuned nothing", async () => {
     // What makes the tuning additive: an untuned character voice produces exactly the
-    // request every Tally voiceover produced before voice continuity existed.
+    // request every Vidxir AI voiceover produced before voice continuity existed.
     withElevenLabs();
 
     await synthesize({

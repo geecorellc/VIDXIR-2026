@@ -342,7 +342,7 @@ async function resolveClipSources(
  *
  * `parseEditDocument` throws a `ZodError`, which is not an `AppError` — so `handle()`
  * would render an autosave of a malformed cut as a 500 "Something went wrong. The error
- * has been logged." That reads as a Tally fault for something the client got wrong, and
+ * has been logged." That reads as a Vidxir AI fault for something the client got wrong, and
  * it tells the editor to keep retrying a body that will never be accepted. Translated
  * here, at the one boundary where the value is untrusted client input, so the route stays
  * free of a second schema.

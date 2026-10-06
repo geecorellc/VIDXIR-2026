@@ -113,7 +113,7 @@ const TASKS: Task[] = [
      *
      * Every five minutes, which sets the worst-case lateness of a scheduled video:
      * a slot at 18:00 starts by 18:05. A finer interval would poll Postgres for
-     * nothing, and a coarser one makes "18:00" a claim Tally does not keep.
+     * nothing, and a coarser one makes "18:00" a claim Vidxir AI does not keep.
      *
      * `runAutomationTick` handles per-channel failures internally, so nothing here
      * needs a try/catch beyond `runTask`'s.

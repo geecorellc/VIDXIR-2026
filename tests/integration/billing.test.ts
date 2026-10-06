@@ -4,8 +4,8 @@
  * The one rule this file exists to prove: **a plan tier changes only because a
  * signature-verified provider event said the money moved.** Every case below is a
  * way that invariant could be broken — an unsigned body, a tampered body, a
- * redelivery, an event that arrives out of order, an event for a customer Tally
- * cannot identify, a price Tally does not sell, a failed payment, a cancellation, a
+ * redelivery, an event that arrives out of order, an event for a customer Vidxir AI
+ * cannot identify, a price Vidxir AI does not sell, a failed payment, a cancellation, a
  * second checkout — and the assertion is always the same pair: what
  * `subscriptions.tier`/`status` say, and what `currentTier()` will actually honour.
  *
@@ -29,8 +29,8 @@
  * repository's `.env.local`, so there is no account to call: a test that tried
  * would either fail on a missing credential or, worse, create real customers and
  * real subscriptions in someone's Stripe account. So, stated plainly for the §20
- * report: **these tests do not prove that Tally can talk to Stripe.** They prove
- * that everything on Tally's side of that boundary is correct, including every
+ * report: **these tests do not prove that Vidxir AI can talk to Stripe.** They prove
+ * that everything on Vidxir AI's side of that boundary is correct, including every
  * failure ordering — which is the half that Stripe cannot verify for us.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -311,7 +311,7 @@ suite("billing (integration)", () => {
     /**
      * A complete Stripe configuration, for this file only.
      *
-     * `TALLY_USE_MOCK_PROVIDERS` is deliberately flipped to false here: the harness
+     * `VIDXIR_USE_MOCK_PROVIDERS` is deliberately flipped to false here: the harness
      * sets it true for every suite, and while it is true `billingAvailability()`
      * reports the provider as `mock` and refuses to be configured — which is
      * correct (§40) and is asserted in `src/lib/billing/billing.test.ts`, but means
@@ -319,7 +319,7 @@ suite("billing (integration)", () => {
      * integration files run sequentially, so no other suite sees this.
      */
     setEnv({
-      TALLY_USE_MOCK_PROVIDERS: "false",
+      VIDXIR_USE_MOCK_PROVIDERS: "false",
       BILLING_PROVIDER: "stripe",
       STRIPE_SECRET_KEY: SECRET_KEY,
       STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET,
@@ -370,7 +370,7 @@ suite("billing (integration)", () => {
 
   describe("signature verification", () => {
     it("refuses an unsigned delivery and records nothing", async () => {
-      const user = await createUser({ email: "unsigned@tally.test" });
+      const user = await createUser({ email: "unsigned@vidxir.test" });
       await attachCustomer(user.id, "cus_unsigned");
 
       const result = await deliver(
@@ -389,7 +389,7 @@ suite("billing (integration)", () => {
     });
 
     it("refuses a body that was tampered with after signing", async () => {
-      const user = await createUser({ email: "tampered@tally.test" });
+      const user = await createUser({ email: "tampered@vidxir.test" });
       await attachCustomer(user.id, "cus_tampered");
 
       const event = stripeEvent(
@@ -411,7 +411,7 @@ suite("billing (integration)", () => {
     });
 
     it("refuses a signature made with a different secret", async () => {
-      const user = await createUser({ email: "wrongsecret@tally.test" });
+      const user = await createUser({ email: "wrongsecret@vidxir.test" });
       await attachCustomer(user.id, "cus_wrongsecret");
 
       const result = await deliver(
@@ -451,7 +451,7 @@ suite("billing (integration)", () => {
        * secret. Stripe's tolerance is 5 minutes, so this signs at 20 minutes old —
        * with a genuine secret and a genuine HMAC over a genuine body.
        */
-      const user = await createUser({ email: "replayed@tally.test" });
+      const user = await createUser({ email: "replayed@vidxir.test" });
       await attachCustomer(user.id, "cus_replayed");
 
       const event = stripeEvent(
@@ -506,7 +506,7 @@ suite("billing (integration)", () => {
 
   describe("granting a tier", () => {
     it("grants the tier the price maps to, and records the event as applied", async () => {
-      const user = await createUser({ email: "grant@tally.test" });
+      const user = await createUser({ email: "grant@vidxir.test" });
       await attachCustomer(user.id, "cus_grant");
 
       const event = stripeEvent(
@@ -515,7 +515,7 @@ suite("billing (integration)", () => {
           id: "sub_grant",
           customer: "cus_grant",
           priceId: STUDIO_PRICE,
-          metadata: { tallyUserId: user.id, tallyTier: "studio" },
+          metadata: { vidxirUserId: user.id, vidxirTier: "studio" },
         }),
       );
 
@@ -557,7 +557,7 @@ suite("billing (integration)", () => {
        */
       const { creditBalanceFor } = await import("@/lib/credits/service");
       const { planByTier } = await import("@/lib/plans");
-      const user = await createUser({ email: "credits-grant@tally.test" });
+      const user = await createUser({ email: "credits-grant@vidxir.test" });
       await attachCustomer(user.id, "cus_credits");
 
       expect((await creditBalanceFor(user.id)).available).toBe(0);
@@ -569,7 +569,7 @@ suite("billing (integration)", () => {
             id: "sub_credits",
             customer: "cus_credits",
             priceId: STUDIO_PRICE,
-            metadata: { tallyUserId: user.id },
+            metadata: { vidxirUserId: user.id },
           }),
         ),
       );
@@ -588,7 +588,7 @@ suite("billing (integration)", () => {
             id: "sub_credits",
             customer: "cus_credits",
             priceId: STUDIO_PRICE,
-            metadata: { tallyUserId: user.id },
+            metadata: { vidxirUserId: user.id },
           }),
           { created: secs(60_000) },
         ),
@@ -621,7 +621,7 @@ suite("billing (integration)", () => {
        */
       const { creditBalanceFor } = await import("@/lib/credits/service");
       const { planByTier } = await import("@/lib/plans");
-      const user = await createUser({ email: "credits-pastdue@tally.test" });
+      const user = await createUser({ email: "credits-pastdue@vidxir.test" });
       await attachCustomer(user.id, "cus_pastdue");
 
       await deliver(
@@ -632,7 +632,7 @@ suite("billing (integration)", () => {
             customer: "cus_pastdue",
             priceId: STUDIO_PRICE,
             status: "past_due",
-            metadata: { tallyUserId: user.id },
+            metadata: { vidxirUserId: user.id },
           }),
         ),
       );
@@ -646,7 +646,7 @@ suite("billing (integration)", () => {
 
     it("resolves the account from the subscription metadata alone", async () => {
       // No stored customer id: this is the path a first-ever checkout takes.
-      const user = await createUser({ email: "bymetadata@tally.test" });
+      const user = await createUser({ email: "bymetadata@vidxir.test" });
 
       const result = await deliver(
         stripeEvent(
@@ -654,7 +654,7 @@ suite("billing (integration)", () => {
           subscriptionObject({
             customer: "cus_bymetadata",
             priceId: SCALE_PRICE,
-            metadata: { tallyUserId: user.id, tallyTier: "scale" },
+            metadata: { vidxirUserId: user.id, vidxirTier: "scale" },
           }),
         ),
       );
@@ -664,7 +664,7 @@ suite("billing (integration)", () => {
     });
 
     it("grants only Starter for a price this deployment does not sell", async () => {
-      const user = await createUser({ email: "unknownprice@tally.test" });
+      const user = await createUser({ email: "unknownprice@vidxir.test" });
       await attachCustomer(user.id, "cus_unknownprice");
 
       const result = await deliver(
@@ -678,14 +678,14 @@ suite("billing (integration)", () => {
       );
 
       // Applied — the status and period really did change — but entitling nothing,
-      // because Tally cannot know what an unrecognised price is meant to buy.
+      // because Vidxir AI cannot know what an unrecognised price is meant to buy.
       expect(result.body.applied).toBe(true);
       expect((await subscriptionRow(user.id))?.tier).toBe("starter");
       expect(await tierOf(user.id)).toBe("starter");
     });
 
     it("grants Starter when the subscription carries no price at all", async () => {
-      const user = await createUser({ email: "noprice@tally.test" });
+      const user = await createUser({ email: "noprice@vidxir.test" });
       await attachCustomer(user.id, "cus_noprice");
 
       const result = await deliver(
@@ -700,11 +700,11 @@ suite("billing (integration)", () => {
     });
 
     it("prefers the price over a metadata tier that disagrees with it", async () => {
-      const user = await createUser({ email: "disagree@tally.test" });
+      const user = await createUser({ email: "disagree@vidxir.test" });
       await attachCustomer(user.id, "cus_disagree");
 
       /**
-       * The case that decides whether Tally bills honestly: the metadata says Scale
+       * The case that decides whether Vidxir AI bills honestly: the metadata says Scale
        * because that is what the user picked at checkout, but the subscription is on
        * the Studio price — a downgrade made in the portal. The customer is being
        * charged for Studio, so Studio is what they get.
@@ -715,7 +715,7 @@ suite("billing (integration)", () => {
           subscriptionObject({
             customer: "cus_disagree",
             priceId: STUDIO_PRICE,
-            metadata: { tallyUserId: user.id, tallyTier: "scale" },
+            metadata: { vidxirUserId: user.id, vidxirTier: "scale" },
           }),
         ),
       );
@@ -724,7 +724,7 @@ suite("billing (integration)", () => {
     });
 
     it("activates from checkout.session.completed only after re-reading the subscription", async () => {
-      const user = await createUser({ email: "checkout@tally.test" });
+      const user = await createUser({ email: "checkout@vidxir.test" });
 
       stripeStub.subscriptionsRetrieve.mockResolvedValue(
         subscriptionObject({
@@ -743,7 +743,7 @@ suite("billing (integration)", () => {
           customer: "cus_checkout",
           subscription: "sub_checkout",
           client_reference_id: user.id,
-          metadata: { tallyUserId: user.id, tallyTier: "scale" },
+          metadata: { vidxirUserId: user.id, vidxirTier: "scale" },
           payment_status: "paid",
         }),
       );
@@ -755,7 +755,7 @@ suite("billing (integration)", () => {
     });
 
     it("does not entitle a completed checkout whose subscription is still incomplete", async () => {
-      const user = await createUser({ email: "incomplete@tally.test" });
+      const user = await createUser({ email: "incomplete@vidxir.test" });
 
       /**
        * Exactly why the subscription is re-read. A session can complete with the
@@ -788,7 +788,7 @@ suite("billing (integration)", () => {
     });
 
     it("grants no tier for a one-off payment session", async () => {
-      const user = await createUser({ email: "onetime@tally.test" });
+      const user = await createUser({ email: "onetime@vidxir.test" });
 
       /**
        * A `mode: "payment"` session is a credit top-up, not a plan purchase, and since
@@ -827,7 +827,7 @@ suite("billing (integration)", () => {
 
   describe("idempotency", () => {
     it("applies a redelivered event exactly once", async () => {
-      const user = await createUser({ email: "redelivery@tally.test" });
+      const user = await createUser({ email: "redelivery@vidxir.test" });
       await attachCustomer(user.id, "cus_redelivery");
 
       const event = stripeEvent(
@@ -854,7 +854,7 @@ suite("billing (integration)", () => {
     });
 
     it("treats concurrent redeliveries of one event as a single application", async () => {
-      const user = await createUser({ email: "concurrent@tally.test" });
+      const user = await createUser({ email: "concurrent@vidxir.test" });
       await attachCustomer(user.id, "cus_concurrent");
 
       const event = stripeEvent(
@@ -878,7 +878,7 @@ suite("billing (integration)", () => {
     });
 
     it("distinguishes two different events with identical contents", async () => {
-      const user = await createUser({ email: "distinct@tally.test" });
+      const user = await createUser({ email: "distinct@vidxir.test" });
       await attachCustomer(user.id, "cus_distinct");
 
       const object = subscriptionObject({ customer: "cus_distinct", priceId: STUDIO_PRICE });
@@ -908,7 +908,7 @@ suite("billing (integration)", () => {
 
   describe("delivery order", () => {
     it("does not let an older event revert a newer tier", async () => {
-      const user = await createUser({ email: "stale@tally.test" });
+      const user = await createUser({ email: "stale@vidxir.test" });
       await attachCustomer(user.id, "cus_stale");
 
       // The upgrade, which arrived first.
@@ -944,7 +944,7 @@ suite("billing (integration)", () => {
     });
 
     it("does not let a late cancellation revoke a newer active subscription", async () => {
-      const user = await createUser({ email: "latecancel@tally.test" });
+      const user = await createUser({ email: "latecancel@vidxir.test" });
       await attachCustomer(user.id, "cus_latecancel");
 
       await deliver(
@@ -979,7 +979,7 @@ suite("billing (integration)", () => {
 
   describe("payment failure and cancellation", () => {
     it("suspends access on a failed payment without forgetting the plan", async () => {
-      const user = await createUser({ email: "pastdue@tally.test" });
+      const user = await createUser({ email: "pastdue@vidxir.test" });
       await attachCustomer(user.id, "cus_pastdue", "sub_pastdue");
 
       await deliver(
@@ -1025,7 +1025,7 @@ suite("billing (integration)", () => {
     });
 
     it("restores access when a retried payment succeeds", async () => {
-      const user = await createUser({ email: "recovered@tally.test" });
+      const user = await createUser({ email: "recovered@vidxir.test" });
       await attachCustomer(user.id, "cus_recovered", "sub_recovered");
 
       stripeStub.subscriptionsRetrieve.mockResolvedValue(
@@ -1075,7 +1075,7 @@ suite("billing (integration)", () => {
     });
 
     it("revokes access when the subscription is deleted", async () => {
-      const user = await createUser({ email: "deleted@tally.test" });
+      const user = await createUser({ email: "deleted@vidxir.test" });
       await attachCustomer(user.id, "cus_deleted");
 
       await deliver(
@@ -1104,7 +1104,7 @@ suite("billing (integration)", () => {
     });
 
     it("keeps access until the period ends when a cancellation is scheduled", async () => {
-      const user = await createUser({ email: "cancelatend@tally.test" });
+      const user = await createUser({ email: "cancelatend@vidxir.test" });
       await attachCustomer(user.id, "cus_cancelatend");
 
       await deliver(
@@ -1126,7 +1126,7 @@ suite("billing (integration)", () => {
     });
 
     it("treats a paused subscription as unpaid", async () => {
-      const user = await createUser({ email: "paused@tally.test" });
+      const user = await createUser({ email: "paused@vidxir.test" });
       await attachCustomer(user.id, "cus_paused");
 
       await deliver(
@@ -1146,7 +1146,7 @@ suite("billing (integration)", () => {
     });
 
     it("honours a trial", async () => {
-      const user = await createUser({ email: "trial@tally.test" });
+      const user = await createUser({ email: "trial@vidxir.test" });
       await attachCustomer(user.id, "cus_trial");
 
       await deliver(
@@ -1169,12 +1169,12 @@ suite("billing (integration)", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Events Tally cannot or should not act on
+  // Events Vidxir AI cannot or should not act on
   // -------------------------------------------------------------------------
 
   describe("events that grant nothing", () => {
-    it("acknowledges an event type Tally does not use", async () => {
-      const user = await createUser({ email: "unhandled@tally.test" });
+    it("acknowledges an event type Vidxir AI does not use", async () => {
+      const user = await createUser({ email: "unhandled@vidxir.test" });
       await attachCustomer(user.id, "cus_unhandled");
 
       const result = await deliver(
@@ -1192,7 +1192,7 @@ suite("billing (integration)", () => {
     });
 
     it("records an event it cannot match to an account, and grants nothing", async () => {
-      const bystander = await createUser({ email: "bystander@tally.test" });
+      const bystander = await createUser({ email: "bystander@vidxir.test" });
 
       stripeStub.customersRetrieve.mockResolvedValue({
         id: "cus_stranger",
@@ -1238,7 +1238,7 @@ suite("billing (integration)", () => {
             customer: "cus_forged",
             priceId: SCALE_PRICE,
             // A well-formed uuid belonging to nobody.
-            metadata: { tallyUserId: "11111111-1111-4111-8111-111111111111" },
+            metadata: { vidxirUserId: "11111111-1111-4111-8111-111111111111" },
           }),
         ),
       );
@@ -1260,7 +1260,7 @@ suite("billing (integration)", () => {
           subscriptionObject({
             customer: "cus_sqli",
             priceId: SCALE_PRICE,
-            metadata: { tallyUserId: "' OR 1=1 --" },
+            metadata: { vidxirUserId: "' OR 1=1 --" },
           }),
         ),
       );
@@ -1270,18 +1270,18 @@ suite("billing (integration)", () => {
     });
 
     it("falls back to the customer's own metadata when the event carries none", async () => {
-      const user = await createUser({ email: "viacustomer@tally.test" });
+      const user = await createUser({ email: "viacustomer@vidxir.test" });
 
       /**
        * The dashboard-edited case: a subscription created outside checkout has no
-       * Tally metadata of its own, and no `subscriptions` row points at the
+       * Vidxir AI metadata of its own, and no `subscriptions` row points at the
        * customer yet, so the customer object is the only remaining link.
        */
       stripeStub.customersRetrieve.mockResolvedValue({
         id: "cus_viacustomer",
         object: "customer",
         deleted: false,
-        metadata: { tallyUserId: user.id },
+        metadata: { vidxirUserId: user.id },
       });
 
       const result = await deliver(
@@ -1302,8 +1302,8 @@ suite("billing (integration)", () => {
 
   describe("tenant isolation", () => {
     it("changes only the account the event belongs to", async () => {
-      const paying = await createUser({ email: "paying@tally.test" });
-      const other = await createUser({ email: "notpaying@tally.test" });
+      const paying = await createUser({ email: "paying@vidxir.test" });
+      const other = await createUser({ email: "notpaying@vidxir.test" });
       await attachCustomer(paying.id, "cus_paying");
       await attachCustomer(other.id, "cus_notpaying");
 
@@ -1320,7 +1320,7 @@ suite("billing (integration)", () => {
     });
 
     it("resolves by stored customer id in preference to a stranger's claim", async () => {
-      const owner = await createUser({ email: "owner-cus@tally.test" });
+      const owner = await createUser({ email: "owner-cus@vidxir.test" });
       await attachCustomer(owner.id, "cus_owned");
 
       // No metadata at all: matching has to come from the stored id.
@@ -1347,7 +1347,7 @@ suite("billing (integration)", () => {
   /**
    * The property this block exists to prove: **credits appear only because a
    * signature-verified event said a one-off payment cleared, and the number credited is
-   * the one Tally wrote before the customer ever reached Stripe.**
+   * the one Vidxir AI wrote before the customer ever reached Stripe.**
    *
    * That second half is the interesting one. Every case below that could plausibly be
    * satisfied by reading the credit count out of the session — the normal path — is
@@ -1495,7 +1495,7 @@ suite("billing (integration)", () => {
       });
 
       it("returns a URL, records a pending purchase, and credits nothing", async () => {
-        const user = await createUser({ email: "topup-buyer@tally.test" });
+        const user = await createUser({ email: "topup-buyer@vidxir.test" });
         await signIn(user);
 
         stripeStub.creditCheckoutCreate.mockResolvedValue({
@@ -1532,7 +1532,7 @@ suite("billing (integration)", () => {
       });
 
       it("passes a pack to the provider, never a price id or an amount", async () => {
-        const user = await createUser({ email: "topup-pack@tally.test" });
+        const user = await createUser({ email: "topup-pack@vidxir.test" });
         await signIn(user);
 
         stripeStub.creditCheckoutCreate.mockResolvedValue({
@@ -1556,7 +1556,7 @@ suite("billing (integration)", () => {
       });
 
       it("rejects a body naming a price id, an amount, or a pack that does not exist", async () => {
-        const user = await createUser({ email: "topup-bogus@tally.test" });
+        const user = await createUser({ email: "topup-bogus@vidxir.test" });
         await signIn(user);
 
         /**
@@ -1610,7 +1610,7 @@ suite("billing (integration)", () => {
       });
 
       it("refuses a pack whose price is not configured, naming the variable to set", async () => {
-        const user = await createUser({ email: "topup-unconfigured@tally.test" });
+        const user = await createUser({ email: "topup-unconfigured@vidxir.test" });
         await signIn(user);
 
         // `credits_1000` is deliberately absent from this suite's environment.
@@ -1627,7 +1627,7 @@ suite("billing (integration)", () => {
       });
 
       it("refuses a cross-origin request", async () => {
-        const user = await createUser({ email: "topup-csrf@tally.test" });
+        const user = await createUser({ email: "topup-csrf@vidxir.test" });
         await signIn(user);
 
         const { NextRequest } = await import("next/server");
@@ -1653,7 +1653,7 @@ suite("billing (integration)", () => {
          * `/api/billing/checkout`, which refuses a second subscription. Buying credits
          * twice is normal, and refusing it would be a bug.
          */
-        const user = await createUser({ email: "topup-twice@tally.test" });
+        const user = await createUser({ email: "topup-twice@vidxir.test" });
         await openPurchase(user, "credits_500", "cs_topup_twice_a");
         await openPurchase(user, "credits_100", "cs_topup_twice_b");
 
@@ -1667,7 +1667,7 @@ suite("billing (integration)", () => {
 
     describe("crediting a completed payment", () => {
       it("adds the credits the purchase row records, and marks it completed", async () => {
-        const user = await createUser({ email: "topup-paid@tally.test" });
+        const user = await createUser({ email: "topup-paid@vidxir.test" });
         await openPurchase(user, "credits_500", "cs_topup_paid");
 
         const result = await deliver(
@@ -1713,10 +1713,10 @@ suite("billing (integration)", () => {
         /**
          * The case that separates this implementation from the obvious one. Stripe
          * metadata is writable by anything holding the API key, so a session arriving
-         * with `tallyCredits: 99999` is exactly what a leaked key buys. The row Tally
+         * with `vidxirCredits: 99999` is exactly what a leaked key buys. The row Vidxir AI
          * wrote at session-creation time is the authority.
          */
-        const user = await createUser({ email: "topup-liar@tally.test" });
+        const user = await createUser({ email: "topup-liar@vidxir.test" });
         await openPurchase(user, "credits_100", "cs_topup_liar");
 
         await deliver(
@@ -1726,9 +1726,9 @@ suite("billing (integration)", () => {
               id: "cs_topup_liar",
               userId: user.id,
               metadata: {
-                tallyUserId: user.id,
-                tallyPack: "credits_2500",
-                tallyCredits: "99999",
+                vidxirUserId: user.id,
+                vidxirPack: "credits_2500",
+                vidxirCredits: "99999",
               },
               // A currency figure that would imply a far larger pack.
               amountTotal: 999_999,
@@ -1742,7 +1742,7 @@ suite("billing (integration)", () => {
       });
 
       it("credits a redelivered session exactly once", async () => {
-        const user = await createUser({ email: "topup-replay@tally.test" });
+        const user = await createUser({ email: "topup-replay@vidxir.test" });
         await openPurchase(user, "credits_500", "cs_topup_replay");
 
         const event = stripeEvent(
@@ -1770,7 +1770,7 @@ suite("billing (integration)", () => {
          * different events, neither a redelivery of the other, describing one payment.
          * Keying on the event id would credit twice.
          */
-        const user = await createUser({ email: "topup-async@tally.test" });
+        const user = await createUser({ email: "topup-async@vidxir.test" });
         await openPurchase(user, "credits_500", "cs_topup_async");
 
         const unpaid = await deliver(
@@ -1811,7 +1811,7 @@ suite("billing (integration)", () => {
       });
 
       it("credits nothing for a session whose payment never cleared", async () => {
-        const user = await createUser({ email: "topup-unpaid@tally.test" });
+        const user = await createUser({ email: "topup-unpaid@vidxir.test" });
         await openPurchase(user, "credits_500", "cs_topup_unpaid");
 
         for (const paymentStatus of ["unpaid", "no_payment_required", null]) {
@@ -1834,7 +1834,7 @@ suite("billing (integration)", () => {
       });
 
       it("credits nothing for a failed async payment", async () => {
-        const user = await createUser({ email: "topup-failed@tally.test" });
+        const user = await createUser({ email: "topup-failed@vidxir.test" });
         await openPurchase(user, "credits_500", "cs_topup_failed");
 
         const result = await deliver(
@@ -1860,7 +1860,7 @@ suite("billing (integration)", () => {
          * theft; the price is the only trustworthy signal left, and it is trustworthy
          * because it must match a `STRIPE_PRICE_CREDITS_*` variable.
          */
-        const user = await createUser({ email: "topup-orphan@tally.test" });
+        const user = await createUser({ email: "topup-orphan@vidxir.test" });
         await attachCustomer(user.id, "cus_topup_orphan");
 
         stripeStub.listLineItems.mockResolvedValue({
@@ -1887,7 +1887,7 @@ suite("billing (integration)", () => {
          * into the environment must not be able to mint credits — otherwise anyone who
          * can create a price can create currency.
          */
-        const user = await createUser({ email: "topup-strange@tally.test" });
+        const user = await createUser({ email: "topup-strange@vidxir.test" });
         await attachCustomer(user.id, "cus_topup_strange");
 
         stripeStub.listLineItems.mockResolvedValue({
@@ -1908,7 +1908,7 @@ suite("billing (integration)", () => {
       });
 
       it("credits nothing when the line items cannot be read", async () => {
-        const user = await createUser({ email: "topup-lookupfail@tally.test" });
+        const user = await createUser({ email: "topup-lookupfail@vidxir.test" });
         await attachCustomer(user.id, "cus_topup_lookupfail");
 
         stripeStub.listLineItems.mockRejectedValue(new Error("stripe is down"));
@@ -1936,8 +1936,8 @@ suite("billing (integration)", () => {
          * purchase row's own `userId` is compared against the resolved one, and a
          * mismatch credits nobody.
          */
-        const buyer = await createUser({ email: "topup-buyer-a@tally.test" });
-        const stranger = await createUser({ email: "topup-stranger@tally.test" });
+        const buyer = await createUser({ email: "topup-buyer-a@vidxir.test" });
+        const stranger = await createUser({ email: "topup-stranger@vidxir.test" });
         await openPurchase(buyer, "credits_500", "cs_topup_owned");
 
         const result = await deliver(
@@ -1971,7 +1971,7 @@ suite("billing (integration)", () => {
          * The invariant the whole file is about, from the other direction: a top-up is
          * not an upgrade. A Starter customer who buys 500 credits is still on Starter.
          */
-        const user = await createUser({ email: "topup-notier@tally.test" });
+        const user = await createUser({ email: "topup-notier@vidxir.test" });
         await openPurchase(user, "credits_500", "cs_topup_notier");
 
         await deliver(
@@ -1987,7 +1987,7 @@ suite("billing (integration)", () => {
       });
 
       it("describes the purchase without naming the vendor", async () => {
-        const user = await createUser({ email: "topup-wording@tally.test" });
+        const user = await createUser({ email: "topup-wording@vidxir.test" });
         await openPurchase(user, "credits_500", "cs_topup_wording");
 
         await deliver(
@@ -2009,7 +2009,7 @@ suite("billing (integration)", () => {
          * figures come from the database rather than from anything the client held, and
          * the tenant predicate means a second account sees none of this.
          */
-        const buyer = await createUser({ email: "topup-read@tally.test" });
+        const buyer = await createUser({ email: "topup-read@vidxir.test" });
         await openPurchase(buyer, "credits_500", "cs_topup_read");
         await deliver(
           stripeEvent(
@@ -2043,7 +2043,7 @@ suite("billing (integration)", () => {
           /stripe|veo|gemini|minimax|seedance|dashscope|runway/i,
         );
 
-        const stranger = await createUser({ email: "topup-reader-b@tally.test" });
+        const stranger = await createUser({ email: "topup-reader-b@vidxir.test" });
         await signIn(stranger);
         const theirs = await getCredits();
         expect(theirs.body.data?.balance?.purchased).toBe(0);
@@ -2072,7 +2072,7 @@ suite("billing (integration)", () => {
          * their allowance, not a zero that only appears once a generation happens to
          * grant it. Idempotent, so the second read grants nothing further.
          */
-        const user = await createUser({ email: "topup-grantread@tally.test" });
+        const user = await createUser({ email: "topup-grantread@vidxir.test" });
         await setTier(user.id, "studio");
         await signIn(user);
 
@@ -2094,7 +2094,7 @@ suite("billing (integration)", () => {
          * credits are reachable by the same charge path a scene uses, and they are the
          * bucket that pays when the plan's allowance is exhausted.
          */
-        const user = await createUser({ email: "topup-spend@tally.test" });
+        const user = await createUser({ email: "topup-spend@vidxir.test" });
         await openPurchase(user, "credits_100", "cs_topup_spend");
 
         await deliver(
@@ -2151,7 +2151,7 @@ suite("billing (integration)", () => {
     });
 
     it("returns a URL and states plainly that no tier was granted", async () => {
-      const user = await createUser({ email: "buyer@tally.test" });
+      const user = await createUser({ email: "buyer@vidxir.test" });
       await signIn(user);
 
       stripeStub.checkoutCreate.mockResolvedValue({
@@ -2172,7 +2172,7 @@ suite("billing (integration)", () => {
     });
 
     it("passes a tier to the provider, never a price id", async () => {
-      const user = await createUser({ email: "tierbuyer@tally.test" });
+      const user = await createUser({ email: "tierbuyer@vidxir.test" });
       await signIn(user);
 
       stripeStub.checkoutCreate.mockResolvedValue({
@@ -2196,7 +2196,7 @@ suite("billing (integration)", () => {
     });
 
     it("rejects a body that names a price id or a bogus tier", async () => {
-      const user = await createUser({ email: "badbody@tally.test" });
+      const user = await createUser({ email: "badbody@vidxir.test" });
       await signIn(user);
 
       for (const body of [
@@ -2213,7 +2213,7 @@ suite("billing (integration)", () => {
     });
 
     it("refuses a cross-origin request", async () => {
-      const user = await createUser({ email: "csrf@tally.test" });
+      const user = await createUser({ email: "csrf@vidxir.test" });
       await signIn(user);
 
       const { NextRequest } = await import("next/server");
@@ -2234,7 +2234,7 @@ suite("billing (integration)", () => {
     });
 
     it("refuses a second subscription for an account that already pays", async () => {
-      const user = await createUser({ email: "already@tally.test" });
+      const user = await createUser({ email: "already@vidxir.test" });
       await signIn(user);
       await attachCustomer(user.id, "cus_already", "sub_already");
 
@@ -2260,7 +2260,7 @@ suite("billing (integration)", () => {
     });
 
     it("allows a new checkout after a cancellation", async () => {
-      const user = await createUser({ email: "resub@tally.test" });
+      const user = await createUser({ email: "resub@vidxir.test" });
       await signIn(user);
       await attachCustomer(user.id, "cus_resub", "sub_resub");
 
@@ -2288,7 +2288,7 @@ suite("billing (integration)", () => {
     });
 
     it("returns a configuration state, not a URL, when Stripe is unset", async () => {
-      const user = await createUser({ email: "unconfigured@tally.test" });
+      const user = await createUser({ email: "unconfigured@vidxir.test" });
       await signIn(user);
 
       const { resetEnvCache } = await import("@/lib/env");
@@ -2342,7 +2342,7 @@ suite("billing (integration)", () => {
     });
 
     it("refuses when the account has no billing history", async () => {
-      const user = await createUser({ email: "nohistory@tally.test" });
+      const user = await createUser({ email: "nohistory@vidxir.test" });
       await signIn(user);
 
       const result = await postPortal();
@@ -2354,8 +2354,8 @@ suite("billing (integration)", () => {
     });
 
     it("returns the portal URL for the caller's own customer", async () => {
-      const user = await createUser({ email: "manage@tally.test" });
-      const other = await createUser({ email: "othercustomer@tally.test" });
+      const user = await createUser({ email: "manage@vidxir.test" });
+      const other = await createUser({ email: "othercustomer@vidxir.test" });
       await signIn(user);
       await attachCustomer(user.id, "cus_manage");
       await attachCustomer(other.id, "cus_someoneelse");

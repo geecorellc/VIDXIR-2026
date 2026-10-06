@@ -58,7 +58,7 @@ import "@/lib/load-env";
 // snapshots the environment on first read.
 import type { EditOperation } from "@/lib/video/edit-ops";
 
-const PREFIX = "tally-verify-editor";
+const PREFIX = "vidxir-verify-editor";
 process.env["QUEUE_PREFIX"] = PREFIX;
 
 /** Long, because a real 1080p encode of a real project takes minutes, not seconds. */
@@ -67,7 +67,7 @@ const RENDER_TIMEOUT_MS = 45 * 60_000;
 /** How far the drag in step 4 moves the last shot, and so how much longer the MP4 is. */
 const DRAG_MS = 1_500;
 
-const FIXTURE_EMAIL = "editor-verify@tally.local";
+const FIXTURE_EMAIL = "editor-verify@vidxir.local";
 
 let step = 0;
 
@@ -153,7 +153,7 @@ async function main(): Promise<void> {
   );
   detail(
     `render=${render.provider} (${render.state}), ` +
-      `mocks=${String(e.TALLY_USE_MOCK_PROVIDERS)} — a render calls no provider`,
+      `mocks=${String(e.VIDXIR_USE_MOCK_PROVIDERS)} — a render calls no provider`,
   );
 
   // ---- 2. a copy, so the real project is never modified ---------------------

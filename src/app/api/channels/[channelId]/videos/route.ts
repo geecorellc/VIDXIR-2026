@@ -3,7 +3,7 @@
  *
  * Feeds two things: the research engine's "how does my own catalogue perform"
  * signal, and the channels screen. Read-only, and read-only by design — §29 is
- * explicit that Tally does not download or repost other people's videos, and this
+ * explicit that Vidxir AI does not download or repost other people's videos, and this
  * endpoint returns metadata about the user's *own* uploads, never media.
  */
 import type { NextRequest } from "next/server";

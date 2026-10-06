@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const detailed = probeTokenMatches(request.headers.get("x-tally-probe-token"));
+  const detailed = probeTokenMatches(request.headers.get("x-vidxir-probe-token"));
 
   const body = detailed
     ? report

@@ -431,7 +431,7 @@ export function SettingsForm({
                     onChange={setCompetitors}
                     rows={3}
                     placeholder={"UCxxxxxxxxxxxxxxxxxxxxxx\nUCyyyyyyyyyyyyyyyyyyyyyy"}
-                    hint="One YouTube channel id per line (the UC… id, not the handle). Tally tracks what breaks out on these channels."
+                    hint="One YouTube channel id per line (the UC… id, not the handle). Vidxir AI tracks what breaks out on these channels."
                   />
                 </div>
                 <SaveRow
@@ -566,7 +566,7 @@ export function SettingsForm({
                     label="Run this channel on a schedule"
                     description={
                       schedulingAvailable
-                        ? "Tally's scheduler starts videos for you. It runs on the server, so nothing depends on this browser being open."
+                        ? "Vidxir AI's scheduler starts videos for you. It runs on the server, so nothing depends on this browser being open."
                         : `Scheduling is part of the Studio plan. On ${planName} you can start each video yourself from Research.`
                     }
                     checked={automationEnabled}
@@ -610,7 +610,7 @@ export function SettingsForm({
                     label="Publish to YouTube without asking me"
                     description={
                       autoPublishAvailable
-                        ? "When off, a finished video waits in Publish for your approval. When on, Tally uploads it at the scheduled time."
+                        ? "When off, a finished video waits in Publish for your approval. When on, Vidxir AI uploads it at the scheduled time."
                         : `Auto-publish is part of the Studio plan. On ${planName} every video waits for your approval.`
                     }
                     checked={autoPublish}

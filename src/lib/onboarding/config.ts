@@ -94,17 +94,17 @@ export const AUTOMATION_LEVELS: readonly Choice[] = [
   {
     value: "manual",
     label: "I approve every step",
-    hint: "Tally researches and drafts; nothing moves without you.",
+    hint: "Vidxir AI researches and drafts; nothing moves without you.",
   },
   {
     value: "assisted",
     label: "Build it, then ask me",
-    hint: "Tally produces the finished video and waits for your approval to publish.",
+    hint: "Vidxir AI produces the finished video and waits for your approval to publish.",
   },
   {
     value: "autopilot",
     label: "Run it end to end",
-    hint: "Tally researches, produces and publishes on your schedule.",
+    hint: "Vidxir AI researches, produces and publishes on your schedule.",
   },
 ] as const;
 

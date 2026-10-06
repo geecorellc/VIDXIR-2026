@@ -12,7 +12,7 @@
  *    one, ask as somebody else, and look at what comes back.
  *  - **The feature flag** gates on `lib/env`, which is a process-wide singleton
  *    resolved at first touch. Flipping it and re-resolving is the only honest test
- *    that `TALLY_CONTINUITY_ENGINE_ENABLED=false` really turns the layer off.
+ *    that `VIDXIR_CONTINUITY_ENGINE_ENABLED=false` really turns the layer off.
  *  - **Provider independence** is a property of the module graph: continuity must
  *    reach generation only through the existing provider abstraction, never by
  *    naming a provider. That is checked by reading the source, because a mock would
@@ -23,7 +23,7 @@
  * No provider is called and no AI request is made anywhere in this file. The
  * planner is never invoked: everything here writes bibles directly through the
  * store, which is what the pipeline does with the planner's normalised output.
- * `TALLY_USE_MOCK_PROVIDERS=true` from the harness makes that structural rather
+ * `VIDXIR_USE_MOCK_PROVIDERS=true` from the harness makes that structural rather
  * than a matter of restraint.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -295,16 +295,16 @@ function continuityProject(projectId: string, channelId: string) {
  */
 async function withFlag<T>(enabled: boolean, run: () => Promise<T>): Promise<T> {
   const { resetEnvCache } = await import("@/lib/env");
-  const previous = process.env["TALLY_CONTINUITY_ENGINE_ENABLED"];
+  const previous = process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"];
 
-  process.env["TALLY_CONTINUITY_ENGINE_ENABLED"] = enabled ? "true" : "false";
+  process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"] = enabled ? "true" : "false";
   resetEnvCache();
 
   try {
     return await run();
   } finally {
-    if (previous === undefined) delete process.env["TALLY_CONTINUITY_ENGINE_ENABLED"];
-    else process.env["TALLY_CONTINUITY_ENGINE_ENABLED"] = previous;
+    if (previous === undefined) delete process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"];
+    else process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"] = previous;
     resetEnvCache();
   }
 }
@@ -321,8 +321,8 @@ suite("continuity layer (integration)", () => {
     it("does not return one tenant's story bible to another", async () => {
       const { getBible, saveBible } = await import("@/lib/continuity/store");
 
-      const owner = await project("bible-owner@tally.test");
-      const other = await createUser({ email: "bible-other@tally.test" });
+      const owner = await project("bible-owner@vidxir.test");
+      const other = await createUser({ email: "bible-other@vidxir.test" });
 
       await saveBible({
         userId: owner.user.id,
@@ -351,8 +351,8 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/store"
       );
 
-      const owner = await project("overwrite-owner@tally.test");
-      const attacker = await createUser({ email: "overwrite-attacker@tally.test" });
+      const owner = await project("overwrite-owner@vidxir.test");
+      const attacker = await createUser({ email: "overwrite-attacker@vidxir.test" });
 
       await saveBible({
         userId: owner.user.id,
@@ -396,8 +396,8 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/store"
       );
 
-      const owner = await project("states-owner@tally.test");
-      const other = await createUser({ email: "states-other@tally.test" });
+      const owner = await project("states-owner@vidxir.test");
+      const other = await createUser({ email: "states-other@vidxir.test" });
       await insertScenes(owner.user.id, owner.projectId, 3);
 
       for (let index = 0; index < 3; index += 1) {
@@ -419,8 +419,8 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/store"
       );
 
-      const owner = await project("scenewrite-owner@tally.test");
-      const attacker = await createUser({ email: "scenewrite-attacker@tally.test" });
+      const owner = await project("scenewrite-owner@vidxir.test");
+      const attacker = await createUser({ email: "scenewrite-attacker@vidxir.test" });
       await insertScenes(owner.user.id, owner.projectId, 2);
 
       await saveSceneContinuity({
@@ -448,8 +448,8 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/store"
       );
 
-      const owner = await project("regen-owner@tally.test");
-      const attacker = await createUser({ email: "regen-attacker@tally.test" });
+      const owner = await project("regen-owner@vidxir.test");
+      const attacker = await createUser({ email: "regen-attacker@vidxir.test" });
       await insertScenes(owner.user.id, owner.projectId, 2);
 
       /**
@@ -485,8 +485,8 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/store"
       );
 
-      const owner = await project("check-owner@tally.test");
-      const other = await createUser({ email: "check-other@tally.test" });
+      const owner = await project("check-owner@vidxir.test");
+      const other = await createUser({ email: "check-other@vidxir.test" });
 
       await recordContinuityCheck({
         userId: owner.user.id,
@@ -515,8 +515,8 @@ suite("continuity layer (integration)", () => {
       const { continuityView } = await import("@/lib/continuity/read");
       const { saveBible } = await import("@/lib/continuity/store");
 
-      const owner = await project("view-owner@tally.test");
-      const other = await createUser({ email: "view-other@tally.test" });
+      const owner = await project("view-owner@vidxir.test");
+      const other = await createUser({ email: "view-other@vidxir.test" });
       await setTier(other.id, "studio");
 
       await saveBible({
@@ -542,8 +542,8 @@ suite("continuity layer (integration)", () => {
     it("refuses a foreign project id at the API guard", async () => {
       const { requireProjectAccess } = await import("@/lib/api/guard");
 
-      const owner = await project("guard-owner@tally.test");
-      const other = await createUser({ email: "guard-other@tally.test" });
+      const owner = await project("guard-owner@vidxir.test");
+      const other = await createUser({ email: "guard-other@vidxir.test" });
 
       // The endpoint's first act. `store.ts` would return nothing anyway; this is
       // what turns "nothing" into a 403 rather than an empty panel.
@@ -559,7 +559,7 @@ suite("continuity layer (integration)", () => {
 
   describe("feature flag", () => {
     it("resolves to off, with a reason, when the flag is absent", async () => {
-      const owner = await project("flag-off@tally.test");
+      const owner = await project("flag-off@vidxir.test");
 
       await withFlag(false, async () => {
         const { resolveFor } = await import("@/lib/continuity/service");
@@ -578,7 +578,7 @@ suite("continuity layer (integration)", () => {
     });
 
     it("resolves to a real level when the flag is on", async () => {
-      const owner = await project("flag-on@tally.test");
+      const owner = await project("flag-on@vidxir.test");
 
       await withFlag(true, async () => {
         const { resolveFor } = await import("@/lib/continuity/service");
@@ -595,7 +595,7 @@ suite("continuity layer (integration)", () => {
       const { saveBible, saveSceneContinuity } = await import(
         "@/lib/continuity/store"
       );
-      const owner = await project("flag-prompt@tally.test");
+      const owner = await project("flag-prompt@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 2);
 
       await saveBible({
@@ -654,7 +654,7 @@ suite("continuity layer (integration)", () => {
       const { latestContinuityCheck, saveBible } = await import(
         "@/lib/continuity/store"
       );
-      const owner = await project("flag-check@tally.test");
+      const owner = await project("flag-check@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 2);
 
       await saveBible({
@@ -686,7 +686,7 @@ suite("continuity layer (integration)", () => {
     });
 
     it("regenerates nothing when the flag is off, whatever the report says", async () => {
-      const owner = await project("flag-regen@tally.test");
+      const owner = await project("flag-regen@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 4);
 
       await withFlag(false, async () => {
@@ -717,7 +717,7 @@ suite("continuity layer (integration)", () => {
 
   describe("generation mode", () => {
     it("is off for a stock-footage project even with the flag on", async () => {
-      const owner = await project("stock@tally.test", {
+      const owner = await project("stock@vidxir.test", {
         generationMode: "STOCK",
       });
 
@@ -741,7 +741,7 @@ suite("continuity layer (integration)", () => {
       const { eq } = await import("drizzle-orm");
 
       // Deliberately left on the free tier signup gives, then asked at `starter`.
-      const user = await createUser({ email: "tier@tally.test" });
+      const user = await createUser({ email: "tier@vidxir.test" });
       const channelId = await createChannel(user.id);
       await db.insert(channelSettings).values({
         channelId,
@@ -776,7 +776,7 @@ suite("continuity layer (integration)", () => {
     });
 
     it("raises the level to character for a preschool audience", async () => {
-      const owner = await project("preschool@tally.test", {
+      const owner = await project("preschool@vidxir.test", {
         // A style that would otherwise resolve to `style`.
         contentStyle: "listicle",
         targetAudience: "toddlers and preschool children",
@@ -802,7 +802,7 @@ suite("continuity layer (integration)", () => {
 
   describe("legacy projects", () => {
     it("is inert for a project that has no bible", async () => {
-      const owner = await project("legacy@tally.test");
+      const owner = await project("legacy@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 3);
 
       await withFlag(true, async () => {
@@ -828,7 +828,7 @@ suite("continuity layer (integration)", () => {
 
     it("reports a usable view for a project with no continuity data at all", async () => {
       const { continuityView } = await import("@/lib/continuity/read");
-      const owner = await project("legacy-view@tally.test");
+      const owner = await project("legacy-view@vidxir.test");
 
       await withFlag(true, async () => {
         const view = await continuityView(owner.user.id, owner.projectId, "studio");
@@ -847,7 +847,7 @@ suite("continuity layer (integration)", () => {
       const { getSceneStates, saveSceneContinuity } = await import(
         "@/lib/continuity/store"
       );
-      const owner = await project("partial@tally.test");
+      const owner = await project("partial@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 5);
 
       // Only two of five. A partially-planned project validates the part that was
@@ -870,7 +870,7 @@ suite("continuity layer (integration)", () => {
       const { db } = await import("@/lib/db");
       const { storyBibles } = await import("@/lib/db/schema");
       const { getBible } = await import("@/lib/continuity/store");
-      const owner = await project("future-schema@tally.test");
+      const owner = await project("future-schema@vidxir.test");
 
       /**
        * A document from a schema version this build does not know.
@@ -915,7 +915,7 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/store"
       );
 
-      const owner = await project("verdict@tally.test");
+      const owner = await project("verdict@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 3);
       await saveBible({
         userId: owner.user.id,
@@ -970,7 +970,7 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/store"
       );
 
-      const owner = await project("scored@tally.test");
+      const owner = await project("scored@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 3);
       await saveBible({
         userId: owner.user.id,
@@ -1044,7 +1044,7 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/store"
       );
 
-      const owner = await project("cap@tally.test");
+      const owner = await project("cap@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 8);
       await saveBible({
         userId: owner.user.id,
@@ -1124,7 +1124,7 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/store"
       );
 
-      const owner = await project("regen-prompt@tally.test");
+      const owner = await project("regen-prompt@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 2);
       await saveUserBible({
         userId: owner.user.id,
@@ -1220,7 +1220,7 @@ suite("continuity layer (integration)", () => {
        * existed.
        */
       const { saveSceneContinuity } = await import("@/lib/continuity/store");
-      const owner = await project("regen-prompt-inert@tally.test");
+      const owner = await project("regen-prompt-inert@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 1);
       await saveSceneContinuity({
         userId: owner.user.id,
@@ -1268,7 +1268,7 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/store"
       );
 
-      const owner = await project("warn@tally.test");
+      const owner = await project("warn@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 4);
       await saveBible({
         userId: owner.user.id,
@@ -1447,7 +1447,7 @@ suite("continuity layer (integration)", () => {
     });
 
     it("resolves the same level whatever the configured providers are", async () => {
-      const owner = await project("provider-agnostic@tally.test");
+      const owner = await project("provider-agnostic@vidxir.test");
       const levels: string[] = [];
 
       /**
@@ -1487,7 +1487,7 @@ suite("continuity layer (integration)", () => {
       const { saveBible, saveSceneContinuity } = await import(
         "@/lib/continuity/store"
       );
-      const owner = await project("prompt-agnostic@tally.test");
+      const owner = await project("prompt-agnostic@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 2);
       await saveBible({
         userId: owner.user.id,
@@ -1553,7 +1553,7 @@ suite("continuity layer (integration)", () => {
       const { getBible, saveBible, saveUserBible } = await import(
         "@/lib/continuity/store"
       );
-      const owner = await project("edited@tally.test");
+      const owner = await project("edited@vidxir.test");
 
       await saveUserBible({
         userId: owner.user.id,
@@ -1581,7 +1581,7 @@ suite("continuity layer (integration)", () => {
 
     it("lets the owner edit their own bible twice", async () => {
       const { getBible, saveUserBible } = await import("@/lib/continuity/store");
-      const owner = await project("edited-twice@tally.test");
+      const owner = await project("edited-twice@vidxir.test");
 
       await saveUserBible({
         userId: owner.user.id,
@@ -1670,7 +1670,7 @@ suite("continuity layer (integration)", () => {
 
     it("finds a stored reference again through the meta flag", async () => {
       const { getReferenceImages } = await import("@/lib/continuity/store");
-      const owner = await project("reference-read@tally.test");
+      const owner = await project("reference-read@vidxir.test");
 
       await storeReference({
         userId: owner.user.id,
@@ -1694,7 +1694,7 @@ suite("continuity layer (integration)", () => {
       const { db } = await import("@/lib/db");
       const { assets } = await import("@/lib/db/schema");
       const { getReferenceImages } = await import("@/lib/continuity/store");
-      const owner = await project("reference-not-flagged@tally.test");
+      const owner = await project("reference-not-flagged@vidxir.test");
 
       // A scene visual that happens to be a still — same kind, no flag. If the
       // predicate were on `kind` alone, this would be served as a character sheet.
@@ -1713,8 +1713,8 @@ suite("continuity layer (integration)", () => {
 
     it("does not return one tenant's references to another", async () => {
       const { getReferenceImages } = await import("@/lib/continuity/store");
-      const owner = await project("reference-owner@tally.test");
-      const intruder = await project("reference-intruder@tally.test");
+      const owner = await project("reference-owner@vidxir.test");
+      const intruder = await project("reference-intruder@vidxir.test");
 
       await storeReference({
         userId: owner.user.id,
@@ -1732,7 +1732,7 @@ suite("continuity layer (integration)", () => {
 
     it("returns only the newest reference per entity", async () => {
       const { getReferenceImages } = await import("@/lib/continuity/store");
-      const owner = await project("reference-superseded@tally.test");
+      const owner = await project("reference-superseded@vidxir.test");
 
       const first = await storeReference({
         userId: owner.user.id,
@@ -1773,7 +1773,7 @@ suite("continuity layer (integration)", () => {
       it("signs each stored still for the panel, newest per entity", async () => {
         const { continuityView } = await import("@/lib/continuity/read");
         const { saveUserBible } = await import("@/lib/continuity/store");
-        const owner = await project("reference-view@tally.test");
+        const owner = await project("reference-view@vidxir.test");
 
         await saveUserBible({
           userId: owner.user.id,
@@ -1838,7 +1838,7 @@ suite("continuity layer (integration)", () => {
         // showing an empty strip: stills are drawn on request, so most projects have none.
         const { continuityView } = await import("@/lib/continuity/read");
         const { saveUserBible } = await import("@/lib/continuity/store");
-        const owner = await project("reference-view-empty@tally.test");
+        const owner = await project("reference-view-empty@vidxir.test");
 
         await saveUserBible({
           userId: owner.user.id,
@@ -1861,8 +1861,8 @@ suite("continuity layer (integration)", () => {
         const { continuityView } = await import("@/lib/continuity/read");
         const { saveUserBible } = await import("@/lib/continuity/store");
 
-        const owner = await project("reference-view-owner@tally.test");
-        const intruder = await project("reference-view-intruder@tally.test");
+        const owner = await project("reference-view-owner@vidxir.test");
+        const intruder = await project("reference-view-intruder@vidxir.test");
 
         await saveUserBible({
           userId: owner.user.id,
@@ -1906,7 +1906,7 @@ suite("continuity layer (integration)", () => {
         const { continuityView } = await import("@/lib/continuity/read");
         const { saveUserBible } = await import("@/lib/continuity/store");
         const storage = await import("@/lib/storage");
-        const owner = await project("reference-view-unsignable@tally.test");
+        const owner = await project("reference-view-unsignable@vidxir.test");
 
         await saveUserBible({
           userId: owner.user.id,
@@ -1942,7 +1942,7 @@ suite("continuity layer (integration)", () => {
 
     it("plans every entity with visual facts, and nothing when the flag is off", async () => {
       const { saveUserBible } = await import("@/lib/continuity/store");
-      const owner = await project("reference-plan@tally.test");
+      const owner = await project("reference-plan@vidxir.test");
 
       await saveUserBible({
         userId: owner.user.id,
@@ -1982,7 +1982,7 @@ suite("continuity layer (integration)", () => {
 
     it("excludes entities that already have a reference, so a second run costs nothing", async () => {
       const { saveUserBible } = await import("@/lib/continuity/store");
-      const owner = await project("reference-plan-partial@tally.test");
+      const owner = await project("reference-plan-partial@vidxir.test");
 
       await saveUserBible({
         userId: owner.user.id,
@@ -2016,7 +2016,7 @@ suite("continuity layer (integration)", () => {
 
     it("wants nothing, with a distinct reason, once every entity is drawn", async () => {
       const { saveUserBible } = await import("@/lib/continuity/store");
-      const owner = await project("reference-plan-complete@tally.test");
+      const owner = await project("reference-plan-complete@vidxir.test");
 
       await saveUserBible({
         userId: owner.user.id,
@@ -2120,7 +2120,7 @@ suite("continuity layer (integration)", () => {
 
       it("totals the outstanding entities at the image rate", async () => {
         const { saveUserBible } = await import("@/lib/continuity/store");
-        const owner = await project("reference-cost@tally.test");
+        const owner = await project("reference-cost@vidxir.test");
         await selectModel(owner.projectId, "mock/placeholder", "1080p");
         await asCaller(owner.user);
 
@@ -2154,7 +2154,7 @@ suite("continuity layer (integration)", () => {
 
       it("charges nothing more for an entity already drawn, and says so in the total", async () => {
         const { saveUserBible } = await import("@/lib/continuity/store");
-        const owner = await project("reference-cost-partial@tally.test");
+        const owner = await project("reference-cost-partial@vidxir.test");
         await selectModel(owner.projectId, "mock/placeholder", "1080p");
         await asCaller(owner.user);
 
@@ -2193,7 +2193,7 @@ suite("continuity layer (integration)", () => {
          * quoted resolution is a real one, not a repetition of the request.
          */
         const { saveUserBible } = await import("@/lib/continuity/store");
-        const owner = await project("reference-cost-quality@tally.test");
+        const owner = await project("reference-cost-quality@vidxir.test");
         await selectModel(owner.projectId, "mock/placeholder", "2k");
         await asCaller(owner.user);
 
@@ -2232,7 +2232,7 @@ suite("continuity layer (integration)", () => {
          * tell "this costs nothing" from "there is no price to quote here" — the second
          * is the truth for a project that will never draw a still.
          */
-        const owner = await project("reference-cost-stock@tally.test", {
+        const owner = await project("reference-cost-stock@vidxir.test", {
           generationMode: "STOCK",
         });
         await asCaller(owner.user);
@@ -2251,7 +2251,7 @@ suite("continuity layer (integration)", () => {
          * and the POST is where that project is refused with a message naming the
          * problem.
          */
-        const owner = await project("reference-cost-unknown@tally.test");
+        const owner = await project("reference-cost-unknown@vidxir.test");
         await selectModel(owner.projectId, "retired/model", "1080p");
         await asCaller(owner.user);
 
@@ -2262,7 +2262,7 @@ suite("continuity layer (integration)", () => {
       });
 
       it("refuses an unauthenticated read of the panel", async () => {
-        const owner = await project("reference-cost-anon@tally.test");
+        const owner = await project("reference-cost-anon@vidxir.test");
         await selectModel(owner.projectId, "mock/placeholder", "1080p");
         jar.clear();
 
@@ -2271,7 +2271,7 @@ suite("continuity layer (integration)", () => {
     });
 
     it("wants nothing for a project with no bible", async () => {
-      const owner = await project("reference-plan-no-bible@tally.test");
+      const owner = await project("reference-plan-no-bible@vidxir.test");
 
       const planned = await withFlag(true, async () => {
         const { referenceImagePlan } = await import("@/lib/continuity/service");
@@ -2310,7 +2310,7 @@ suite("continuity layer (integration)", () => {
         const { saveSceneContinuity, saveUserBible, getReferenceImages } =
           await import("@/lib/continuity/store");
         const { referencesForScene } = await import("@/lib/continuity/service");
-        const owner = await project("reference-scene-select@tally.test");
+        const owner = await project("reference-scene-select@vidxir.test");
 
         await saveUserBible({
           userId: owner.user.id,
@@ -2376,7 +2376,7 @@ suite("continuity layer (integration)", () => {
           "@/lib/continuity/store"
         );
         const { referencesForScene } = await import("@/lib/continuity/service");
-        const owner = await project("reference-scene-nostate@tally.test");
+        const owner = await project("reference-scene-nostate@vidxir.test");
 
         await saveUserBible({
           userId: owner.user.id,
@@ -2406,7 +2406,7 @@ suite("continuity layer (integration)", () => {
         const { saveSceneContinuity, saveUserBible, getReferenceImages } =
           await import("@/lib/continuity/store");
         const { referencesForScene } = await import("@/lib/continuity/service");
-        const owner = await project("reference-scene-partial@tally.test");
+        const owner = await project("reference-scene-partial@vidxir.test");
 
         await saveUserBible({
           userId: owner.user.id,
@@ -2446,7 +2446,7 @@ suite("continuity layer (integration)", () => {
       it("returns nothing when the layer is inert", async () => {
         const { saveSceneContinuity, saveUserBible, getReferenceImages } =
           await import("@/lib/continuity/store");
-        const owner = await project("reference-scene-inert@tally.test");
+        const owner = await project("reference-scene-inert@vidxir.test");
 
         await saveUserBible({
           userId: owner.user.id,
@@ -2654,7 +2654,7 @@ suite("continuity layer (integration)", () => {
       // leave the identity half-specified in production while every in-memory test
       // still passed.
       const { getBible } = await import("@/lib/continuity/store");
-      const owner = await voicedProject("voice-persist@tally.test");
+      const owner = await voicedProject("voice-persist@vidxir.test");
 
       const stored = await getBible(owner.user.id, owner.projectId);
       const voice = stored?.bible.characters.find((c) => c.id === "mara")?.voice;
@@ -2675,7 +2675,7 @@ suite("continuity layer (integration)", () => {
 
     it("uses the same voice for the same character in every scene they lead", async () => {
       const { sceneVoicesFor } = await import("@/lib/continuity/service");
-      const owner = await voicedProject("voice-same@tally.test");
+      const owner = await voicedProject("voice-same@vidxir.test");
 
       await withFlag(true, async () => {
         const voices = sceneVoicesFor({
@@ -2694,7 +2694,7 @@ suite("continuity layer (integration)", () => {
 
     it("gives different characters their own voices", async () => {
       const { sceneVoicesFor } = await import("@/lib/continuity/service");
-      const owner = await voicedProject("voice-different@tally.test", {
+      const owner = await voicedProject("voice-different@vidxir.test", {
         ben: BEN_VOICE,
       });
 
@@ -2725,7 +2725,7 @@ suite("continuity layer (integration)", () => {
        */
       const { countRegeneration } = await import("@/lib/continuity/store");
       const { sceneVoicesFor } = await import("@/lib/continuity/service");
-      const owner = await voicedProject("voice-regenerate@tally.test");
+      const owner = await voicedProject("voice-regenerate@vidxir.test");
 
       await withFlag(true, async () => {
         const before = sceneVoicesFor({
@@ -2757,7 +2757,7 @@ suite("continuity layer (integration)", () => {
       // reference comes from; the voice comes from the bible, so it is the same in all
       // three without anything being threaded from one scene to the next.
       const { sceneVoicesFor } = await import("@/lib/continuity/service");
-      const owner = await voicedProject("voice-inherit@tally.test", {
+      const owner = await voicedProject("voice-inherit@vidxir.test", {
         leads: ["mara", "ben", "mara", "mara"],
       });
 
@@ -2776,7 +2776,7 @@ suite("continuity layer (integration)", () => {
       // a cast and no voices, which is every bible written before this existed.
       const { saveUserBible } = await import("@/lib/continuity/store");
       const { sceneVoicesFor } = await import("@/lib/continuity/service");
-      const owner = await project("voice-legacy@tally.test");
+      const owner = await project("voice-legacy@vidxir.test");
 
       await saveUserBible({
         userId: owner.user.id,
@@ -2798,7 +2798,7 @@ suite("continuity layer (integration)", () => {
       // §25's harder case: a project that never had a continuity document. The
       // voiceover stage must reach its single-voice path rather than throwing.
       const { sceneVoicesFor } = await import("@/lib/continuity/service");
-      const owner = await project("voice-no-bible@tally.test");
+      const owner = await project("voice-no-bible@vidxir.test");
       await insertScenes(owner.user.id, owner.projectId, 2);
 
       await withFlag(true, async () => {
@@ -2810,7 +2810,7 @@ suite("continuity layer (integration)", () => {
 
     it("produces no voice constraint while the layer is switched off", async () => {
       const { sceneVoicesFor } = await import("@/lib/continuity/service");
-      const owner = await voicedProject("voice-inert@tally.test");
+      const owner = await voicedProject("voice-inert@vidxir.test");
 
       await withFlag(false, async () => {
         const context = await voiceContext(owner);
@@ -2834,8 +2834,8 @@ suite("continuity layer (integration)", () => {
       const { loadContext, sceneVoicesFor } = await import(
         "@/lib/continuity/service"
       );
-      const owner = await voicedProject("voice-owner@tally.test");
-      const other = await createUser({ email: "voice-other@tally.test" });
+      const owner = await voicedProject("voice-owner@vidxir.test");
+      const other = await createUser({ email: "voice-other@vidxir.test" });
 
       expect(await getBible(other.id, owner.projectId)).toBeNull();
 
@@ -2864,7 +2864,7 @@ suite("continuity layer (integration)", () => {
       const { projects } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const owner = await voicedProject("voice-two-projects@tally.test");
+      const owner = await voicedProject("voice-two-projects@vidxir.test");
 
       const second = await createProject({
         userId: owner.user.id,
@@ -2924,7 +2924,7 @@ suite("continuity layer (integration)", () => {
         "@/lib/continuity/service"
       );
       const { latestContinuityCheck } = await import("@/lib/continuity/store");
-      const owner = await voicedProject("voice-finding@tally.test", {
+      const owner = await voicedProject("voice-finding@vidxir.test", {
         leads: ["mara", "mara", "mara"],
       });
 
@@ -2979,7 +2979,7 @@ suite("continuity layer (integration)", () => {
       // are checked twice, so the only difference between the two runs is the voices.
       const { checkContinuity } = await import("@/lib/continuity/service");
       const { saveUserBible } = await import("@/lib/continuity/store");
-      const owner = await voicedProject("voice-score@tally.test", {
+      const owner = await voicedProject("voice-score@vidxir.test", {
         leads: ["mara", "mara"],
       });
 
@@ -3026,7 +3026,7 @@ suite("continuity layer (integration)", () => {
       const voiceProvider = await import("@/lib/providers/voice");
       const spy = vi.spyOn(voiceProvider, "synthesize");
       const { sceneVoicesFor } = await import("@/lib/continuity/service");
-      const owner = await voicedProject("voice-no-calls@tally.test", {
+      const owner = await voicedProject("voice-no-calls@vidxir.test", {
         ben: BEN_VOICE,
       });
 

@@ -1,5 +1,5 @@
 /**
- * The billing webhook — the only code in Tally that can change a plan tier (§24).
+ * The billing webhook — the only code in Vidxir AI that can change a plan tier (§24).
  *
  * Everything else in the billing path is a *request*: a checkout session is a
  * request to pay, a portal visit is a request to change something. This file
@@ -24,7 +24,7 @@
  *     tier, so events older than `subscriptions.lastEventAt` are recorded and
  *     skipped rather than applied.
  *
- *  4. **Tier from the price, not from metadata.** `tallyTier` metadata is written
+ *  4. **Tier from the price, not from metadata.** `vidxirTier` metadata is written
  *     at checkout and is only a hint; the authoritative tier is whichever
  *     configured price the subscription is actually on. If the two disagree —
  *     someone switched plans in the portal — the price wins, because that is what
@@ -50,7 +50,7 @@ import { completeCreditPurchase } from "@/lib/credits/purchase";
 const log = logger.child({ component: "billing-webhook", provider: "stripe" });
 
 /**
- * Events Tally acts on. Anything else is recorded with `skipReason: "unhandled"`
+ * Events Vidxir AI acts on. Anything else is recorded with `skipReason: "unhandled"`
  * and acknowledged — returning an error for an event we simply do not use would
  * make Stripe retry it forever and eventually disable the endpoint.
  */
@@ -219,12 +219,12 @@ export async function processEvent(event: Stripe.Event): Promise<WebhookOutcome>
   if (!context.userId) {
     /**
      * A real possibility, not a defensive nicety: a subscription created directly
-     * in the Stripe dashboard has no `tallyUserId`. Recorded and skipped, because
+     * in the Stripe dashboard has no `vidxirUserId`. Recorded and skipped, because
      * the alternatives are both worse than doing nothing — guessing an account
      * would grant a stranger's subscription to a user, and erroring would make
      * Stripe retry an event that can never succeed.
      */
-    log.warn("webhook event could not be matched to a Tally account", {
+    log.warn("webhook event could not be matched to a Vidxir AI account", {
       eventId: event.id,
       eventType: event.type,
     });
@@ -279,7 +279,7 @@ export async function processEvent(event: Stripe.Event): Promise<WebhookOutcome>
   const subscription = await subscriptionObjectFor(event, context);
   if (!subscription) {
     // An invoice with no subscription attached, or a session that bought nothing
-    // Tally sells. Nothing to entitle.
+    // Vidxir AI sells. Nothing to entitle.
     return finish("unhandled");
   }
 
@@ -368,15 +368,15 @@ interface EventContext {
 }
 
 /**
- * Which Tally account an event belongs to.
+ * Which Vidxir AI account an event belongs to.
  *
  * Three sources, in descending trustworthiness, and never the URL or a query
  * parameter:
  *
- *  1. `client_reference_id` / `metadata.tallyUserId` — set by Tally when the
+ *  1. `client_reference_id` / `metadata.vidxirUserId` — set by Vidxir AI when the
  *     session or subscription was created.
  *  2. The `subscriptions` row already carrying this customer or subscription id.
- *  3. The Stripe customer's own `metadata.tallyUserId`, fetched if needed.
+ *  3. The Stripe customer's own `metadata.vidxirUserId`, fetched if needed.
  *
  * Each candidate is validated against `users` before it is used, so a forged
  * metadata value naming a random uuid resolves to nothing rather than to an
@@ -474,7 +474,7 @@ const UUID_RE =
 
 function metadataUserId(metadata: unknown): string | null {
   if (!metadata || typeof metadata !== "object") return null;
-  return stringOrNull((metadata as Record<string, unknown>)["tallyUserId"]);
+  return stringOrNull((metadata as Record<string, unknown>)["vidxirUserId"]);
 }
 
 function stringOrNull(value: unknown): string | null {
@@ -607,8 +607,8 @@ async function applySubscription(input: {
 
   /**
    * The tier comes from the price the subscription is on. A subscription whose
-   * price is not one Tally sells resolves to Starter — the safe direction, and the
-   * only honest one: Tally cannot know what an unrecognised price entitles.
+   * price is not one Vidxir AI sells resolves to Starter — the safe direction, and the
+   * only honest one: Vidxir AI cannot know what an unrecognised price entitles.
    */
   const priceId = sub.items.data[0]?.price?.id ?? null;
   const fromPrice = tierForPriceId(priceId);
@@ -624,7 +624,7 @@ async function applySubscription(input: {
   const tier: PlanTier = fromPrice ?? (entitled ? fallbackTier(sub) : "starter");
 
   if (!fromPrice) {
-    log.warn("subscription price is not a configured Tally plan", {
+    log.warn("subscription price is not a configured Vidxir AI plan", {
       userId: input.userId,
       subscriptionStatus: status,
     });
@@ -670,7 +670,7 @@ async function applySubscription(input: {
  * able to name a tier that does not exist.
  */
 function fallbackTier(sub: Stripe.Subscription): PlanTier {
-  const claimed = sub.metadata?.["tallyTier"];
+  const claimed = sub.metadata?.["vidxirTier"];
   if (isPlanTier(claimed) && claimed !== "starter") {
     log.warn("falling back to metadata tier for an unrecognised price", {
       tier: claimed,

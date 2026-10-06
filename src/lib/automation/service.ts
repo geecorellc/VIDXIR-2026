@@ -1,7 +1,7 @@
 /**
  * The automation engine (§19).
  *
- * This is what makes Tally an automation platform rather than a set of buttons: on
+ * This is what makes Vidxir AI an automation platform rather than a set of buttons: on
  * a schedule, with no browser open, it picks the highest-scoring idea a channel's
  * research produced and starts a video from it.
  *
@@ -490,7 +490,7 @@ async function inFlightProject(
 /**
  * The highest-scoring unused idea for a channel.
  *
- * Ordered by the Tally Opportunity Score, which is the whole point of §8: the
+ * Ordered by the Vidxir AI Opportunity Score, which is the whole point of §8: the
  * engine picks by the score the research pass computed, not by recency. An idea
  * with no score is excluded rather than sorted last — an unscored idea means
  * scoring did not complete, and automating on it would make a video from something
@@ -512,10 +512,10 @@ async function bestIdea(
         eq(ideas.channelId, channelId),
         ne(ideas.state, "used"),
         ne(ideas.state, "rejected"),
-        isNotNull(ideas.tallyScore),
+        isNotNull(ideas.vidxirScore),
       ),
     )
-    .orderBy(desc(ideas.tallyScore), desc(ideas.createdAt))
+    .orderBy(desc(ideas.vidxirScore), desc(ideas.createdAt))
     .limit(1);
 
   return rows[0] ?? null;

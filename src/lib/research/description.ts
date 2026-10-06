@@ -114,7 +114,7 @@ const BRIEF_JSON_SCHEMA = jsonSchema({
   required: ["niche", "keywords", "language"],
 });
 
-const SYSTEM_PROMPT = `You are Tally's research planner. You are given a short description of a video someone wants to make, and you turn it into a research brief.
+const SYSTEM_PROMPT = `You are Vidxir AI's research planner. You are given a short description of a video someone wants to make, and you turn it into a research brief.
 
 Your only job is CLASSIFICATION AND SEARCH PLANNING:
 - Name the subject area.

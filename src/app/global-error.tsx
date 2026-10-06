@@ -66,7 +66,7 @@ export default function GlobalError({
               marginBottom: 14,
             }}
           >
-            Tally could not start
+            Vidxir AI could not start
           </div>
 
           <h1

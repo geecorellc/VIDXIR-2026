@@ -12,7 +12,7 @@
  *  - Price ids come from the environment, never from the client. A request body
  *    carries a *tier*; this module looks up that tier's configured price. A client
  *    that could name a price id could name a $0 one.
- *  - `client_reference_id` and customer metadata carry Tally's `userId`, so the
+ *  - `client_reference_id` and customer metadata carry Vidxir AI's `userId`, so the
  *    webhook can resolve an event to an account without trusting a redirect
  *    parameter. The success URL is decorative: it proves nothing and grants
  *    nothing.
@@ -86,9 +86,9 @@ export function stripeClient(): Stripe {
   if (!cached || cachedKey !== key) {
     cached = new Stripe(key, {
       apiVersion: API_VERSION,
-      // Identifies Tally in Stripe's request logs, which is how an operator tells
+      // Identifies Vidxir AI in Stripe's request logs, which is how an operator tells
       // our calls apart from a dashboard action during an incident.
-      appInfo: { name: "Tally", url: "https://tally.app" },
+      appInfo: { name: "Vidxir AI", url: "https://vidxir.com" },
       // Stripe's own retry logic, for network errors and 5xxs only. It is
       // idempotent-safe: the SDK attaches an idempotency key to writes.
       maxNetworkRetries: 2,
@@ -139,7 +139,7 @@ export function priceIdFor(tier: PaidTier): string {
  * The tier a Stripe price id corresponds to, or null.
  *
  * The webhook's only mapping direction: Stripe reports which price a subscription
- * is on, and Tally decides what that entitles. An unrecognised price grants
+ * is on, and Vidxir AI decides what that entitles. An unrecognised price grants
  * nothing — a price created in the dashboard and never wired into the environment
  * must not silently unlock the highest tier.
  */
@@ -166,7 +166,7 @@ export function tierForPriceId(priceId: string | null | undefined): PlanTier | n
  * subscriptions billing in parallel. The id is stored on the `subscriptions` row,
  * which already exists for every user from signup.
  *
- * `metadata.tallyUserId` is the webhook's fallback path for resolving an event to
+ * `metadata.vidxirUserId` is the webhook's fallback path for resolving an event to
  * an account when `client_reference_id` is absent (portal-initiated changes, or a
  * subscription edited in the dashboard).
  */
@@ -186,7 +186,7 @@ export async function ensureCustomer(
   const customer = await callStripe("customers.create", () =>
     stripe.customers.create({
       email,
-      metadata: { tallyUserId: userId },
+      metadata: { vidxirUserId: userId },
     }),
   );
 
@@ -231,9 +231,9 @@ export const stripeProvider: BillingProvider = {
          */
         client_reference_id: request.userId,
         subscription_data: {
-          metadata: { tallyUserId: request.userId, tallyTier: request.tier },
+          metadata: { vidxirUserId: request.userId, vidxirTier: request.tier },
         },
-        metadata: { tallyUserId: request.userId, tallyTier: request.tier },
+        metadata: { vidxirUserId: request.userId, vidxirTier: request.tier },
         // Let Stripe collect and remember the address it needs for tax.
         billing_address_collection: "auto",
         allow_promotion_codes: true,
@@ -283,20 +283,20 @@ export const stripeProvider: BillingProvider = {
         success_url: request.successUrl,
         cancel_url: request.cancelUrl,
         /**
-         * `tallyPack` is recorded for diagnostics and for the abnormal path — a
+         * `vidxirPack` is recorded for diagnostics and for the abnormal path — a
          * session whose `credit_purchases` row is missing. It is deliberately *not*
          * what the webhook credits from: metadata is writable by anything holding
-         * the API key, so the authoritative pack and credit count live in Tally's
+         * the API key, so the authoritative pack and credit count live in Vidxir AI's
          * own row, written before the customer ever reaches Stripe.
          */
         client_reference_id: request.userId,
         metadata: {
-          tallyUserId: request.userId,
-          tallyPack: request.pack,
-          tallyCredits: String(pack.credits),
+          vidxirUserId: request.userId,
+          vidxirPack: request.pack,
+          vidxirCredits: String(pack.credits),
         },
         payment_intent_data: {
-          metadata: { tallyUserId: request.userId, tallyPack: request.pack },
+          metadata: { vidxirUserId: request.userId, vidxirPack: request.pack },
         },
         billing_address_collection: "auto",
         /**
@@ -349,7 +349,7 @@ export const stripeProvider: BillingProvider = {
 // ---------------------------------------------------------------------------
 
 /**
- * Run a Stripe call and translate its failures into Tally's error vocabulary.
+ * Run a Stripe call and translate its failures into Vidxir AI's error vocabulary.
  *
  * The distinction that matters: an invalid or revoked API key is an operator
  * problem and must not be retried or reported to the user as a payment failure,
@@ -436,7 +436,7 @@ export async function billingIdentity(
  *
  * Used to refuse a second checkout: Stripe would happily create a parallel
  * subscription and bill for both, and the user would have no way to tell from
- * Tally's UI. Plan *changes* go through the portal, which swaps the price on the
+ * Vidxir AI's UI. Plan *changes* go through the portal, which swaps the price on the
  * existing subscription instead.
  */
 export async function activeSubscriptionId(

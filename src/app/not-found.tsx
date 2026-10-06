@@ -8,7 +8,7 @@
  * nothing to render.
  */
 import Link from "next/link";
-import { TallyLogo } from "@/components/ui/TallyLogo";
+import { VidxirLogo } from "@/components/ui/VidxirLogo";
 import { color, font, radius } from "@/lib/design/tokens";
 
 export default function NotFound() {
@@ -24,7 +24,7 @@ export default function NotFound() {
         gap: 22,
       }}
     >
-      <TallyLogo size={14} />
+      <VidxirLogo size={14} />
 
       <div style={{ textAlign: "center", maxWidth: 440 }}>
         <div

@@ -11,7 +11,7 @@
  * nothing about what actually failed and reload-loops.
  *
  * This does not swallow anything. `reset()` re-renders the segment, which is the
- * right affordance for the transient class of failure Tally actually produces
+ * right affordance for the transient class of failure Vidxir AI actually produces
  * (a provider timing out, Redis briefly unreachable); anything structural throws
  * again immediately and lands back here. The real diagnosis stays on the server:
  * a thrown error is already logged there with its stack and trace id, and §33

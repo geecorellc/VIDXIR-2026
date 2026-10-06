@@ -24,7 +24,7 @@ import { getLinkStudioData, latestLinkProjectId } from "@/lib/dashboard/link-stu
 import { loadStudioScript } from "@/lib/dashboard/studio-script";
 import { capabilityStatus } from "@/lib/providers/config";
 
-export const metadata = { title: "Describe your idea — Tally" };
+export const metadata = { title: "Describe your idea — Vidxir AI" };
 
 export default async function DescribePage({
   searchParams,
@@ -58,7 +58,7 @@ export default async function DescribePage({
       <SectionHeader
         eyebrow="Your idea"
         title="Describe the video you want to make"
-        sub="Say what you have in mind. Tally researches what is working in that subject right now and writes something original from it — no channel connection needed."
+        sub="Say what you have in mind. Vidxir AI researches what is working in that subject right now and writes something original from it — no channel connection needed."
       />
       <LinkStudio
         data={data}

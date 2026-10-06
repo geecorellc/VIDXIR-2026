@@ -404,7 +404,7 @@ export async function executeResearchRun(
     .where(eq(researchRuns.id, input.runId));
 
   try {
-    // The stored id wins over the payload's. Both are written by Tally, but only
+    // The stored id wins over the payload's. Both are written by Vidxir AI, but only
     // the row was written inside the request that authorised this run.
     const sourceVideoId = runRow.sourceVideoId ?? input.sourceVideoId ?? null;
     // Likewise: the description is read from the row, never from the payload. It is

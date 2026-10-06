@@ -17,7 +17,7 @@
  * implementation could quietly overreach. `captions.download` on the Data API
  * requires the **video owner's** OAuth credentials; a third party cannot read
  * another creator's captions through it, and the third-party "transcript API"
- * services that appear to do so work by scraping an internal endpoint. So Tally
+ * services that appear to do so work by scraping an internal endpoint. So Vidxir AI
  * does not fetch a transcript. What it does instead is report YouTube's own claim
  * about whether the video has captions (`transcript: "unavailable"` with a reason)
  * — an honest statement about the source rather than a promise (§42). The script
@@ -363,7 +363,7 @@ function buildAnalysis(
  * Why there is no transcript.
  *
  * `captionsAvailable === true` becomes `owner_only` rather than `available`,
- * because the captions existing and Tally being able to read them are different
+ * because the captions existing and Vidxir AI being able to read them are different
  * facts and only the first one is knowable here.
  */
 function transcriptStateOf(captionsAvailable: boolean | null): TranscriptState {
@@ -479,7 +479,7 @@ function notConfiguredError(): NotConfiguredError {
 /**
  * Turn a provider failure into a named state.
  *
- * The provider has already translated Google's wire format into Tally's taxonomy,
+ * The provider has already translated Google's wire format into Vidxir AI's taxonomy,
  * so this switches on the code rather than re-parsing an HTTP response. The
  * messages below are written here rather than taken from the error, because §21
  * forbids letting an internal error or a provider detail reach the browser.
@@ -515,7 +515,7 @@ function failure(
   // Written here rather than passed through from the provider. A translated
   // provider message can carry a URL, a project id or a quota table, and §21
   // forbids any of that reaching the browser — the only exception is
-  // `not_configured`, whose message is a variable name Tally itself wrote.
+  // `not_configured`, whose message is a variable name Vidxir AI itself wrote.
   const message =
     state === "quota_exceeded"
       ? "YouTube's daily API quota is used up. Research will work again once it " +

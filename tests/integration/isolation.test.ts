@@ -36,8 +36,8 @@ suite("tenant isolation (integration)", () => {
   describe("projects", () => {
     it("refuses to read another user's project by id", async () => {
       const { createProject, getProject } = await import("@/lib/projects/service");
-      const owner = await createUser({ email: "owner@tally.test" });
-      const other = await createUser({ email: "other@tally.test" });
+      const owner = await createUser({ email: "owner@vidxir.test" });
+      const other = await createUser({ email: "other@vidxir.test" });
       const channelId = await createChannel(owner.id);
 
       const project = await createProject({
@@ -63,8 +63,8 @@ suite("tenant isolation (integration)", () => {
       const { createProject, listProjects } = await import(
         "@/lib/projects/service"
       );
-      const owner = await createUser({ email: "owner2@tally.test" });
-      const other = await createUser({ email: "other2@tally.test" });
+      const owner = await createUser({ email: "owner2@vidxir.test" });
+      const other = await createUser({ email: "other2@vidxir.test" });
       const ownerChannel = await createChannel(owner.id);
       const otherChannel = await createChannel(other.id);
 
@@ -98,8 +98,8 @@ suite("tenant isolation (integration)", () => {
       const { createProject, transition, getProject } = await import(
         "@/lib/projects/service"
       );
-      const owner = await createUser({ email: "owner3@tally.test" });
-      const other = await createUser({ email: "other3@tally.test" });
+      const owner = await createUser({ email: "owner3@vidxir.test" });
+      const other = await createUser({ email: "other3@vidxir.test" });
       const channelId = await createChannel(owner.id);
       const project = await createProject({
         userId: owner.id,
@@ -121,8 +121,8 @@ suite("tenant isolation (integration)", () => {
       const { createProject, setProgress, getProject } = await import(
         "@/lib/projects/service"
       );
-      const owner = await createUser({ email: "owner4@tally.test" });
-      const other = await createUser({ email: "other4@tally.test" });
+      const owner = await createUser({ email: "owner4@vidxir.test" });
+      const other = await createUser({ email: "other4@vidxir.test" });
       const channelId = await createChannel(owner.id);
       const project = await createProject({
         userId: owner.id,
@@ -142,8 +142,8 @@ suite("tenant isolation (integration)", () => {
   describe("channels", () => {
     it("only lists the caller's channels", async () => {
       const { listChannelSummaries } = await import("@/lib/dashboard/stage");
-      const owner = await createUser({ email: "chan-owner@tally.test" });
-      const other = await createUser({ email: "chan-other@tally.test" });
+      const owner = await createUser({ email: "chan-owner@vidxir.test" });
+      const other = await createUser({ email: "chan-other@vidxir.test" });
       await createChannel(owner.id, { title: "Owner Channel" });
       await createChannel(other.id, { title: "Other Channel" });
 
@@ -153,7 +153,7 @@ suite("tenant isolation (integration)", () => {
 
     it("never returns OAuth tokens in a channel summary (§6)", async () => {
       const { listChannelSummaries } = await import("@/lib/dashboard/stage");
-      const user = await createUser({ email: "tokens@tally.test" });
+      const user = await createUser({ email: "tokens@vidxir.test" });
       await createChannel(user.id);
 
       const [summary] = await listChannelSummaries(user.id);
@@ -170,8 +170,8 @@ suite("tenant isolation (integration)", () => {
       const { getChannelConfig, initialiseChannelConfig } = await import(
         "@/lib/settings/service"
       );
-      const owner = await createUser({ email: "set-owner@tally.test" });
-      const other = await createUser({ email: "set-other@tally.test" });
+      const owner = await createUser({ email: "set-owner@vidxir.test" });
+      const other = await createUser({ email: "set-other@vidxir.test" });
       const channelId = await createChannel(owner.id);
       await initialiseChannelConfig(owner.id, channelId);
 
@@ -187,7 +187,7 @@ suite("tenant isolation (integration)", () => {
     it("keeps per-channel settings separate (§27)", async () => {
       const { getChannelConfig, initialiseChannelConfig, updateChannelSettings } =
         await import("@/lib/settings/service");
-      const user = await createUser({ email: "multi@tally.test" });
+      const user = await createUser({ email: "multi@vidxir.test" });
       await setTier(user.id, "scale");
 
       const first = await createChannel(user.id, {
@@ -215,8 +215,8 @@ suite("tenant isolation (integration)", () => {
   describe("onboarding", () => {
     it("keeps each user's answers to themselves", async () => {
       const { getProfile, saveStep } = await import("@/lib/onboarding/service");
-      const first = await createUser({ email: "ob1@tally.test" });
-      const second = await createUser({ email: "ob2@tally.test" });
+      const first = await createUser({ email: "ob1@vidxir.test" });
+      const second = await createUser({ email: "ob2@vidxir.test" });
 
       await saveStep(first.id, { niche: "Vintage synths" });
 
@@ -230,7 +230,7 @@ suite("tenant isolation (integration)", () => {
       const { users } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await createUser({ email: "ob3@tally.test" });
+      const user = await createUser({ email: "ob3@vidxir.test" });
 
       await expect(complete(user.id)).rejects.toMatchObject({
         code: "validation_failed",
@@ -269,7 +269,7 @@ suite("plan enforcement (integration)", () => {
       const { assertCanConnectChannel } = await import("@/lib/plans/enforce");
       const { currentTier } = await import("@/lib/api/guard");
 
-      const user = await createUser({ email: "limit@tally.test" });
+      const user = await createUser({ email: "limit@vidxir.test" });
       await createChannel(user.id, { youtubeChannelId: "UCbbbbbbbbbbbbbbbbbbbbb1" });
 
       // The tier comes from the database, never from the caller (§24).
@@ -289,7 +289,7 @@ suite("plan enforcement (integration)", () => {
       const { channels } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await createUser({ email: "disc@tally.test" });
+      const user = await createUser({ email: "disc@vidxir.test" });
       const channelId = await createChannel(user.id);
 
       await expect(
@@ -309,8 +309,8 @@ suite("plan enforcement (integration)", () => {
 
     it("does not let one user's channels consume another's allowance", async () => {
       const { assertCanConnectChannel } = await import("@/lib/plans/enforce");
-      const busy = await createUser({ email: "busy@tally.test" });
-      const fresh = await createUser({ email: "fresh@tally.test" });
+      const busy = await createUser({ email: "busy@vidxir.test" });
+      const fresh = await createUser({ email: "fresh@vidxir.test" });
       await createChannel(busy.id);
 
       await expect(
@@ -324,7 +324,7 @@ suite("plan enforcement (integration)", () => {
       const { assertCanStartVideo } = await import("@/lib/plans/enforce");
       const { createProject } = await import("@/lib/projects/service");
 
-      const user = await createUser({ email: "quota@tally.test" });
+      const user = await createUser({ email: "quota@vidxir.test" });
       const channelId = await createChannel(user.id);
 
       // Starter includes four videos a month.
@@ -355,7 +355,7 @@ suite("plan enforcement (integration)", () => {
         "@/lib/projects/service"
       );
 
-      const user = await createUser({ email: "usage@tally.test" });
+      const user = await createUser({ email: "usage@vidxir.test" });
       const channelId = await createChannel(user.id);
       await createProject({
         userId: user.id,
@@ -383,7 +383,7 @@ suite("plan enforcement (integration)", () => {
       const { requireFeature, hasFeature } = await import("@/lib/plans/enforce");
       const { currentTier } = await import("@/lib/api/guard");
 
-      const user = await createUser({ email: "feature@tally.test" });
+      const user = await createUser({ email: "feature@vidxir.test" });
       const tier = await currentTier(user.id);
       expect(tier).toBe("starter");
 
@@ -402,7 +402,7 @@ suite("plan enforcement (integration)", () => {
     it("keeps cross-channel analytics and priority rendering on Scale only", async () => {
       const { hasFeature } = await import("@/lib/plans/enforce");
       const { currentTier } = await import("@/lib/api/guard");
-      const user = await createUser({ email: "scale@tally.test" });
+      const user = await createUser({ email: "scale@vidxir.test" });
 
       await setTier(user.id, "studio");
       expect(hasFeature(await currentTier(user.id), "crossChannelAnalytics")).toBe(
@@ -424,7 +424,7 @@ suite("plan enforcement (integration)", () => {
       const { eq } = await import("drizzle-orm");
       const { currentTier } = await import("@/lib/api/guard");
 
-      const user = await createUser({ email: "lapsed@tally.test" });
+      const user = await createUser({ email: "lapsed@vidxir.test" });
       await setTier(user.id, "scale");
       expect(await currentTier(user.id)).toBe("scale");
 

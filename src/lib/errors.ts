@@ -486,7 +486,7 @@ export class PublishBlockedError extends AppError {
     super({
       code: "publish_blocked_dev_mode",
       message:
-        "Publishing is blocked because TALLY_BLOCK_REAL_PUBLISH is enabled. " +
+        "Publishing is blocked because VIDXIR_BLOCK_REAL_PUBLISH is enabled. " +
         "Disable it to publish to a real YouTube channel.",
       status: 409,
       retryable: false,

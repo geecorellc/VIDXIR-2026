@@ -18,7 +18,7 @@ import { subscriptions } from "@/lib/db/schema";
 import { entitlementsFor } from "@/lib/plans/enforce";
 import { billingAvailability, canUpgrade } from "@/lib/billing";
 
-export const metadata = { title: "Plan & billing — Tally" };
+export const metadata = { title: "Plan & billing — Vidxir AI" };
 
 export default async function BillingPage() {
   const session = await getSession();

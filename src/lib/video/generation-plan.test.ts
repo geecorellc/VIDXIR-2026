@@ -53,9 +53,9 @@ import {
 
 /** The variables `lib/env` requires before it will parse. Local placeholders only. */
 const BASE = {
-  DATABASE_URL: "postgresql://tally:tally@localhost:5432/tally_unit",
+  DATABASE_URL: "postgresql://vidxir:vidxir@localhost:5432/vidxir_unit",
   REDIS_URL: "redis://127.0.0.1:6379",
-  S3_BUCKET: "tally-unit",
+  S3_BUCKET: "vidxir-unit",
   S3_ACCESS_KEY_ID: "unit",
   S3_SECRET_ACCESS_KEY: "unit",
   ENCRYPTION_KEY: "a".repeat(64),
@@ -64,7 +64,7 @@ const BASE = {
 
 const MANAGED = [
   "NODE_ENV",
-  "TALLY_USE_MOCK_PROVIDERS",
+  "VIDXIR_USE_MOCK_PROVIDERS",
   "VIDEO_GEN_PROVIDERS",
   "DASHSCOPE_API_KEY",
   "MINIMAX_API_KEY",
@@ -90,7 +90,7 @@ function setEnv(key: string, value: string): void {
 /**
  * Apply a provider configuration.
  *
- * `TALLY_USE_MOCK_PROVIDERS` is forced off by default: left on, it replaces the
+ * `VIDXIR_USE_MOCK_PROVIDERS` is forced off by default: left on, it replaces the
  * enabled provider list with `["mock"]` entirely, which would make every case below
  * assert against the placeholder provider instead of the one it names.
  */
@@ -98,7 +98,7 @@ function configure(vars: Record<string, string | undefined>): void {
   setEnv("NODE_ENV", "test");
   resetEnvCache();
   for (const key of MANAGED) delete process.env[key];
-  const merged = { ...BASE, TALLY_USE_MOCK_PROVIDERS: "false", ...vars };
+  const merged = { ...BASE, VIDXIR_USE_MOCK_PROVIDERS: "false", ...vars };
   for (const [key, value] of Object.entries(merged)) {
     if (value === undefined) delete process.env[key];
     else setEnv(key, value);
@@ -394,7 +394,7 @@ describe("validateSelection — quality (§4, §12)", () => {
   it("rejects a real quality the chosen model does not declare (§4, §18.7)", () => {
     allReady();
 
-    // 2K is a quality Tally knows and no video model offers. §4 forbids showing an
+    // 2K is a quality Vidxir AI knows and no video model offers. §4 forbids showing an
     // option the model does not support, and this is the same rule enforced where
     // the UI cannot be trusted.
     for (const model of generationOptions("scale").models) {

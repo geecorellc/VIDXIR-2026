@@ -37,7 +37,7 @@ const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
  */
 let dummyHash: string | null = null;
 async function dummyCompare(password: string): Promise<void> {
-  dummyHash ??= await hashPassword("tally-timing-equalizer");
+  dummyHash ??= await hashPassword("vidxir-timing-equalizer");
   await verifyPassword(password, dummyHash);
 }
 

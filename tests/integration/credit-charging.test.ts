@@ -2,7 +2,7 @@
  * Credits charged at the generation call sites (§10, §12, §13).
  *
  * `credits.test.ts` proves the ledger is correct in isolation. This proves the pipeline
- * actually uses it, which is a different claim and the one that decides whether Tally
+ * actually uses it, which is a different claim and the one that decides whether Vidxir AI
  * bills for the work it does. Everything here runs the real stage functions against the
  * real database, with `mock/placeholder` as the model — a generator that produces real
  * PNG bytes and makes no vendor call, so a charge can be observed without spending
@@ -19,7 +19,7 @@
  *  - **Stock footage is not charged at all.** It is paid for by the plan's video
  *    allowance; charging credits as well would bill twice for one video.
  *  - **An unaffordable build is refused before it generates.** Not merely refused — a
- *    build that generated scene one at Tally's expense and then failed would satisfy a
+ *    build that generated scene one at Vidxir AI's expense and then failed would satisfy a
  *    naive "it threw" assertion while still having spent real money.
  *  - **A failed generation is refunded.** Money taken for an asset that does not exist.
  *  - **Reference stills are charged at the image rate, once per entity.**
@@ -434,7 +434,7 @@ suite("credits charged at the generation call sites (integration)", () => {
     it(
       "charges once per generated scene and moves the balance by their sum",
       async () => {
-        const { user, projectId, channelId } = await fixture("charge@tally.test");
+        const { user, projectId, channelId } = await fixture("charge@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
 
         const plan = await upToVisuals(context);
@@ -469,7 +469,7 @@ suite("credits charged at the generation call sites (integration)", () => {
          * BullMQ job replays the same per-scene keys, loses the ledger insert and charges
          * zero — so the customer pays once per scene generated, not once per attempt.
          */
-        const { user, projectId, channelId } = await fixture("retry@tally.test");
+        const { user, projectId, channelId } = await fixture("retry@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
 
         await upToVisuals(context);
@@ -497,7 +497,7 @@ suite("credits charged at the generation call sites (integration)", () => {
          * `assertCanStartVideo` enforces at the request that starts the build. Charging
          * credits as well would bill twice for one video.
          */
-        const { user, projectId, channelId } = await fixture("stock@tally.test", {
+        const { user, projectId, channelId } = await fixture("stock@vidxir.test", {
           mode: "STOCK",
         });
         const context = { userId: user.id, projectId, channelId };
@@ -517,11 +517,11 @@ suite("credits charged at the generation call sites (integration)", () => {
         /**
          * The cost guard, and the assertion that makes it worth having: not just that it
          * threw, but that **no scene was generated**. A stage that refused only at the
-         * charge would have produced scene one at Tally's expense first, and the
+         * charge would have produced scene one at Vidxir AI's expense first, and the
          * eighty-scene version of that is eighty vendor calls for a video that could
          * never finish.
          */
-        const { user, projectId, channelId } = await fixture("broke@tally.test");
+        const { user, projectId, channelId } = await fixture("broke@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
 
         const plan = await upToVisuals(context);
@@ -561,7 +561,7 @@ suite("credits charged at the generation call sites (integration)", () => {
          * and then a failure — they want to be told before anything is spent, which is
          * what leaves the credits available for a shorter video or a cheaper model.
          */
-        const { user, projectId, channelId } = await fixture("partial@tally.test");
+        const { user, projectId, channelId } = await fixture("partial@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
 
         const plan = await upToVisuals(context);
@@ -588,7 +588,7 @@ suite("credits charged at the generation call sites (integration)", () => {
          * The failure is injected at `generateClip`, which is the provider boundary the
          * charge wraps — mocking anything further out would test the mock.
          */
-        const { user, projectId, channelId } = await fixture("refund@tally.test");
+        const { user, projectId, channelId } = await fixture("refund@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
 
         await upToVisuals(context);
@@ -638,7 +638,7 @@ suite("credits charged at the generation call sites (integration)", () => {
          * second failure and could refund twice. One free generation per failure, in the
          * customer's favour, is the smaller and safer error.
          */
-        const { user, projectId, channelId } = await fixture("freeretry@tally.test");
+        const { user, projectId, channelId } = await fixture("freeretry@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
 
         await upToVisuals(context);
@@ -678,7 +678,7 @@ suite("credits charged at the generation call sites (integration)", () => {
       "describes a spend without naming the vendor behind the model",
       async () => {
         // §3 applies to the transaction history, not only to the picker.
-        const { user, projectId, channelId } = await fixture("vendor@tally.test");
+        const { user, projectId, channelId } = await fixture("vendor@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
 
         await upToVisuals(context);
@@ -749,16 +749,16 @@ suite("credits charged at the generation call sites (integration)", () => {
      */
     async function withContinuity<T>(run: () => Promise<T>): Promise<T> {
       const { resetEnvCache } = await import("@/lib/env");
-      const previous = process.env["TALLY_CONTINUITY_ENGINE_ENABLED"];
-      process.env["TALLY_CONTINUITY_ENGINE_ENABLED"] = "true";
+      const previous = process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"];
+      process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"] = "true";
       resetEnvCache();
       try {
         return await run();
       } finally {
         if (previous === undefined) {
-          delete process.env["TALLY_CONTINUITY_ENGINE_ENABLED"];
+          delete process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"];
         } else {
-          process.env["TALLY_CONTINUITY_ENGINE_ENABLED"] = previous;
+          process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"] = previous;
         }
         resetEnvCache();
       }
@@ -767,7 +767,7 @@ suite("credits charged at the generation call sites (integration)", () => {
     it(
       "charges the image rate once per entity, and not again on a re-run",
       async () => {
-        const { user, projectId, channelId } = await fixture("refs@tally.test");
+        const { user, projectId, channelId } = await fixture("refs@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
 
         await withContinuity(async () => {
@@ -818,7 +818,7 @@ suite("credits charged at the generation call sites (integration)", () => {
          * empty balance stops the run and reports it, rather than failing the project or
          * asking seven more times for an answer already known.
          */
-        const { user, projectId, channelId } = await fixture("refsbroke@tally.test");
+        const { user, projectId, channelId } = await fixture("refsbroke@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
 
         await withContinuity(async () => {
@@ -857,7 +857,7 @@ suite("credits charged at the generation call sites (integration)", () => {
    * Every other block here proves the charge is correct. This proves the *quote* is,
    * which is a separate and equally billable claim: `/api/video/providers` computes the
    * figure the customer reads before pressing Generate, and if it disagreed with the
-   * ledger row the pipeline writes, Tally would be quoting one price and taking another.
+   * ledger row the pipeline writes, Vidxir AI would be quoting one price and taking another.
    *
    * Asserted by crossing the two rather than by calling `scenePriceFor` twice — a test
    * that re-derived the price from the same function would pass just as happily if that
@@ -911,7 +911,7 @@ suite("credits charged at the generation call sites (integration)", () => {
     it(
       "quotes exactly what the visuals stage then charges per scene",
       async () => {
-        const { user, projectId, channelId } = await fixture("quote@tally.test");
+        const { user, projectId, channelId } = await fixture("quote@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
         await onboard(user.id);
         await signIn(user);
@@ -920,7 +920,7 @@ suite("credits charged at the generation call sites (integration)", () => {
         expect(catalogue.status).toBe(200);
 
         /**
-         * The mock model is the only one available under `TALLY_USE_MOCK_PROVIDERS`, and
+         * The mock model is the only one available under `VIDXIR_USE_MOCK_PROVIDERS`, and
          * it is also the model the fixture generates with — which is what makes this
          * crossing possible at all without a vendor call.
          */
@@ -962,7 +962,7 @@ suite("credits charged at the generation call sites (integration)", () => {
        * so a page load cannot mint credits. Both halves are asserted: the figure is the
        * real one, and reading it twice does not move it.
        */
-      const { user } = await fixture("quote-balance@tally.test");
+      const { user } = await fixture("quote-balance@vidxir.test");
       await onboard(user.id);
       await signIn(user);
 
@@ -990,7 +990,7 @@ suite("credits charged at the generation call sites (integration)", () => {
        * declined to make. A route that granted would show a non-zero figure and write a
        * `monthly_grant` row on a page view.
        */
-      const { user } = await fixture("quote-nogrant@tally.test");
+      const { user } = await fixture("quote-nogrant@vidxir.test");
       await onboard(user.id);
       await signIn(user);
 
@@ -1008,7 +1008,7 @@ suite("credits charged at the generation call sites (integration)", () => {
     });
 
     it("prices every listed resolution and names no vendor (§3, §20)", async () => {
-      const { user } = await fixture("quote-shape@tally.test");
+      const { user } = await fixture("quote-shape@vidxir.test");
       await onboard(user.id);
       await signIn(user);
 
@@ -1084,7 +1084,7 @@ suite("credits charged at the generation call sites (integration)", () => {
     it(
       "charges a regeneration against the ledger with the scene recorded",
       async () => {
-        const { user, projectId, channelId } = await fixture("regen@tally.test");
+        const { user, projectId, channelId } = await fixture("regen@vidxir.test");
         const context = { userId: user.id, projectId, channelId };
 
         await withRegeneration(context, async (executeSceneRegeneration, jobId) => {
@@ -1136,8 +1136,8 @@ suite("credits charged at the generation call sites (integration)", () => {
       ) => Promise<void>,
     ): Promise<void> {
       const { resetEnvCache } = await import("@/lib/env");
-      const previous = process.env["TALLY_CONTINUITY_ENGINE_ENABLED"];
-      process.env["TALLY_CONTINUITY_ENGINE_ENABLED"] = "true";
+      const previous = process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"];
+      process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"] = "true";
       resetEnvCache();
 
       try {
@@ -1164,9 +1164,9 @@ suite("credits charged at the generation call sites (integration)", () => {
         await markJobSucceeded(job.id, { done: true });
       } finally {
         if (previous === undefined) {
-          delete process.env["TALLY_CONTINUITY_ENGINE_ENABLED"];
+          delete process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"];
         } else {
-          process.env["TALLY_CONTINUITY_ENGINE_ENABLED"] = previous;
+          process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"] = previous;
         }
         resetEnvCache();
       }

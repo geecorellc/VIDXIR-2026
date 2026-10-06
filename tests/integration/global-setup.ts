@@ -8,7 +8,7 @@
  * leaves the most behind.
  *
  * **Why the sweep is here and not in `useDatabase()`.** A per-file hook would clean the
- * shared `tally-test` namespace while other files may still be using it. That is safe
+ * shared `vidxir-test` namespace while other files may still be using it. That is safe
  * today only because `vitest.config.ts` sets `fileParallelism: false` whenever
  * `TEST_DATABASE_URL` is present, and building teardown on top of that would mean
  * enabling parallelism later silently turns cleanup into one file deleting another's live
@@ -64,7 +64,7 @@ export async function teardown(): Promise<void> {
      */
     process.stdout.write(
       `[integration teardown] removed ${result.redisKeysDeleted} Redis key(s) and ` +
-        `${result.objectsDeleted} object(s) from the tally-test namespace\n`,
+        `${result.objectsDeleted} object(s) from the vidxir-test namespace\n`,
     );
   }
 }

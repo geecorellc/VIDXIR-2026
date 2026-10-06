@@ -261,7 +261,7 @@ export interface RevenueSummary {
   measuredDays: number;
   /**
    * Why revenue is absent, when it is. `scope_missing` is the expected value for
-   * a Tally channel: the monetary scope is not requested at consent.
+   * a Vidxir AI channel: the monetary scope is not requested at consent.
    */
   state: RevenueState | "mixed";
   /** Per-state day counts, so the UI can explain a partial period. */
@@ -332,7 +332,7 @@ export async function revenueSummary(
 
   /**
    * Mixed currencies cannot be added. Rather than convert — which would need a
-   * rate Tally does not have and would produce a figure YouTube never reported —
+   * rate Vidxir AI does not have and would produce a figure YouTube never reported —
    * this refuses to total and says so.
    */
   const currencies = new Set(reporting.map((r) => r.currency ?? "").filter(Boolean));

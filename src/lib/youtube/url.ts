@@ -77,7 +77,7 @@ export interface ParsedYouTubeLink {
    *
    * Always regenerated from the id rather than echoed from the input, so a
    * tracking parameter, an affiliate tag or a `redirect` query string cannot
-   * survive into anything Tally stores or renders as a link.
+   * survive into anything Vidxir AI stores or renders as a link.
    */
   canonicalUrl: string;
 }

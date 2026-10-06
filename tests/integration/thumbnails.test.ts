@@ -27,7 +27,7 @@
  * call in the stage and §40 forbids spending credits in tests. Visuals run as the
  * development mock — real PNG bytes — storage is the real MinIO bucket, and the
  * compositor is the real ffmpeg. There is no mock compositor to fall back to, by
- * design: an image Tally claims to have made is one it made.
+ * design: an image Vidxir AI claims to have made is one it made.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -429,7 +429,7 @@ suite("thumbnail pipeline (integration)", () => {
     it(
       "turns four concepts into four stored JPEGs and a project ready to publish",
       async () => {
-        const { user, project } = await fixture("thumbs@tally.test");
+        const { user, project } = await fixture("thumbs@vidxir.test");
         const context = { userId: user.id, projectId: project.id };
 
         const { result } = await generate(context);
@@ -532,7 +532,7 @@ suite("thumbnail pipeline (integration)", () => {
       // photograph of something similar, and it costs no provider call. Only
       // variant 0 gets it — four cards showing the same poster is one concept.
       const poster = await pngBytes();
-      const { user, project } = await fixture("poster@tally.test", {
+      const { user, project } = await fixture("poster@vidxir.test", {
         posterBytes: poster,
       });
 
@@ -567,7 +567,7 @@ suite("thumbnail pipeline (integration)", () => {
     }, 300_000);
 
     it("replaces the previous set rather than accumulating a fifth card", async () => {
-      const { user, project } = await fixture("regen@tally.test");
+      const { user, project } = await fixture("regen@vidxir.test");
       const context = { userId: user.id, projectId: project.id };
 
       const first = await generate(context);
@@ -611,7 +611,7 @@ suite("thumbnail pipeline (integration)", () => {
     it("leaves one variant unrendered rather than failing the other three", async () => {
       if (!canComposite) return;
 
-      const { user, project } = await fixture("partial@tally.test");
+      const { user, project } = await fixture("partial@vidxir.test");
 
       // One background acquisition fails. The other three must still composite:
       // failing the whole job on one bad stock search throws away three good
@@ -667,7 +667,7 @@ suite("thumbnail pipeline (integration)", () => {
     }, 300_000);
 
     it("fails the job when no concept composited at all", async () => {
-      const { user, project } = await fixture("nothing@tally.test");
+      const { user, project } = await fixture("nothing@vidxir.test");
 
       const { AssetMissingError } = await import("@/lib/errors");
       visuals.acquireVisual.mockRejectedValue(new AssetMissingError("any visual"));
@@ -712,7 +712,7 @@ suite("thumbnail pipeline (integration)", () => {
     }, 300_000);
 
     it("records a non-retryable failure and steps the project back", async () => {
-      const { user, project } = await fixture("nonretry@tally.test");
+      const { user, project } = await fixture("nonretry@vidxir.test");
 
       /**
        * A `ProviderError` with `retryable: false`, because that is the only shape
@@ -761,7 +761,7 @@ suite("thumbnail pipeline (integration)", () => {
     }, 300_000);
 
     it("leaves the project generating when the failure is retryable", async () => {
-      const { user, project } = await fixture("retry@tally.test");
+      const { user, project } = await fixture("retry@vidxir.test");
 
       /**
        * A retryable error must NOT move the project. The worker has two attempts
@@ -807,7 +807,7 @@ suite("thumbnail pipeline (integration)", () => {
       // The status alone is not enough: a project can be VIDEO_READY by
       // transition and have no render row at all, and generating four images for a
       // video that does not exist is work for nothing.
-      const { user, project } = await fixture("norender@tally.test", {
+      const { user, project } = await fixture("norender@vidxir.test", {
         withRender: false,
       });
 
@@ -836,7 +836,7 @@ suite("thumbnail pipeline (integration)", () => {
     }, 120_000);
 
     it("refuses once the video is published, because the thumbnail is live", async () => {
-      const { user, project } = await fixture("published@tally.test");
+      const { user, project } = await fixture("published@vidxir.test");
       const { transition } = await import("@/lib/projects/service");
 
       for (const status of ["READY_TO_PUBLISH", "PUBLISHING", "PUBLISHED"] as const) {
@@ -857,7 +857,7 @@ suite("thumbnail pipeline (integration)", () => {
     }, 120_000);
 
     it("refuses a second generation while one is already running", async () => {
-      const { user, project } = await fixture("concurrent@tally.test");
+      const { user, project } = await fixture("concurrent@vidxir.test");
 
       const { startThumbnails } = await import("@/lib/thumbnails/service");
       // The first leaves a queued job row, which is what `hasActiveJob` reads. A
@@ -879,8 +879,8 @@ suite("thumbnail pipeline (integration)", () => {
     }, 120_000);
 
     it("refuses a project belonging to another user", async () => {
-      const { user, project } = await fixture("owner@tally.test");
-      const intruder = await createUser({ email: "intruder@tally.test" });
+      const { user, project } = await fixture("owner@vidxir.test");
+      const intruder = await createUser({ email: "intruder@vidxir.test" });
 
       const { startThumbnails } = await import("@/lib/thumbnails/service");
       // `getProject` is tenant-scoped, so another user's project id is simply not
@@ -906,7 +906,7 @@ suite("thumbnail pipeline (integration)", () => {
     it("records the chosen variant and nothing else", async () => {
       if (!canComposite) return;
 
-      const { user, project } = await fixture("select@tally.test");
+      const { user, project } = await fixture("select@vidxir.test");
       const { result } = await generate({
         userId: user.id,
         projectId: project.id,
@@ -949,7 +949,7 @@ suite("thumbnail pipeline (integration)", () => {
     it("refuses a variant whose image was never composited", async () => {
       if (!canComposite) return;
 
-      const { user, project } = await fixture("unrendered@tally.test");
+      const { user, project } = await fixture("unrendered@vidxir.test");
 
       const { AssetMissingError } = await import("@/lib/errors");
       visuals.acquireVisual.mockImplementation(async (request, options) => {
@@ -1000,8 +1000,8 @@ suite("thumbnail pipeline (integration)", () => {
     }, 300_000);
 
     it("does not resolve a variant belonging to another user", async () => {
-      const mine = await fixture("mine@tally.test");
-      const theirs = await fixture("theirs@tally.test");
+      const mine = await fixture("mine@vidxir.test");
+      const theirs = await fixture("theirs@vidxir.test");
 
       const first = await generate({
         userId: mine.user.id,
@@ -1056,7 +1056,7 @@ suite("thumbnail pipeline (integration)", () => {
        * `projectId` predicate stops project A's thumbnail being attached to project
        * B, which would publish the wrong image with the right owner.
        */
-      const first = await fixture("two-a@tally.test");
+      const first = await fixture("two-a@vidxir.test");
       const { db } = await import("@/lib/db");
       const { createProject, transition } = await import("@/lib/projects/service");
       const { persistScriptVersion, approveScript } = await import(
@@ -1133,7 +1133,7 @@ suite("thumbnail pipeline (integration)", () => {
 
   describe("reading a set", () => {
     it("returns null before anything has been generated", async () => {
-      const { user, project } = await fixture("empty@tally.test");
+      const { user, project } = await fixture("empty@vidxir.test");
       const { getThumbnails } = await import("@/lib/thumbnails/service");
       // Null rather than an empty set: the studio says "No thumbnails yet", and a
       // shell of four blank cards would look like a generation that produced
@@ -1142,8 +1142,8 @@ suite("thumbnail pipeline (integration)", () => {
     }, 120_000);
 
     it("does not return another user's set", async () => {
-      const mine = await fixture("read-mine@tally.test");
-      const intruder = await createUser({ email: "read-intruder@tally.test" });
+      const mine = await fixture("read-mine@vidxir.test");
+      const intruder = await createUser({ email: "read-intruder@vidxir.test" });
 
       await generate({ userId: mine.user.id, projectId: mine.project.id });
 
@@ -1153,7 +1153,7 @@ suite("thumbnail pipeline (integration)", () => {
     }, 300_000);
 
     it("returns the variants in card order with their images", async () => {
-      const { user, project } = await fixture("read@tally.test");
+      const { user, project } = await fixture("read@vidxir.test");
       const { result } = await generate({
         userId: user.id,
         projectId: project.id,
@@ -1189,7 +1189,7 @@ async function pngBytes(): Promise<Buffer> {
   const binary = ffmpegBinary();
   if (!binary) throw new Error("ffmpeg is required for this fixture");
 
-  const dir = await mkdtemp(join(tmpdir(), "tally-thumb-fixture-"));
+  const dir = await mkdtemp(join(tmpdir(), "vidxir-thumb-fixture-"));
   const output = join(dir, "poster.png");
 
   try {

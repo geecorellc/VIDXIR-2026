@@ -195,7 +195,7 @@ describe("asDatabaseError", () => {
       "42601",
       'syntax error at or near "SELCT" — ' +
         "SELECT * FROM users WHERE email = 'victim@example.com'; " +
-        "dsn=postgresql://tally:hunter2@db.internal:5432/tally",
+        "dsn=postgresql://vidxir:hunter2@db.internal:5432/vidxir",
     );
     const classified = asDatabaseError("read users", leaky);
     const body = JSON.stringify(classified.toResponseBody());

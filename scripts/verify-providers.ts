@@ -16,7 +16,7 @@
  * as the app does, so a pass means the app's own configuration works rather than
  * a separate set of variables that happen to be right.
  *
- * `TALLY_USE_MOCK_PROVIDERS=true` is overridden for this run only, in-process. A
+ * `VIDXIR_USE_MOCK_PROVIDERS=true` is overridden for this run only, in-process. A
  * verification that exercised the mocks would report success while proving
  * nothing, which is the specific dishonesty §42 prohibits. The per-provider
  * selectors are left alone: `VOICE_PROVIDER=mock` is a real answer, and the
@@ -27,7 +27,7 @@
  */
 import "@/lib/load-env";
 
-process.env["TALLY_USE_MOCK_PROVIDERS"] = "false";
+process.env["VIDXIR_USE_MOCK_PROVIDERS"] = "false";
 
 interface Check {
   name: string;
@@ -93,7 +93,7 @@ const CHECKS: readonly Check[] = [
       if (voiceProviderName() === "mock" || !isVoiceConfigured()) return null;
 
       const result = await synthesize({
-        segments: [{ sceneIndex: 0, text: "Tally provider check." }],
+        segments: [{ sceneIndex: 0, text: "Vidxir AI provider check." }],
         usage: { ...USAGE, operation: "verify" },
       });
       const segment = result.segments[0];
@@ -153,7 +153,7 @@ const CHECKS: readonly Check[] = [
           {
             sceneIndex: 0,
             // Distinctive enough that a wrong or empty result is obvious.
-            text: "Tally transcription check: the quick brown fox jumps over the lazy dog.",
+            text: "Vidxir AI transcription check: the quick brown fox jumps over the lazy dog.",
           },
         ],
         usage: { ...USAGE, operation: "verify" },
@@ -287,7 +287,7 @@ const CHECKS: readonly Check[] = [
 
       /**
        * Not a live call, and deliberately so: every YouTube read and write in
-       * Tally takes a channel's *OAuth access token*, which only exists after a
+       * Vidxir AI takes a channel's *OAuth access token*, which only exists after a
        * user has completed consent. There is no API-key-only path to exercise, so
        * the verifiable part here is that the client credentials produce a
        * well-formed consent URL carrying the scopes the app needs. Connecting a

@@ -243,7 +243,7 @@ describe("channelUpdateSchema", () => {
     expect(channelUpdateSchema.safeParse({ settings: { uploadsPerWeek: 2 } }).success).toBe(
       true,
     );
-    expect(channelUpdateSchema.safeParse({ brand: { brandName: "Tally" } }).success).toBe(
+    expect(channelUpdateSchema.safeParse({ brand: { brandName: "Vidxir AI" } }).success).toBe(
       true,
     );
     expect(channelUpdateSchema.safeParse({ automation: { enabled: false } }).success).toBe(

@@ -13,7 +13,7 @@
  *  - **A pack whose price env var is unset is not offered.** There is no fallback price
  *    and no default. `availablePacks()` filters on configuration, so the UI can only
  *    show what can actually be bought (§42, §48 — never pretend a purchase will work).
- *  - **The credit count lives here, not in Stripe.** The webhook reads it from Tally's
+ *  - **The credit count lives here, not in Stripe.** The webhook reads it from Vidxir AI's
  *    own `credit_purchases` row, written at session-creation time from this table. It
  *    is never read back out of Stripe metadata, which is writable by anything holding
  *    the API key, and never derived from the amount paid, which is a currency figure.
@@ -180,7 +180,7 @@ export function priceIdForPack(id: CreditPackId): string {
  *
  * Note that the webhook does not actually need this in the normal path — it reads the
  * credit count from the `credit_purchases` row it wrote itself. This exists for the
- * abnormal one: a payment for a Tally credit price that has no matching purchase row
+ * abnormal one: a payment for a Vidxir AI credit price that has no matching purchase row
  * (created directly in the dashboard, or a row lost to a rollback) can at least be
  * identified and logged rather than being an unattributable payment.
  */

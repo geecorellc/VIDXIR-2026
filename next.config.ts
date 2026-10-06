@@ -18,9 +18,9 @@ import type { NextConfig } from "next";
  * YouTube's own image hosts, which are not derivable from any variable.
  *
  * The source-analysis panel and the channel list display a thumbnail straight from
- * YouTube's CDN — deliberately, because Tally must not fetch, store or re-encode
+ * YouTube's CDN — deliberately, because Vidxir AI must not fetch, store or re-encode
  * another creator's media (§22), so the URL goes to the browser and the bytes never
- * touch a Tally server. That design only works if the browser is allowed to load it:
+ * touch a Vidxir AI server. That design only works if the browser is allowed to load it:
  * with these absent, `img-src` was `'self' data: blob:` plus the storage origin, and
  * every source thumbnail and channel avatar was blocked by our own policy and rendered
  * broken. The panel looked like it had failed to analyse the video when in fact it had.
@@ -98,7 +98,7 @@ function contentSecurityPolicy(): string {
     /**
      * YouTube's hosts are added to `img-src` only, not to `media-src`.
      *
-     * Tally displays a remote *thumbnail*; it never plays remote video or audio. Listing
+     * Vidxir AI displays a remote *thumbnail*; it never plays remote video or audio. Listing
      * these under `media-src` would permit a `<video src="https://…youtube…">` that
      * nothing in the app creates, and §22's line is that source media is never
      * fetched — so the narrower directive is the one that matches what the code does.

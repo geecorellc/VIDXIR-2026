@@ -152,7 +152,7 @@ export async function startThumbnails(
   if (!(await hasFinishedRender(input.userId, input.projectId))) {
     throw new ValidationError(
       "This video has not finished rendering yet. Thumbnails are designed for a " +
-        "finished video, so build the video first and Tally will design four " +
+        "finished video, so build the video first and Vidxir AI will design four " +
         "concepts for it.",
     );
   }
@@ -722,7 +722,7 @@ async function backgroundFor(
 /**
  * A frame from the project's finished render, if one has been extracted.
  *
- * Currently this returns null for every project built by Tally: `renders`
+ * Currently this returns null for every project built by Vidxir AI: `renders`
  * declares `poster_asset_id`, but no stage writes it — the local ffmpeg renderer
  * produces an MP4 and nothing else. The read is here rather than deferred because
  * it is the branch that decides *where a background comes from*, and a hosted

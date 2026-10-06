@@ -100,7 +100,7 @@ export async function providerBytes(
 }
 
 /**
- * Send the request, mapping a non-OK status onto Tally's error taxonomy.
+ * Send the request, mapping a non-OK status onto Vidxir AI's error taxonomy.
  *
  * The upstream body is read into the message only after being truncated, and it
  * is never shown to a user — `AppError.message` for these codes is the operator

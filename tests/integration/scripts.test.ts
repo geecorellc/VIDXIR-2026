@@ -211,7 +211,7 @@ suite("scripts and metadata (integration)", () => {
 
   describe("startScriptGeneration", () => {
     it("queues a job and moves the project to SCRIPT_GENERATING", async () => {
-      const { project, user } = await fixture("start@tally.test");
+      const { project, user } = await fixture("start@vidxir.test");
       const { startScriptGeneration } = await import("@/lib/scripts/service");
       const { getProject } = await import("@/lib/projects/service");
 
@@ -242,7 +242,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("refuses a second run while one is in flight", async () => {
-      const { project, user } = await fixture("dup@tally.test");
+      const { project, user } = await fixture("dup@vidxir.test");
       const { startScriptGeneration } = await import("@/lib/scripts/service");
 
       await startScriptGeneration({
@@ -263,8 +263,8 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("refuses another user's project", async () => {
-      const { project } = await fixture("owner@tally.test");
-      const intruder = await createUser({ email: "intruder@tally.test" });
+      const { project } = await fixture("owner@vidxir.test");
+      const intruder = await createUser({ email: "intruder@vidxir.test" });
       const { startScriptGeneration } = await import("@/lib/scripts/service");
 
       // A valid project id belonging to somebody else — the only test of
@@ -279,7 +279,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("rejects a revision note long enough to be a prompt", async () => {
-      const { project, user } = await fixture("longnote@tally.test");
+      const { project, user } = await fixture("longnote@vidxir.test");
       const { startScriptGeneration } = await import("@/lib/scripts/service");
 
       await expect(
@@ -295,7 +295,7 @@ suite("scripts and metadata (integration)", () => {
 
   describe("executeScriptGeneration", () => {
     it("stores a version, measures it, and moves to SCRIPT_READY", async () => {
-      const { project, user } = await fixture("exec@tally.test");
+      const { project, user } = await fixture("exec@vidxir.test");
       ai.generateJson.mockResolvedValue(scriptDraft());
 
       const { startScriptGeneration } = await import("@/lib/scripts/service");
@@ -346,7 +346,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("builds a brief from the channel's own settings and brand kit", async () => {
-      const { project, user } = await fixture("brief@tally.test");
+      const { project, user } = await fixture("brief@vidxir.test");
       ai.generateJson.mockResolvedValue(scriptDraft());
 
       const { startScriptGeneration } = await import("@/lib/scripts/service");
@@ -374,7 +374,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("records the failure on the project instead of leaving it generating", async () => {
-      const { project, user } = await fixture("fail@tally.test");
+      const { project, user } = await fixture("fail@vidxir.test");
       const { ProviderError } = await import("@/lib/errors");
       ai.generateJson.mockRejectedValue(
         new ProviderError("Claude", "The model returned an unusable response."),
@@ -399,7 +399,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("surfaces a missing credential as a configuration state, not a crash", async () => {
-      const { project, user } = await fixture("nokey@tally.test");
+      const { project, user } = await fixture("nokey@vidxir.test");
       const { NotConfiguredError } = await import("@/lib/errors");
       ai.generateJson.mockRejectedValue(
         new NotConfiguredError("Claude", ["ANTHROPIC_API_KEY"]),
@@ -433,7 +433,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("passes a revision note through to the rewrite", async () => {
-      const { project, user } = await fixture("note@tally.test");
+      const { project, user } = await fixture("note@vidxir.test");
       ai.generateJson.mockResolvedValue(scriptDraft());
 
       const { startScriptGeneration } = await import("@/lib/scripts/service");
@@ -458,7 +458,7 @@ suite("scripts and metadata (integration)", () => {
 
   describe("scriptHandler", () => {
     it("takes the owning user from the job row, not from the payload", async () => {
-      const { project, user } = await fixture("handler@tally.test");
+      const { project, user } = await fixture("handler@vidxir.test");
       ai.generateJson.mockResolvedValue(scriptDraft());
 
       const { startScriptGeneration } = await import("@/lib/scripts/service");
@@ -485,8 +485,8 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("refuses a payload pointing at a different project than the job row", async () => {
-      const first = await fixture("payload-a@tally.test");
-      const second = await fixture("payload-b@tally.test");
+      const first = await fixture("payload-a@vidxir.test");
+      const second = await fixture("payload-b@vidxir.test");
       ai.generateJson.mockResolvedValue(scriptDraft());
 
       const { startScriptGeneration } = await import("@/lib/scripts/service");
@@ -513,7 +513,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("rejects a malformed payload without calling the model", async () => {
-      const { project, user } = await fixture("payload-bad@tally.test");
+      const { project, user } = await fixture("payload-bad@vidxir.test");
       const { startScriptGeneration } = await import("@/lib/scripts/service");
       const { scriptHandler } = await import("@/worker/handlers/script");
 
@@ -555,7 +555,7 @@ suite("scripts and metadata (integration)", () => {
     }
 
     it("appends v2 without destroying v1", async () => {
-      const { user, project, first } = await withVersion("v2@tally.test");
+      const { user, project, first } = await withVersion("v2@vidxir.test");
       const { startScriptGeneration, listScriptVersions } = await import(
         "@/lib/scripts/service"
       );
@@ -580,7 +580,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("reverts to an earlier version by moving the pointer", async () => {
-      const { user, project, first } = await withVersion("revert@tally.test");
+      const { user, project, first } = await withVersion("revert@vidxir.test");
       const { startScriptGeneration, activateScriptVersion, listScriptVersions } =
         await import("@/lib/scripts/service");
 
@@ -607,8 +607,8 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("refuses to activate another user's version", async () => {
-      const { first, project } = await withVersion("vowner@tally.test");
-      const intruder = await createUser({ email: "vintruder@tally.test" });
+      const { first, project } = await withVersion("vowner@vidxir.test");
+      const intruder = await createUser({ email: "vintruder@vidxir.test" });
       const { activateScriptVersion } = await import("@/lib/scripts/service");
 
       await expect(
@@ -617,8 +617,8 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("shows no versions to another user", async () => {
-      const { project } = await withVersion("vlist@tally.test");
-      const intruder = await createUser({ email: "vlistother@tally.test" });
+      const { project } = await withVersion("vlist@vidxir.test");
+      const intruder = await createUser({ email: "vlistother@vidxir.test" });
       const { listScriptVersions } = await import("@/lib/scripts/service");
 
       expect(await listScriptVersions(intruder.id, project.id)).toEqual([]);
@@ -656,7 +656,7 @@ suite("scripts and metadata (integration)", () => {
     }
 
     it("records the approval against the active version", async () => {
-      const { user, project, version } = await ready("approve@tally.test");
+      const { user, project, version } = await ready("approve@vidxir.test");
       const { approveScript } = await import("@/lib/scripts/service");
 
       const approved = await approveScript(user.id, project.id);
@@ -666,7 +666,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("leaves the project at SCRIPT_READY rather than starting the asset spend", async () => {
-      const { user, project } = await ready("approvestate@tally.test");
+      const { user, project } = await ready("approvestate@vidxir.test");
       const { approveScript } = await import("@/lib/scripts/service");
       const { getProject } = await import("@/lib/projects/service");
 
@@ -678,7 +678,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("clears the approval when a new version is generated", async () => {
-      const { user, project } = await ready("reapprove@tally.test");
+      const { user, project } = await ready("reapprove@vidxir.test");
       const { approveScript, startScriptGeneration } = await import(
         "@/lib/scripts/service"
       );
@@ -700,7 +700,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("clears the approval when an earlier version is reactivated", async () => {
-      const { user, project } = await ready("revertapprove@tally.test");
+      const { user, project } = await ready("revertapprove@vidxir.test");
       const {
         activateScriptVersion,
         approveScript,
@@ -732,7 +732,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("refuses while a rewrite is still running", async () => {
-      const { user, project } = await ready("approvebusy@tally.test");
+      const { user, project } = await ready("approvebusy@vidxir.test");
       const { approveScript, startScriptGeneration } = await import(
         "@/lib/scripts/service"
       );
@@ -751,7 +751,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("refuses when there is no script yet", async () => {
-      const { user, project } = await fixture("noscript@tally.test");
+      const { user, project } = await fixture("noscript@vidxir.test");
       const { approveScript } = await import("@/lib/scripts/service");
 
       await expect(approveScript(user.id, project.id)).rejects.toMatchObject({
@@ -760,8 +760,8 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("refuses another user's script", async () => {
-      const { project } = await ready("approveowner@tally.test");
-      const intruder = await createUser({ email: "approveintruder@tally.test" });
+      const { project } = await ready("approveowner@vidxir.test");
+      const intruder = await createUser({ email: "approveintruder@vidxir.test" });
       const { approveScript } = await import("@/lib/scripts/service");
 
       await expect(approveScript(intruder.id, project.id)).rejects.toMatchObject({
@@ -791,7 +791,7 @@ suite("scripts and metadata (integration)", () => {
     }
 
     it("generates from the active script and computes chapter offsets", async () => {
-      const { user, project } = await withScript("meta@tally.test");
+      const { user, project } = await withScript("meta@vidxir.test");
       ai.generateJson.mockResolvedValue(metadataDraft());
       const { generateMetadata } = await import("@/lib/metadata/service");
 
@@ -824,7 +824,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("prefers real scene timings over the word-count estimate", async () => {
-      const { user, project, version } = await withScript("metascenes@tally.test");
+      const { user, project, version } = await withScript("metascenes@vidxir.test");
       const { db } = await import("@/lib/db");
       const { scenes } = await import("@/lib/db/schema");
 
@@ -860,7 +860,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("refuses before there is a script to describe", async () => {
-      const { user, project } = await fixture("metanoscript@tally.test");
+      const { user, project } = await fixture("metanoscript@vidxir.test");
       const { generateMetadata } = await import("@/lib/metadata/service");
 
       // Metadata written before the script would describe a video that does not
@@ -872,7 +872,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("marks a manual edit and refuses to overwrite it", async () => {
-      const { user, project } = await withScript("metaedit@tally.test");
+      const { user, project } = await withScript("metaedit@vidxir.test");
       ai.generateJson.mockResolvedValue(metadataDraft());
       const { generateMetadata, updateMetadata } = await import(
         "@/lib/metadata/service"
@@ -904,7 +904,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("replaces an edited row only when regeneration is confirmed", async () => {
-      const { user, project } = await withScript("metaforce@tally.test");
+      const { user, project } = await withScript("metaforce@vidxir.test");
       ai.generateJson.mockResolvedValue(metadataDraft());
       const { generateMetadata, updateMetadata } = await import(
         "@/lib/metadata/service"
@@ -930,7 +930,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("enforces YouTube's tag budget on a hand-edited list", async () => {
-      const { user, project } = await withScript("metatags@tally.test");
+      const { user, project } = await withScript("metatags@vidxir.test");
       ai.generateJson.mockResolvedValue(metadataDraft());
       const { generateMetadata, updateMetadata } = await import(
         "@/lib/metadata/service"
@@ -951,7 +951,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("rejects a title over YouTube's limit", async () => {
-      const { user, project } = await withScript("metatitle@tally.test");
+      const { user, project } = await withScript("metatitle@vidxir.test");
       ai.generateJson.mockResolvedValue(metadataDraft());
       const { generateMetadata, getMetadata, updateMetadata } = await import(
         "@/lib/metadata/service"
@@ -975,7 +975,7 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("refuses to edit metadata that does not exist yet", async () => {
-      const { user, project } = await withScript("metanoedit@tally.test");
+      const { user, project } = await withScript("metanoedit@vidxir.test");
       const { updateMetadata } = await import("@/lib/metadata/service");
 
       await expect(
@@ -988,14 +988,14 @@ suite("scripts and metadata (integration)", () => {
     });
 
     it("refuses another user's metadata", async () => {
-      const { user, project } = await withScript("metaowner@tally.test");
+      const { user, project } = await withScript("metaowner@vidxir.test");
       ai.generateJson.mockResolvedValue(metadataDraft());
       const { generateMetadata, getMetadata, updateMetadata } = await import(
         "@/lib/metadata/service"
       );
 
       await generateMetadata({ userId: user.id, projectId: project.id });
-      const intruder = await createUser({ email: "metaintruder@tally.test" });
+      const intruder = await createUser({ email: "metaintruder@vidxir.test" });
 
       expect(await getMetadata(intruder.id, project.id)).toBeNull();
       await expect(

@@ -16,7 +16,7 @@
  *    and nothing more.
  *
  * The "nothing more" is the part §16 is emphatic about: optional providers must
- * not make the application report unhealthy. Tally works perfectly well with no
+ * not make the application report unhealthy. Vidxir AI works perfectly well with no
  * ElevenLabs key — the Voiceover step reports `not_configured`, which is a
  * designed product state, not an outage. Draining traffic for it would take the
  * whole app down to protect a feature the operator chose not to enable. So the

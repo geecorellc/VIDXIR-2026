@@ -26,7 +26,7 @@ import {
 import { Btn } from "@/components/ui/Btn";
 import { ChoiceGrid, TogglePills } from "@/components/ui/ChoiceGrid";
 import { Field, SelectField, TextAreaField } from "@/components/ui/Field";
-import { TallyLogo } from "@/components/ui/TallyLogo";
+import { VidxirLogo } from "@/components/ui/VidxirLogo";
 import { color, display, font, radius } from "@/lib/design/tokens";
 import {
   AUTOMATION_LEVELS,
@@ -239,7 +239,7 @@ export function OnboardingWizard({
 
   return (
     <div
-      className="tally-scroll"
+      className="vidxir-scroll"
       style={{
         minHeight: "100vh",
         padding: "44px 20px 70px",
@@ -250,7 +250,7 @@ export function OnboardingWizard({
 
       <div style={{ position: "relative", maxWidth: 640, margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 30 }}>
-          <TallyLogo size={19} />
+          <VidxirLogo size={19} />
         </div>
 
         {/* Step rail */}
@@ -330,7 +330,7 @@ export function OnboardingWizard({
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Alex Rivera"
                   autoComplete="name"
-                  hint="Used on your dashboard and in Tally's emails to you."
+                  hint="Used on your dashboard and in Vidxir AI's emails to you."
                 />
                 <p
                   style={{
@@ -354,7 +354,7 @@ export function OnboardingWizard({
                   value={channelUrl}
                   onChange={(e) => setChannelUrl(e.target.value)}
                   placeholder="youtube.com/@yourchannel"
-                  hint="Optional for now. You'll connect it securely with Google after setup — Tally never asks for your YouTube password."
+                  hint="Optional for now. You'll connect it securely with Google after setup — Vidxir AI never asks for your YouTube password."
                 />
                 <ChoiceGrid
                   legend="Niche"
@@ -383,7 +383,7 @@ export function OnboardingWizard({
                   rows={4}
                   maxLength={1000}
                   placeholder="Solo founders in their late twenties who want to ship faster without hiring."
-                  hint="The more specific this is, the better Tally's research and scripts get."
+                  hint="The more specific this is, the better Vidxir AI's research and scripts get."
                 />
                 <SelectField
                   label="Content language"
@@ -476,7 +476,7 @@ export function OnboardingWizard({
                     <strong style={{ color: color.textBright }}>
                       Auto-publishing is a Studio feature.
                     </strong>{" "}
-                    Tally will build every video on this schedule; publishing
+                    Vidxir AI will build every video on this schedule; publishing
                     without approval unlocks when you upgrade, and you can turn it
                     on per channel.
                   </div>

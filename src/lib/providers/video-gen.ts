@@ -1,9 +1,9 @@
 /**
- * The generation provider registry — Tally's branded models, and the vendor APIs
+ * The generation provider registry — Vidxir AI's branded models, and the vendor APIs
  * underneath them (Phase 12 §2, §3, §4, §5, §14, §16).
  *
  * Phase 11 reached six vendors through one aggregator (fal.ai) and named them in
- * the picker. §2 removes that: the four models a customer chooses from are Tally's
+ * the picker. §2 removes that: the four models a customer chooses from are Vidxir AI's
  * own, each reaching **one vendor's first-party API directly**, and the vendor is
  * never part of the customer-facing name.
  *
@@ -25,7 +25,7 @@
  *     list cannot be selected by any request, however the request is manipulated.
  *  2. **No fabricated APIs** (§19, "do not fabricate provider capabilities"). Every
  *     adapter below submits to an endpoint its vendor documents, in that vendor's
- *     own request shape. Where a vendor has a capability Tally has not integrated,
+ *     own request shape. Where a vendor has a capability Vidxir AI has not integrated,
  *     the capability matrix says `false` and says why in a comment — it does not
  *     claim the capability and fail at runtime.
  *  3. **Capabilities are declared, not assumed** (§4, §16). Each model carries the
@@ -112,7 +112,7 @@ export type VideoGenState = "ready" | "mock" | "not_configured" | "disabled";
  * What a model can actually do (§16).
  *
  * The centralised capability matrix. Every field is stated per model from that
- * vendor's published documentation, and a capability Tally has not implemented is
+ * vendor's published documentation, and a capability Vidxir AI has not implemented is
  * `false` even when the vendor offers it — a matrix that promises image-to-video
  * because the vendor supports it, while no adapter here sends a first frame, is
  * worse than one that says `false`.
@@ -213,7 +213,7 @@ export interface VideoGenProviderStatus {
  * A stored reference still, offered to a model that can constrain generation with one.
  *
  * §6's other half. Reaches two adapters today — Tal 3.1 and Tal 3.0, whose vendors each
- * document a reference-image input on the model Tally configures by default. Every other
+ * document a reference-image input on the model Vidxir AI configures by default. Every other
  * catalogued model gets the fallback instead: detailed textual prompting, which is what
  * the continuity engine has always done and still does whenever a still cannot be used.
  *
@@ -800,7 +800,7 @@ const minimax: GenerationProvider = {
         resolution: quality === "1080p" ? "1080P" : "720P",
         // A content-policy refusal is a correct outcome surfaced as a permanent
         // error. Disabling the check would move responsibility for a policy
-        // violation onto Tally's account.
+        // violation onto Vidxir AI's account.
         prompt_optimizer: true,
       },
     });
@@ -1033,7 +1033,7 @@ const SEEDANCE_MAX_REFERENCE_BYTES = 22 * 1_048_576;
 /**
  * Reference images this adapter will send in one request.
  *
- * The vendor documents 1–9 for the Seedance 2.0 series. Tally's own ceiling is lower and
+ * The vendor documents 1–9 for the Seedance 2.0 series. Vidxir AI's own ceiling is lower and
  * deliberately so: `referencesForScene` emits characters, then the environment, then
  * props, and the whole set is base64-inlined into a single body the vendor caps at 64 MB.
  * Four covers a cast of three in their location, which is what a scene prompt describes;
@@ -1045,7 +1045,7 @@ const SEEDANCE_MAX_REFERENCE_IMAGES = 4;
  * Image types the reference input accepts.
  *
  * The vendor lists jpeg, png, webp, bmp, tiff, gif and (on this family) heic/heif. Only
- * the three Tally's own image stages actually produce are listed: a still arrives here
+ * the three Vidxir AI's own image stages actually produce are listed: a still arrives here
  * from `assets.mimeType` after being drawn by Seedream or Imagen, and accepting formats
  * nothing in this repository writes would be untested breadth.
  */
@@ -1091,7 +1091,7 @@ interface ArkReferenceImage {
  *
  * Base64 data URIs rather than links, which the vendor documents as an accepted form of
  * `image_url.url` alongside a public URL and an uploaded asset id. That choice is what
- * makes this work at all here: Tally's stills live in a private bucket reached through
+ * makes this work at all here: Vidxir AI's stills live in a private bucket reached through
  * `getObjectBuffer`, MinIO is not addressable from the vendor's network, and the
  * alternative would be either publishing the bucket or handing a third party a signed
  * URL to object storage — a credential in a request body by another name (§21).
@@ -1176,10 +1176,10 @@ const TAL_3: VideoGenModel = {
      * False despite the vendor generating audio on this family.
      *
      * `generate_audio` defaults to *true* at the vendor and the adapter sends it off
-     * explicitly. Tally composes narration, music and captions itself, so a vendor
+     * explicitly. Vidxir AI composes narration, music and captions itself, so a vendor
      * soundtrack arriving inside the clip would fight the voice track the renderer lays
      * over it — and this flag is what the rest of the pipeline reads to decide whether a
-     * clip already carries sound. Declaring it true would silence Tally's own narration.
+     * clip already carries sound. Declaring it true would silence Vidxir AI's own narration.
      */
     audio: false,
     /**
@@ -1203,7 +1203,7 @@ const TAL_3: VideoGenModel = {
      *
      * A deployment that pins the fast tier is choosing to lose 1080p. That is a
      * misconfiguration this matrix cannot express — capabilities describe the model
-     * Tally catalogues, not one environment's env file — so it surfaces as the vendor
+     * Vidxir AI catalogues, not one environment's env file — so it surfaces as the vendor
      * refusing the resolution rather than as a silent downgrade, which is the same
      * failure mode as pinning a version that takes no reference images.
      */
@@ -1333,7 +1333,7 @@ const seedance: GenerationProvider = {
         /**
          * Off explicitly, because the vendor's default is on.
          *
-         * Tally lays its own narration, music and captions over the clip. A vendor
+         * Vidxir AI lays its own narration, music and captions over the clip. A vendor
          * soundtrack inside the video would play underneath the voice track with no way
          * to separate them again, and `TAL_3.capabilities.audio` tells the rest of the
          * pipeline this clip is silent.
@@ -1467,7 +1467,7 @@ function arkImageSize(format: VideoFormat, quality: VideoQuality): string {
 }
 
 /**
- * Tally's resolution vocabulary in the vendor's tokens.
+ * Vidxir AI's resolution vocabulary in the vendor's tokens.
  *
  * Three tiers, matching `TAL_3.capabilities.qualities`. No 2K branch: Ark does not
  * document one for this family, and `assertQuality` refuses the tier before this is
@@ -1532,7 +1532,7 @@ async function awaitArkTask(
 // ---------------------------------------------------------------------------
 
 /**
- * §15: Tally already had a Gemini integration for Veo, and this is it — adapted to
+ * §15: Vidxir AI already had a Gemini integration for Veo, and this is it — adapted to
  * the branded model rather than duplicated. The image half (Imagen) is added to the
  * *same* provider, sharing the same `GEMINI_API_KEY`, which is what keeps §15's "do
  * not create a duplicate Gemini integration" true.
@@ -1590,10 +1590,10 @@ const VEO_REFERENCE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg"] as con
 /**
  * Largest still this adapter will inline, before base64.
  *
- * **Tally's own guard, not a quoted vendor limit.** The reference-image documentation
+ * **Vidxir AI's own guard, not a quoted vendor limit.** The reference-image documentation
  * does not state a per-image size, and inventing a number and attributing it to the
  * vendor is exactly what §19 forbids — so this is chosen from what is actually known:
- * base64 inflates bytes by a third, three stills share one request, and Tally's own
+ * base64 inflates bytes by a third, three stills share one request, and Vidxir AI's own
  * stills are 1080p-to-2K PNGs that land far below this. A still much larger than this
  * did not come from `executeReferenceImages`, and inlining three of them would build a
  * multi-megabyte body to be rejected after the scene's credits were committed.
@@ -1607,7 +1607,7 @@ const VEO_MAX_REFERENCE_BYTES = 6 * 1_048_576;
  *
  * `GEMINI_VEO_MODEL` is operator-configurable and the vendor gates this feature on the
  * model version: Veo 3.1 accepts reference images, Veo 3.1 Lite, Veo 3 and Veo 2 reject
- * the field. Tally's default (`veo-3.1-generate-preview`) qualifies, but a deployment
+ * the field. Vidxir AI's default (`veo-3.1-generate-preview`) qualifies, but a deployment
  * that pinned an older version must not have its requests rejected wholesale for
  * carrying a field that version has never heard of.
  *
@@ -1632,7 +1632,7 @@ interface VeoReferenceImage {
  *
  * The vendor takes them inline, base64, *inside the instance* alongside the prompt —
  * not in `parameters`, and not as a URL the vendor fetches. Sending bytes rather than a
- * link is also the only option available here: Tally's stills live in a private bucket,
+ * link is also the only option available here: Vidxir AI's stills live in a private bucket,
  * and the alternative would be handing Google a signed URL to storage.
  *
  * Deliberately not `imageToVideo`. The instance-level `image` field is a *first frame*
@@ -1676,7 +1676,7 @@ const TAL_3_1: VideoGenModel = {
   description: "Premium generation quality",
   bestFor: "Hero scenes, premium productions and highest visual quality",
   strengths: [
-    "Highest visual fidelity available in Tally",
+    "Highest visual fidelity available in Vidxir AI",
     "Generates a native audio track with the clip",
     "Strongest prompt adherence for complex direction",
     "Also generates 2K reference stills for the continuity engine",
@@ -1722,7 +1722,7 @@ const veo: GenerationProvider = {
   hint: "Create a key at https://aistudio.google.com/apikey",
   serviceNote:
     "Runs on the Google AI (Gemini) API and needs its own API key. The " +
-    "GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET pair Tally already uses is an OAuth " +
+    "GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET pair Vidxir AI already uses is an OAuth " +
     "client for acting as a user's YouTube channel, granted YouTube scopes at " +
     "consent; it cannot authenticate Veo and is not reused here. No second Google " +
     "authentication path is introduced — this is a different credential for a " +
@@ -1826,8 +1826,8 @@ const veo: GenerationProvider = {
            * What that does and does not concede is worth being exact about. It permits
            * an adult figure in the frame, which a character reference for a story bible
            * with human characters obviously requires. It does not introduce a real
-           * likeness: every still Tally sends was drawn by `executeReferenceImages`
-           * from Tally's own story bible, so the subject being preserved is a generated
+           * likeness: every still Vidxir AI sends was drawn by `executeReferenceImages`
+           * from Vidxir AI's own story bible, so the subject being preserved is a generated
            * character, and the scene director still never asks for a named person. The
            * text-to-video path — every other scene, and every scene on every other
            * model — is untouched and still sends `dont_allow`.
@@ -2020,8 +2020,8 @@ interface RunwayTask {
 const RUNWAY_MODEL: VideoGenModel = {
   id: "runway/gen4-turbo",
   provider: "runway",
-  label: "Tally AI Video (legacy)",
-  description: "A model selected before Tally's branded models existed.",
+  label: "Vidxir AI Video (legacy)",
+  description: "A model selected before Vidxir AI's branded models existed.",
   bestFor: "Existing projects only",
   strengths: [],
   limitations: [
@@ -2050,7 +2050,7 @@ const runway: GenerationProvider = {
   requiredEnvVars: ["RUNWAY_API_KEY"],
   hint: "Create a key at https://dev.runwayml.com",
   serviceNote:
-    "Retained for projects that selected it before Tally's branded models " +
+    "Retained for projects that selected it before Vidxir AI's branded models " +
     "existed. Runway's role in the stock/b-roll stage is separate and unaffected.",
   models: [RUNWAY_MODEL],
   missingEnvVars() {
@@ -2112,8 +2112,8 @@ const runway: GenerationProvider = {
       height: pixels.height,
       durationMs: 5_000,
       providerAssetId: `runway:${videoTask.id}`,
-      license: "Generated by Runway under the Tally account's Runway licence",
-      attribution: "Generated with Tally AI Video",
+      license: "Generated by Runway under the Vidxir AI account's Runway licence",
+      attribution: "Generated with Vidxir AI Video",
       matchedOn: prompt.slice(0, 120),
     };
   },
@@ -2195,7 +2195,7 @@ const MOCK_MODEL: VideoGenModel = {
 /**
  * A real PNG at the requested frame, one colour per scene.
  *
- * Only reachable when `TALLY_USE_MOCK_PROVIDERS` is on, which `env.ts` refuses in
+ * Only reachable when `VIDXIR_USE_MOCK_PROVIDERS` is on, which `env.ts` refuses in
  * production. It is honest about what it is: `kind` ends up `generated_image`, the
  * licence says "not for publication", and the model is labelled a placeholder.
  * Nothing here claims a video was generated when it was not.
@@ -2204,7 +2204,7 @@ const mock: GenerationProvider = {
   id: "mock",
   label: "Development placeholder",
   requiredEnvVars: [],
-  hint: "Active because TALLY_USE_MOCK_PROVIDERS=true. Never available in production.",
+  hint: "Active because VIDXIR_USE_MOCK_PROVIDERS=true. Never available in production.",
   serviceNote:
     "Produces a solid-colour still, not a video. Development only, and refused " +
     "in production by the environment validator.",
@@ -2279,7 +2279,7 @@ const mock: GenerationProvider = {
  * id would turn a saved project into a failed render (§17).
  *
  * Each old id maps to the branded tier backed by the *same vendor* where one exists,
- * and to the nearest tier otherwise. Kling and Hunyuan have no direct Tally
+ * and to the nearest tier otherwise. Kling and Hunyuan have no direct Vidxir AI
  * credential, so they map to the cinematic tier; that is a visible change of model
  * for those projects, and the alternative — failing the render — is worse.
  */
@@ -2512,7 +2512,7 @@ export function videoGenStatuses(): VideoGenProviderStatus[] {
 }
 
 /**
- * Every provider Tally knows how to call, enabled or not.
+ * Every provider Vidxir AI knows how to call, enabled or not.
  *
  * The operator-facing view: a provider that is implemented but switched off shows as
  * `disabled` rather than vanishing, so "we do not offer this" and "this is broken"
@@ -2593,7 +2593,7 @@ export function publicModels(): PublicModel[] {
  *
  * What the customer-facing picker needs to distinguish "this deployment does not
  * offer AI video" from "AI video is misconfigured — contact support", without
- * learning which company Tally buys generation from. The variable-naming detail an
+ * learning which company Vidxir AI buys generation from. The variable-naming detail an
  * operator needs stays in `allVideoGenStatuses()`, which only operator surfaces and
  * the verification scripts read.
  */
@@ -2906,10 +2906,10 @@ function requireKey(
 
 /** Licence text for a branded generation. */
 function brandedLicense(label: string): string {
-  return `Generated by ${label} under the Tally account's generation terms`;
+  return `Generated by ${label} under the Vidxir AI account's generation terms`;
 }
 
-/** Attribution text. Names the Tally model, never the vendor behind it (§3). */
+/** Attribution text. Names the Vidxir AI model, never the vendor behind it (§3). */
 function brandedAttribution(label: string): string {
   return `Generated with ${label}`;
 }

@@ -13,7 +13,7 @@
  * which projects exist.
  *
  * The signed URLs are the one thing here that is not simply the document. The preview
- * plays real Tally assets out of private storage, so the browser needs short-lived read
+ * plays real Vidxir AI assets out of private storage, so the browser needs short-lived read
  * URLs — and it must never be given a key it can turn into one itself. They are minted
  * here, keyed by storage key, and only for keys the *stored document* references; a key
  * the client sends is never signed, because `saveEditDocument` rewrites every key from

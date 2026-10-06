@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
         audienceFitScore: ideas.audienceFitScore,
         velocityScore: ideas.velocityScore,
         freshnessScore: ideas.freshnessScore,
-        tallyScore: ideas.tallyScore,
+        vidxirScore: ideas.vidxirScore,
         scoreBreakdown: ideas.scoreBreakdown,
         state: ideas.state,
         generatedBy: ideas.generatedBy,
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest) {
       })
       .from(ideas)
       .where(and(...predicates))
-      .orderBy(desc(ideas.tallyScore), desc(ideas.createdAt))
+      .orderBy(desc(ideas.vidxirScore), desc(ideas.createdAt))
       .limit(query.limit);
 
     // Sources for the whole page in one query rather than one per idea. The

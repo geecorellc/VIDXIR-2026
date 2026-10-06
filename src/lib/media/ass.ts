@@ -11,7 +11,7 @@
  *    containing a comma or an apostrophe. Burning arbitrary user text through it is a
  *    quoting bug waiting for the first title with a colon in it.
  *  - `subtitles` reads a **file**, so the text never touches the filter graph, and it
- *    resolves a font by *name* through fontconfig. That is the path Tally's captions
+ *    resolves a font by *name* through fontconfig. That is the path Vidxir AI's captions
  *    already take and the one the bundled ffmpeg is built for (libass, libfreetype,
  *    fontconfig and libfribidi are all present in the `ffmpeg-static` build).
  *

@@ -22,7 +22,7 @@ import { getResearchData } from "@/lib/dashboard/research";
 import { getStageContext } from "@/lib/dashboard/stage";
 import { capabilityStatus } from "@/lib/providers/config";
 
-export const metadata = { title: "Research — Tally" };
+export const metadata = { title: "Research — Vidxir AI" };
 
 export default async function ResearchPage({
   searchParams,
@@ -51,7 +51,7 @@ export default async function ResearchPage({
         <EmptyCTA
           icon={<Youtube size={22} />}
           title="Connect a channel first"
-          body="Research is per-channel: Tally reads your niche, your own past performance and your competitors before it proposes anything. Connect a channel to give it something to work from."
+          body="Research is per-channel: Vidxir AI reads your niche, your own past performance and your competitors before it proposes anything. Connect a channel to give it something to work from."
           action={<ConnectChannelCard variant="button" />}
         />
       </div>

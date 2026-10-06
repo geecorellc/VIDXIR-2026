@@ -29,7 +29,7 @@ const original = {
  * `node:fs` would be testing the mock's opinion of what a font file is rather than
  * the function's.
  */
-const dir = mkdtempSync(join(tmpdir(), "tally-fonts-"));
+const dir = mkdtempSync(join(tmpdir(), "vidxir-fonts-"));
 const fakeHeadline = join(dir, "Headline.ttf");
 const fakeBody = join(dir, "Body.ttf");
 writeFileSync(fakeHeadline, "not really a font, but it is a file");

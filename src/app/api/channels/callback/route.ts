@@ -114,7 +114,7 @@ export async function GET(request: NextRequest) {
 
     if (!channel || !channel.channelId) {
       // A Google account without a YouTube channel. Real and common; the user
-      // has to create one before Tally can do anything.
+      // has to create one before Vidxir AI can do anything.
       log.info("authorised account has no youtube channel", { userId });
       return finish(request, intent.returnTo, "no_channel");
     }

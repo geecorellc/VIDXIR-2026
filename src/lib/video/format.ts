@@ -25,12 +25,12 @@
  *  3. The timeline and the renderer size the canvas.
  *
  * `aspectRatioLabel` exists because providers disagree on how to spell a ratio:
- * Runway wants pixel dimensions (`1920:1080`), the four backends behind Tally's own
+ * Runway wants pixel dimensions (`1920:1080`), the four backends behind Vidxir AI's own
  * models want the reduced form (`16:9`). Both are derived here so no provider module
  * invents its own.
  */
 
-/** The formats Tally can render. */
+/** The formats Vidxir AI can render. */
 export type VideoFormat = "landscape" | "portrait" | "square";
 
 export const VIDEO_FORMATS = ["landscape", "portrait", "square"] as const;

@@ -44,8 +44,8 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   APP_URL: z.string().url().default("http://localhost:3000"),
 
-  TALLY_USE_MOCK_PROVIDERS: bool.default("false"),
-  TALLY_BLOCK_REAL_PUBLISH: bool.default("false"),
+  VIDXIR_USE_MOCK_PROVIDERS: bool.default("false"),
+  VIDXIR_BLOCK_REAL_PUBLISH: bool.default("false"),
   /**
    * The continuity layer (story bible, continuity-aware prompts, continuity QC).
    *
@@ -54,7 +54,7 @@ const schema = z.object({
    * what it generated before the layer existed. Unlike the two flags above this one
    * is allowed in production — it gates a feature rather than a test double.
    */
-  TALLY_CONTINUITY_ENGINE_ENABLED: bool.default("false"),
+  VIDXIR_CONTINUITY_ENGINE_ENABLED: bool.default("false"),
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
@@ -72,13 +72,13 @@ const schema = z.object({
     .default(30_000),
 
   REDIS_URL: z.string().min(1, "REDIS_URL is required"),
-  QUEUE_PREFIX: z.string().default("tally"),
+  QUEUE_PREFIX: z.string().default("vidxir"),
 
   ENCRYPTION_KEY: hex32,
   SESSION_SECRET: hex32,
 
   EMAIL_PROVIDER: z.enum(["console", "resend"]).default("console"),
-  EMAIL_FROM: z.string().default("Tally <no-reply@tally.app>"),
+  EMAIL_FROM: z.string().default("Vidxir AI <no-reply@vidxir.com>"),
   RESEND_API_KEY: z.string().optional(),
 
   /**
@@ -90,7 +90,7 @@ const schema = z.object({
    * AWS. Both run the same models; nothing else in the app changes.
    *
    * Not `mock`: there is no fake AI transport (§42). Mock selection stays with
-   * TALLY_USE_MOCK_PROVIDERS, which the capability registry reads.
+   * VIDXIR_USE_MOCK_PROVIDERS, which the capability registry reads.
    */
   AI_PROVIDER: z.enum(["anthropic", "bedrock"]).default("anthropic"),
 
@@ -112,7 +112,7 @@ const schema = z.object({
    *
    * There is deliberately no `BEDROCK_ACCESS_KEY_ID` or secret here.
    * Credentials come from the standard AWS provider chain, so they can live in
-   * an instance role, a container role or an SSO cache and never enter Tally's
+   * an instance role, a container role or an SSO cache and never enter Vidxir AI's
    * configuration (§33). Note this is distinct from `S3_*` and
    * `REMOTION_AWS_REGION`: those are storage and render, and an operator may
    * legitimately run them in a different account or region from inference.
@@ -141,7 +141,7 @@ const schema = z.object({
    * AI video-generation providers an operator has enabled (Phase 11 §10).
    *
    * A comma-separated allow-list of provider ids. Since Phase 12 the ids are the
-   * four direct vendor APIs behind Tally's branded models — `qwen`, `minimax`,
+   * four direct vendor APIs behind Vidxir AI's branded models — `qwen`, `minimax`,
    * `seedance`, `veo` — plus the pre-existing `runway`. Empty is the default and
    * means AI video is unavailable and every project uses stock footage, which is
    * the pre-Phase-11 behaviour.
@@ -401,12 +401,12 @@ function load(): Env {
   const env = parsed.data;
 
   // §40: mock providers and the publish guard exist for development only.
-  // Allowing them in production would let Tally report success for work it
+  // Allowing them in production would let Vidxir AI report success for work it
   // never did — the exact failure mode §42 prohibits.
   if (env.NODE_ENV === "production") {
-    if (env.TALLY_USE_MOCK_PROVIDERS) {
+    if (env.VIDXIR_USE_MOCK_PROVIDERS) {
       throw new Error(
-        "TALLY_USE_MOCK_PROVIDERS must be false in production. " +
+        "VIDXIR_USE_MOCK_PROVIDERS must be false in production. " +
           "Production must use real providers.",
       );
     }
@@ -486,11 +486,11 @@ export function resetEnvCache(): void {
 /**
  * The AWS region Bedrock should be called in, or undefined.
  *
- * `BEDROCK_REGION` is Tally's own knob and wins. `AWS_REGION` /
+ * `BEDROCK_REGION` is Vidxir AI's own knob and wins. `AWS_REGION` /
  * `AWS_DEFAULT_REGION` are the standard AWS variables the credential chain
  * already honours, and a deployment that sets them should not have to repeat
  * itself. Those two are read from `process.env` rather than the typed schema
- * because they are the ambient AWS environment, not Tally configuration.
+ * because they are the ambient AWS environment, not Vidxir AI configuration.
  *
  * Lives here rather than in `providers/ai` so the capability registry can resolve
  * a region without importing the Bedrock SDK.
@@ -507,7 +507,7 @@ export function bedrockRegion(): string | undefined {
 /** True when mock providers are active (development/test only). */
 export function usingMockProviders(): boolean {
   const e = env();
-  return e.NODE_ENV !== "production" && e.TALLY_USE_MOCK_PROVIDERS;
+  return e.NODE_ENV !== "production" && e.VIDXIR_USE_MOCK_PROVIDERS;
 }
 
 /**
@@ -518,13 +518,13 @@ export function usingMockProviders(): boolean {
  * product feature an operator may legitimately want on.
  */
 export function continuityEnabled(): boolean {
-  return env().TALLY_CONTINUITY_ENGINE_ENABLED;
+  return env().VIDXIR_CONTINUITY_ENGINE_ENABLED;
 }
 
 /** True when any real YouTube publish/upload call must be refused (§40). */
 export function realPublishBlocked(): boolean {
   const e = env();
-  return e.NODE_ENV !== "production" && e.TALLY_BLOCK_REAL_PUBLISH;
+  return e.NODE_ENV !== "production" && e.VIDXIR_BLOCK_REAL_PUBLISH;
 }
 
 export function isProduction(): boolean {

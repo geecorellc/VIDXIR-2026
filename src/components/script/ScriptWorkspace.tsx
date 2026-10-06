@@ -127,7 +127,7 @@ export function ScriptWorkspace({
           <Loader2
             size={20}
             color={color.accent}
-            className="tally-spin"
+            className="vidxir-spin"
             style={{ marginBottom: 12 }}
             aria-hidden="true"
           />
@@ -170,7 +170,7 @@ export function ScriptWorkspace({
       {!generating && script && (
         <>
           <div
-            className="tally-script-grid"
+            className="vidxir-script-grid"
             style={{
               display: "grid",
               gridTemplateColumns: "minmax(0, 1.3fr) minmax(260px, 1fr)",
@@ -388,7 +388,7 @@ export function ScriptWorkspace({
 
           <style>{`
             @media (max-width: 900px) {
-              .tally-script-grid { grid-template-columns: 1fr !important; }
+              .vidxir-script-grid { grid-template-columns: 1fr !important; }
             }
           `}</style>
         </>

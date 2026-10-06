@@ -47,7 +47,7 @@
  *
  * ## Cost and safety
  *
- * **Nothing here calls a provider or Stripe.** `TALLY_USE_MOCK_PROVIDERS=true` is set at
+ * **Nothing here calls a provider or Stripe.** `VIDXIR_USE_MOCK_PROVIDERS=true` is set at
  * module scope before anything reads the environment, and step 1 asserts it rather than
  * assuming it. No generation is performed at all: this script charges for generations
  * that never happen, which is precisely what makes it free — the credit service takes no
@@ -73,16 +73,16 @@ import type { PlanTier } from "@/lib/plans";
 /**
  * Set before anything can read it.
  *
- * `.env.local` has `TALLY_USE_MOCK_PROVIDERS=false`, which is the right default for a
+ * `.env.local` has `VIDXIR_USE_MOCK_PROVIDERS=false`, which is the right default for a
  * developer's web app and the wrong one here. `process.loadEnvFile` runs from the
  * hoisted `load-env` import above and does not overwrite variables already present —
  * but it ran *first*, so this assignment is what wins, and no `env()` call has happened
  * yet.
  */
-process.env["TALLY_USE_MOCK_PROVIDERS"] = "true";
+process.env["VIDXIR_USE_MOCK_PROVIDERS"] = "true";
 
-const FIXTURE_EMAIL = "credits-verify@tally.local";
-const OTHER_EMAIL = "credits-verify-other@tally.local";
+const FIXTURE_EMAIL = "credits-verify@vidxir.local";
+const OTHER_EMAIL = "credits-verify-other@vidxir.local";
 
 /** The model the fixture charges against. Priced at 1 credit, so the sums are readable. */
 const MOCK_MODEL = "mock/placeholder";
@@ -114,7 +114,7 @@ const VENDOR_NAMES =
   /veo|gemini|minimax|wan|seedance|dashscope|fal\.ai|runway|bedrock|stripe/i;
 
 async function main(): Promise<void> {
-  console.log("\nTally credit system verification\n");
+  console.log("\nVidxir AI credit system verification\n");
 
   // ---- 1. Environment and the live schema -------------------------------
   const { env, usingMockProviders } = await import("@/lib/env");

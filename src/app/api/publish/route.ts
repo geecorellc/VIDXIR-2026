@@ -2,7 +2,7 @@
  * POST /api/publish — upload the finished video to YouTube (§18, §42).
  *
  * Returns once the job is queued. Nothing has reached YouTube when this responds,
- * and the Publish panel says as much ("Tally will mark this Published only once
+ * and the Publish panel says as much ("Vidxir AI will mark this Published only once
  * YouTube confirms the upload") while it polls the project's own status.
  *
  * Every prerequisite is checked here as well as in the worker, for the reason

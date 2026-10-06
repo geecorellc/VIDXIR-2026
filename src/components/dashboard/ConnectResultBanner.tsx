@@ -40,7 +40,7 @@ const MESSAGES: Record<ConnectResultCode, Message> = {
   connected: {
     tone: "success",
     title: "Channel connected",
-    body: "Tally can now read your channel and publish on your behalf. Statistics have been fetched.",
+    body: "Vidxir AI can now read your channel and publish on your behalf. Statistics have been fetched.",
   },
   reconnected: {
     tone: "success",
@@ -51,7 +51,7 @@ const MESSAGES: Record<ConnectResultCode, Message> = {
     tone: "warning",
     title: "Connected, but not everything was granted",
     body:
-      "The channel is saved, but Tally was not given the permissions it needs to upload. " +
+      "The channel is saved, but Vidxir AI was not given the permissions it needs to upload. " +
       "Reconnect and accept all the requested permissions before publishing.",
   },
   denied: {
@@ -63,7 +63,7 @@ const MESSAGES: Record<ConnectResultCode, Message> = {
     tone: "warning",
     title: "That Google account has no YouTube channel",
     body:
-      "Create a channel on YouTube first, then connect it here. Tally cannot publish to an " +
+      "Create a channel on YouTube first, then connect it here. Vidxir AI cannot publish to an " +
       "account without one.",
   },
   invalid_state: {
@@ -83,7 +83,7 @@ const MESSAGES: Record<ConnectResultCode, Message> = {
     title: "YouTube is not configured on this server",
     body:
       "Connecting needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET. Until they are set, the " +
-      "OAuth flow is unavailable — Tally will not pretend a channel is linked.",
+      "OAuth flow is unavailable — Vidxir AI will not pretend a channel is linked.",
   },
   plan_limit: {
     tone: "warning",

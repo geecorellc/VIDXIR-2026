@@ -18,7 +18,7 @@ import { getSession } from "@/lib/auth/session";
 import { getStageContext } from "@/lib/dashboard/stage";
 import { displayTitle } from "@/lib/projects/display-title";
 
-export const metadata = { title: "Edit video — Tally" };
+export const metadata = { title: "Edit video — Vidxir AI" };
 
 export default async function VideoEditPage({
   searchParams,
@@ -38,7 +38,7 @@ export default async function VideoEditPage({
         <SectionHeader
           eyebrow="Stage 03"
           title="Edit the video"
-          sub="Cut, trim and re-time the video Tally generated."
+          sub="Cut, trim and re-time the video Vidxir AI generated."
         />
         <EmptyCTA
           title="No video to edit"

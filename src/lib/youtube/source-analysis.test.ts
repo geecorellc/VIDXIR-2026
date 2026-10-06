@@ -5,7 +5,7 @@
  * about restraint as much as about parsing:
  *
  *  - **Metadata is retrieved and derived correctly** (§23 case 4). Title, channel,
- *    category name, tags, duration, statistics, plus the two figures Tally derives
+ *    category name, tags, duration, statistics, plus the two figures Vidxir AI derives
  *    rather than reads — views per hour and engagement rate — and the topic/niche
  *    seed §6 researches from.
  *  - **A missing transcript is a stated reason, never a promise** (§23 case 5).
@@ -16,7 +16,7 @@
  *    disabled reports `null`, not 0, and every absent field is *named* in
  *    `missingFields` so the UI can say the seed is thin instead of rendering
  *    blanks that look like a bug.
- *  - **Every failure is a named state with a message Tally wrote** (§21, §23 cases
+ *  - **Every failure is a named state with a message Vidxir AI wrote** (§21, §23 cases
  *    19–20). Not configured, quota, refused, unreachable and not-found are
  *    distinguished, retryable is set only where retrying could work, and no
  *    provider message, URL, project id or stack reaches the returned object.
@@ -262,7 +262,7 @@ describe("analyzeSource — transcript handling (§23 case 5, §22)", () => {
     state.detail = fullDetail({ captionsAvailable: true });
     const result = await analyzeSource(URL_, { now: NOW });
     if (result.state !== "ok") throw new Error(result.message);
-    // Not "available". The captions existing and Tally being able to read them
+    // Not "available". The captions existing and Vidxir AI being able to read them
     // are different facts, and only the first is knowable from metadata.
     expect(result.analysis.transcript).toBe("owner_only");
   });
@@ -483,7 +483,7 @@ describe("analyzeSource — failure states (§21, §23 cases 19–20)", () => {
     ]) {
       expect(serialised).not.toContain(leak);
     }
-    // What the user gets instead is a sentence Tally wrote.
+    // What the user gets instead is a sentence Vidxir AI wrote.
     expect(result.message).toMatch(/could not reach youtube|refused/i);
     // The stable code the UI branches on, not the provider's wording.
     expect(result.errorCode).toBe("provider_failed");

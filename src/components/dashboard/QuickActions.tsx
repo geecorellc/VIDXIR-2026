@@ -82,7 +82,7 @@ export function QuickActions({ hasChannel }: { hasChannel: boolean }) {
             color: color.textFaint,
           }}
         >
-          The last two work with no channel connected. Tally connects through Google
+          The last two work with no channel connected. Vidxir AI connects through Google
           — it never asks for your YouTube password.
         </p>
       )}

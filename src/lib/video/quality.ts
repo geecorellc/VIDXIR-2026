@@ -1,5 +1,5 @@
 /**
- * Generation quality — the resolution Tally asks a model for (§4, §16).
+ * Generation quality — the resolution Vidxir AI asks a model for (§4, §16).
  *
  * `format.ts` answers "what shape is the frame". This answers "how many pixels",
  * and it is deliberately a separate axis because the two are chosen separately in
@@ -27,7 +27,7 @@
  */
 import { formatSpec, type VideoFormat } from "@/lib/video/format";
 
-/** The resolutions Tally can ask for. */
+/** The resolutions Vidxir AI can ask for. */
 export type VideoQuality = "draft" | "720p" | "1080p" | "2k";
 
 export const VIDEO_QUALITIES = ["draft", "720p", "1080p", "2k"] as const;

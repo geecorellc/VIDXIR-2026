@@ -21,7 +21,7 @@
  *  - **An export refuses honestly.** No saved cut, an emptied cut, and a published project
  *    each have their own refusal, and none of them may leave a queued job behind.
  *
- * No provider is called. `TALLY_USE_MOCK_PROVIDERS=true` comes from the harness, and the
+ * No provider is called. `VIDXIR_USE_MOCK_PROVIDERS=true` comes from the harness, and the
  * export test asserts on the enqueued `jobs` row rather than running a worker — so no
  * render, no ffmpeg, and no paid generation.
  */
@@ -300,7 +300,7 @@ suite("editor API (integration)", () => {
 
   describe("GET /api/video/edit", () => {
     it("seeds the cut from the project's real rows and signs every asset it plays", async () => {
-      const { user, project } = await builtProject("api-open@tally.test");
+      const { user, project } = await builtProject("api-open@vidxir.test");
       await signIn(user);
 
       const result = await getEdit(project.id);
@@ -343,8 +343,8 @@ suite("editor API (integration)", () => {
     });
 
     it("returns the same 403 for another tenant's project as for one that does not exist", async () => {
-      const owner = await builtProject("api-owner@tally.test");
-      const intruder = await onboardedUser("api-intruder@tally.test");
+      const owner = await builtProject("api-owner@vidxir.test");
+      const intruder = await onboardedUser("api-intruder@vidxir.test");
       await signIn(intruder);
 
       const foreign = await getEdit(owner.project.id);
@@ -367,7 +367,7 @@ suite("editor API (integration)", () => {
     });
 
     it("requires a session", async () => {
-      const { project } = await builtProject("api-anon@tally.test");
+      const { project } = await builtProject("api-anon@vidxir.test");
       jar.clear();
 
       const result = await getEdit(project.id);
@@ -375,7 +375,7 @@ suite("editor API (integration)", () => {
     });
 
     it("rejects a projectId that is not a uuid before touching the database", async () => {
-      const user = await onboardedUser("api-badid@tally.test");
+      const user = await onboardedUser("api-badid@vidxir.test");
       await signIn(user);
 
       const result = await getEdit("not-a-uuid");
@@ -391,7 +391,7 @@ suite("editor API (integration)", () => {
   describe("PUT /api/video/edit", () => {
     it("saves an edited cut and bumps the version", async () => {
       const { applyOperation } = await import("@/lib/video/edit-ops");
-      const { user, project } = await builtProject("api-save@tally.test");
+      const { user, project } = await builtProject("api-save@vidxir.test");
       await signIn(user);
 
       const opened = (await getEdit(project.id)).body.data as {
@@ -445,7 +445,7 @@ suite("editor API (integration)", () => {
     });
 
     it("rejects a document the schema does not accept and leaves the row alone", async () => {
-      const { user, project } = await builtProject("api-invalid@tally.test");
+      const { user, project } = await builtProject("api-invalid@vidxir.test");
       await signIn(user);
 
       const opened = (await getEdit(project.id)).body.data as {
@@ -477,7 +477,7 @@ suite("editor API (integration)", () => {
     });
 
     it("refuses a stale save with a conflict rather than overwriting", async () => {
-      const { user, project } = await builtProject("api-conflict@tally.test");
+      const { user, project } = await builtProject("api-conflict@vidxir.test");
       await signIn(user);
 
       const opened = (await getEdit(project.id)).body.data as {
@@ -505,14 +505,14 @@ suite("editor API (integration)", () => {
     });
 
     it("will not let another tenant save over a cut", async () => {
-      const owner = await builtProject("api-save-owner@tally.test");
+      const owner = await builtProject("api-save-owner@vidxir.test");
       await signIn(owner.user);
       const opened = (await getEdit(owner.project.id)).body.data as {
         version: number;
         document: unknown;
       };
 
-      const intruder = await onboardedUser("api-save-intruder@tally.test");
+      const intruder = await onboardedUser("api-save-intruder@vidxir.test");
       await signIn(intruder);
 
       const result = await putEdit({
@@ -547,7 +547,7 @@ suite("editor API (integration)", () => {
     }
 
     it("queues the existing render job for the saved cut", async () => {
-      const { user, project } = await builtProject("api-export@tally.test");
+      const { user, project } = await builtProject("api-export@vidxir.test");
       await signIn(user);
 
       // Open, which seeds and stores the cut the export will read.
@@ -581,7 +581,7 @@ suite("editor API (integration)", () => {
     });
 
     it("refuses when the project has never been opened in the editor", async () => {
-      const { user, project } = await builtProject("api-export-none@tally.test");
+      const { user, project } = await builtProject("api-export-none@vidxir.test");
       await signIn(user);
 
       const result = await postExport({ projectId: project.id });
@@ -595,7 +595,7 @@ suite("editor API (integration)", () => {
 
     it("refuses a cut with no visible clips instead of rendering nothing", async () => {
       const { applyOperation } = await import("@/lib/video/edit-ops");
-      const { user, project } = await builtProject("api-export-empty@tally.test");
+      const { user, project } = await builtProject("api-export-empty@vidxir.test");
       await signIn(user);
 
       const opened = (await getEdit(project.id)).body.data as {
@@ -627,11 +627,11 @@ suite("editor API (integration)", () => {
     });
 
     it("will not export another tenant's project", async () => {
-      const owner = await builtProject("api-export-owner@tally.test");
+      const owner = await builtProject("api-export-owner@vidxir.test");
       await signIn(owner.user);
       await getEdit(owner.project.id);
 
-      const intruder = await onboardedUser("api-export-intruder@tally.test");
+      const intruder = await onboardedUser("api-export-intruder@vidxir.test");
       await signIn(intruder);
 
       const result = await postExport({ projectId: owner.project.id });
@@ -653,7 +653,7 @@ suite("editor API (integration)", () => {
     it("exports an edited cut from READY_TO_PUBLISH, not just VIDEO_READY", async () => {
       const { applyOperation } = await import("@/lib/video/edit-ops");
       const { getProject, transition } = await import("@/lib/projects/service");
-      const { user, project } = await builtProject("api-export-rtp@tally.test");
+      const { user, project } = await builtProject("api-export-rtp@vidxir.test");
       await signIn(user);
 
       // The thumbnail round trip a user does before reviewing the video.
@@ -705,7 +705,7 @@ suite("editor API (integration)", () => {
      */
     it("refuses to export a scheduled project", async () => {
       const { getProject, transition } = await import("@/lib/projects/service");
-      const { user, project } = await builtProject("api-export-scheduled@tally.test");
+      const { user, project } = await builtProject("api-export-scheduled@vidxir.test");
       await signIn(user);
       await getEdit(project.id);
 
@@ -729,7 +729,7 @@ suite("editor API (integration)", () => {
 
   describe("GET /api/video/export/status", () => {
     it("reports no render and no cut for an untouched project", async () => {
-      const { user, project } = await builtProject("api-status-fresh@tally.test");
+      const { user, project } = await builtProject("api-status-fresh@vidxir.test");
       await signIn(user);
 
       const result = await getExportStatus(project.id);
@@ -741,7 +741,7 @@ suite("editor API (integration)", () => {
     });
 
     it("reports a saved cut as out of date until it has been rendered", async () => {
-      const { user, project } = await builtProject("api-status-stale@tally.test");
+      const { user, project } = await builtProject("api-status-stale@vidxir.test");
       await signIn(user);
       await getEdit(project.id);
 
@@ -757,8 +757,8 @@ suite("editor API (integration)", () => {
     });
 
     it("does not report another tenant's render", async () => {
-      const owner = await builtProject("api-status-owner@tally.test");
-      const intruder = await onboardedUser("api-status-intruder@tally.test");
+      const owner = await builtProject("api-status-owner@vidxir.test");
+      const intruder = await onboardedUser("api-status-intruder@vidxir.test");
       await signIn(intruder);
 
       const result = await getExportStatus(owner.project.id);

@@ -101,7 +101,7 @@ export function Btn({
       }}
     >
       {loading ? (
-        <Loader2 size={14} className="tally-spin" aria-hidden="true" />
+        <Loader2 size={14} className="vidxir-spin" aria-hidden="true" />
       ) : (
         icon
       )}

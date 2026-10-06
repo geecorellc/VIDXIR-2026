@@ -64,7 +64,7 @@ export interface PlanDefinition {
    * Credits granted at the start of each billing period (§7, §8).
    *
    * Not nullable and never "unlimited", unlike the two limits above. An unlimited
-   * credit balance would be an unlimited licence to spend Tally's provider budget,
+   * credit balance would be an unlimited licence to spend Vidxir AI's provider budget,
    * which is the one thing a credit system exists to prevent — so even Scale has a
    * finite monthly grant and tops up beyond it (§11).
    *

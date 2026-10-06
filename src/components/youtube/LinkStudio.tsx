@@ -11,7 +11,7 @@
  * Two entry paths share it, chosen by `seed`:
  *
  *  - `"link"` — paste any public YouTube URL, analyse it, research its topic (§4).
- *  - `"description"` — type what you want to make, and Tally interprets it into a
+ *  - `"description"` — type what you want to make, and Vidxir AI interprets it into a
  *    research brief instead (§1C).
  *
  * They differ only in step 1 and in what step 2 has to show. Everything after that —
@@ -23,7 +23,7 @@
  *
  * What this component does *not* do is as important as what it does.
  *
- * §18: "show job progress using Tally's existing job/worker system. Do not create
+ * §18: "show job progress using Vidxir AI's existing job/worker system. Do not create
  * fake progress." Every status line here is a `jobs` row or a `research_runs` row.
  * While something is running it polls `/api/projects/link-status`, prints the
  * worker's own `statusMessage`, and stops the moment the run reaches a terminal
@@ -36,7 +36,7 @@
  * disabled buttons below are a courtesy, not a gate.
  *
  * §22: the pasted video is a research source. Nothing on this screen offers to
- * download it, copy its script, or reuse its title — the angle cards are Tally's
+ * download it, copy its script, or reuse its title — the angle cards are Vidxir AI's
  * own proposals, and the source panel is metadata and a thumbnail URL.
  *
  * §1C, on the description path: the text the user types is a subject to research, and
@@ -387,7 +387,7 @@ export function LinkStudio({
               color: color.textDim,
             }}
           >
-            A sentence or two, in your own words. Tally works out the subject,
+            A sentence or two, in your own words. Vidxir AI works out the subject,
             researches what is working in it right now, and proposes original angles
             from what it measures. No channel connection needed.
           </p>
@@ -448,7 +448,7 @@ export function LinkStudio({
                 color: color.textFaint,
               }}
             >
-              The AI provider is not configured, so Tally will fall back to reading
+              The AI provider is not configured, so Vidxir AI will fall back to reading
               search terms out of your own words, and cannot propose angles or write a
               script until it is.
             </p>
@@ -472,7 +472,7 @@ export function LinkStudio({
             color: color.textDim,
           }}
         >
-          Any public video — yours or someone else&apos;s, in any niche. Tally
+          Any public video — yours or someone else&apos;s, in any niche. Vidxir AI
           reads what it is about, researches what is working in that topic right
           now, and proposes original angles of its own. No channel connection
           needed to research or generate.
@@ -577,7 +577,7 @@ export function LinkStudio({
             />
             {seed === "description" ? (
               /**
-               * The description as stored, and what Tally understood it to be about.
+               * The description as stored, and what Vidxir AI understood it to be about.
                *
                * Read back from the run row rather than from local state, so a refresh
                * or a link to `?project=` shows it and it is visibly the same text the
@@ -598,7 +598,7 @@ export function LinkStudio({
                 <p style={{ margin: 0, fontSize: 12.5, color: color.textDim }}>
                   <Label>Subject</Label>
                   {run?.niche ??
-                    "not read yet — Tally works this out when the run starts"}
+                    "not read yet — Vidxir AI works this out when the run starts"}
                 </p>
               </div>
             ) : data?.source ? (
@@ -615,7 +615,7 @@ export function LinkStudio({
                */
               <p style={{ margin: 0, fontSize: 13, color: color.textDim }}>
                 {run && SETTLED_WITHOUT_SOURCE.has(run.status)
-                  ? "This run stopped before Tally read the source video, so there is nothing to show. Paste the link again to start a fresh one."
+                  ? "This run stopped before Vidxir AI read the source video, so there is nothing to show. Paste the link again to start a fresh one."
                   : "The worker reads the source video when the run starts. Nothing is shown here until it has."}
               </p>
             )}
@@ -708,7 +708,7 @@ export function LinkStudio({
                   color: color.textFaint,
                 }}
               >
-                These are signals Tally measured, shown so you can judge the
+                These are signals Vidxir AI measured, shown so you can judge the
                 angles below. Nothing here is copied into your video.
               </p>
             </Card>
@@ -733,9 +733,9 @@ export function LinkStudio({
                     "Research signals above will still be collected."
                   : researching
                     ? seed === "description"
-                      ? "Tally is researching your idea and will propose original " +
+                      ? "Vidxir AI is researching your idea and will propose original " +
                         "angles here when it finishes."
-                      : "Tally is researching the topic and will propose original " +
+                      : "Vidxir AI is researching the topic and will propose original " +
                         "angles here when it finishes."
                     : "No angles yet. Re-run research to propose some."}
               </p>
@@ -779,20 +779,20 @@ export function LinkStudio({
                         />
                         <span style={{ flex: 1, minWidth: 0 }}>{angle.title}</span>
                         <span
-                          title="Tally's own score — not a YouTube metric"
+                          title="Vidxir AI's own score — not a YouTube metric"
                           style={{
                             fontFamily: font.display,
                             fontSize: 12,
                             flexShrink: 0,
                             color:
-                              angle.tallyScore === null
+                              angle.vidxirScore === null
                                 ? color.textFaint
                                 : color.accent,
                           }}
                         >
-                          {angle.tallyScore === null
+                          {angle.vidxirScore === null
                             ? "—"
-                            : Math.round(angle.tallyScore)}
+                            : Math.round(angle.vidxirScore)}
                         </span>
                       </span>
 
@@ -848,7 +848,7 @@ export function LinkStudio({
                     color: color.textFaint,
                   }}
                 >
-                  Each of these is Tally&apos;s own proposal, written from the
+                  Each of these is Vidxir AI&apos;s own proposal, written from the
                   research above.
                   {seed === "description"
                     ? " Each one delivers on what you described."
@@ -923,7 +923,7 @@ export function LinkStudio({
                     }}
                   >
                     {aiConfigured
-                      ? "Tally will write an original script from the angle you " +
+                      ? "Vidxir AI will write an original script from the angle you " +
                         "chose and the research above — structured into scenes the " +
                         "video pipeline can build."
                       : "Writing a script needs the AI provider to be configured."}

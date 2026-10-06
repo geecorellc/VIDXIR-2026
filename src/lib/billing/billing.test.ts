@@ -17,7 +17,7 @@
  *     "this subscription is on some price" and "this account is on Scale". A price
  *     that is not in the environment must map to nothing at all; the alternative —
  *     guessing, or defaulting upward — would hand out the top plan to anyone whose
- *     subscription was created outside Tally.
+ *     subscription was created outside Vidxir AI.
  *
  * No network call is possible from these tests: the only Stripe API touched is the
  * constructor, and the key is a literal that is not a credential.
@@ -31,9 +31,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
  */
 const BASE_ENV = {
   NODE_ENV: "test",
-  DATABASE_URL: "postgres://tally:tally@127.0.0.1:5432/tally_test",
+  DATABASE_URL: "postgres://vidxir:vidxir@127.0.0.1:5432/vidxir_test",
   REDIS_URL: "redis://127.0.0.1:6379",
-  S3_BUCKET: "tally-test",
+  S3_BUCKET: "vidxir-test",
   S3_ACCESS_KEY_ID: "test",
   S3_SECRET_ACCESS_KEY: "test",
   ENCRYPTION_KEY: "a".repeat(64),
@@ -50,7 +50,7 @@ const SCALE_PRICE = "price_unit_test_scale";
 /** Every billing variable, so a test can start from a known-empty state. */
 const BILLING_KEYS = [
   "BILLING_PROVIDER",
-  "TALLY_USE_MOCK_PROVIDERS",
+  "VIDXIR_USE_MOCK_PROVIDERS",
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
   "STRIPE_PRICE_STUDIO",
@@ -122,7 +122,7 @@ async function configure(vars: Record<string, string | undefined>): Promise<void
 /** A complete, working Stripe configuration. */
 async function configureFully(): Promise<void> {
   await configure({
-    TALLY_USE_MOCK_PROVIDERS: "false",
+    VIDXIR_USE_MOCK_PROVIDERS: "false",
     BILLING_PROVIDER: "stripe",
     STRIPE_SECRET_KEY: FAKE_SECRET_KEY,
     STRIPE_WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
@@ -140,7 +140,7 @@ describe("billingAvailability", () => {
     // §40: mock providers exist for development. A mock that reported "configured"
     // would let a development build hand out paid tiers.
     await configure({
-      TALLY_USE_MOCK_PROVIDERS: "true",
+      VIDXIR_USE_MOCK_PROVIDERS: "true",
       BILLING_PROVIDER: "stripe",
       STRIPE_SECRET_KEY: FAKE_SECRET_KEY,
       STRIPE_WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
@@ -158,7 +158,7 @@ describe("billingAvailability", () => {
 
   it("names the missing credentials when Stripe is selected but unset", async () => {
     await configure({
-      TALLY_USE_MOCK_PROVIDERS: "false",
+      VIDXIR_USE_MOCK_PROVIDERS: "false",
       BILLING_PROVIDER: "stripe",
     });
 
@@ -180,7 +180,7 @@ describe("billingAvailability", () => {
 
   it("is not configured when the keys are present but a price id is missing", async () => {
     await configure({
-      TALLY_USE_MOCK_PROVIDERS: "false",
+      VIDXIR_USE_MOCK_PROVIDERS: "false",
       BILLING_PROVIDER: "stripe",
       STRIPE_SECRET_KEY: FAKE_SECRET_KEY,
       STRIPE_WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
@@ -202,7 +202,7 @@ describe("billingAvailability", () => {
      * could ever be verified to grant them the plan.
      */
     await configure({
-      TALLY_USE_MOCK_PROVIDERS: "false",
+      VIDXIR_USE_MOCK_PROVIDERS: "false",
       BILLING_PROVIDER: "stripe",
       STRIPE_SECRET_KEY: FAKE_SECRET_KEY,
       STRIPE_PRICE_STUDIO: STUDIO_PRICE,
@@ -232,7 +232,7 @@ describe("billingAvailability", () => {
 
 describe("getBillingProvider", () => {
   it("refuses to return a provider when billing is unconfigured", async () => {
-    await configure({ TALLY_USE_MOCK_PROVIDERS: "false", BILLING_PROVIDER: "stripe" });
+    await configure({ VIDXIR_USE_MOCK_PROVIDERS: "false", BILLING_PROVIDER: "stripe" });
 
     const { getBillingProvider } = await import("@/lib/billing");
     // A stub returning success is exactly what §48 forbids; the API layer turns
@@ -244,7 +244,7 @@ describe("getBillingProvider", () => {
 
   it("never returns a provider while mock billing is selected", async () => {
     await configure({
-      TALLY_USE_MOCK_PROVIDERS: "true",
+      VIDXIR_USE_MOCK_PROVIDERS: "true",
       STRIPE_SECRET_KEY: FAKE_SECRET_KEY,
       STRIPE_WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
       STRIPE_PRICE_STUDIO: STUDIO_PRICE,
@@ -309,7 +309,7 @@ describe("getBillingProvider", () => {
 
 describe("stripeClient", () => {
   it("throws a configuration error rather than constructing without a key", async () => {
-    await configure({ TALLY_USE_MOCK_PROVIDERS: "false", BILLING_PROVIDER: "stripe" });
+    await configure({ VIDXIR_USE_MOCK_PROVIDERS: "false", BILLING_PROVIDER: "stripe" });
 
     const { stripeClient } = await import("@/lib/billing/stripe");
     expect(() => stripeClient()).toThrowError(
@@ -349,7 +349,7 @@ describe("priceIdFor", () => {
 
   it("names the exact variable an operator must set", async () => {
     await configure({
-      TALLY_USE_MOCK_PROVIDERS: "false",
+      VIDXIR_USE_MOCK_PROVIDERS: "false",
       BILLING_PROVIDER: "stripe",
       STRIPE_SECRET_KEY: FAKE_SECRET_KEY,
       STRIPE_WEBHOOK_SECRET: FAKE_WEBHOOK_SECRET,
@@ -383,7 +383,7 @@ describe("tierForPriceId", () => {
      * The load-bearing case. A price created in the Stripe dashboard and never
      * wired into this deployment's environment entitles nothing; the webhook turns
      * `null` into Starter. Defaulting upward here would grant Scale to any
-     * subscription Tally did not create.
+     * subscription Vidxir AI did not create.
      */
     expect(tierForPriceId("price_created_in_the_dashboard")).toBeNull();
     expect(tierForPriceId(null)).toBeNull();
@@ -392,7 +392,7 @@ describe("tierForPriceId", () => {
   });
 
   it("maps nothing at all when no prices are configured", async () => {
-    await configure({ TALLY_USE_MOCK_PROVIDERS: "false", BILLING_PROVIDER: "stripe" });
+    await configure({ VIDXIR_USE_MOCK_PROVIDERS: "false", BILLING_PROVIDER: "stripe" });
     const { tierForPriceId } = await import("@/lib/billing/stripe");
 
     // An empty env var must not match an empty-ish price id.

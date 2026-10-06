@@ -1,5 +1,5 @@
 /**
- * The credit ledger and balance — Tally's generation currency (§7–§13).
+ * The credit ledger and balance — Vidxir AI's generation currency (§7–§13).
  *
  * Five operations, and the interesting property of each:
  *
@@ -359,7 +359,7 @@ export interface ChargeOutcome {
  * (§12). The alternative — generate, then charge — would let a customer with an empty
  * balance consume unlimited provider spend, since the refusal would arrive after the
  * money was gone. Charging first means the worst case is a refunded charge, which is
- * recoverable; the other way round the loss is Tally's and is not.
+ * recoverable; the other way round the loss is Vidxir AI's and is not.
  */
 export async function chargeCredits(
   request: ChargeRequest,

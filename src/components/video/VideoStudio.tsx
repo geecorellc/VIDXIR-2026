@@ -223,7 +223,7 @@ export function VideoStudio({
 
         {/* Filmstrip. Cells map to real scenes; before a scene plan exists the
             strip is empty rather than showing six invented frames. */}
-        <div style={{ display: "flex", gap: 8, overflowX: "auto" }} className="tally-scroll">
+        <div style={{ display: "flex", gap: 8, overflowX: "auto" }} className="vidxir-scroll">
           {sceneCount === 0 ? (
             <span style={{ fontSize: 12, color: color.textFaint }}>
               Scenes appear here once the scene planner has run.
@@ -352,7 +352,7 @@ export function VideoStudio({
           loading={busy || pending}
           icon={
             building ? (
-              <Loader2 size={15} className="tally-spin" />
+              <Loader2 size={15} className="vidxir-spin" />
             ) : done ? (
               <RefreshCw size={15} />
             ) : undefined

@@ -37,7 +37,7 @@
  * rather than branches:
  *
  *  - **The credential.** `SignalReader` is the seam. Channel mode reads as the
- *    channel; link mode reads as the Tally project, which can see public data and
+ *    channel; link mode reads as the Vidxir AI project, which can see public data and
  *    nothing else. That is exactly what §2B needs, because it means researching a
  *    link requires no connected channel.
  *  - **The seed exclusion.** §6 is explicit that research must not simply return
@@ -357,7 +357,7 @@ function normaliseLanguage(raw: string | null): string | null {
   return trimmed;
 }
 
-/** Shortest and longest video Tally will target from a source's duration. */
+/** Shortest and longest video Vidxir AI will target from a source's duration. */
 const MIN_TARGET_SECONDS = 60;
 const MAX_TARGET_SECONDS = 1_200;
 
@@ -380,7 +380,7 @@ function clampTargetLength(durationSeconds: number | null): number {
  * Region code for search, taken from the content language's region subtag.
  *
  * Search results are region-sensitive, and the onboarding language ("en-US",
- * "de-DE", "pt-BR") is the only geographic signal Tally actually collects. A
+ * "de-DE", "pt-BR") is the only geographic signal Vidxir AI actually collects. A
  * language with no region subtag ("en") falls back to US rather than guessing —
  * `regionCode` must be a real ISO-3166 code or the API rejects the request.
  */

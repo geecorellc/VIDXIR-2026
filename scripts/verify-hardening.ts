@@ -184,7 +184,7 @@ async function main(): Promise<void> {
       EMAIL_PROVIDER: "resend",
       RESEND_API_KEY: "probe-placeholder",
       BILLING_PROVIDER: "mock",
-      TALLY_USE_MOCK_PROVIDERS: "false",
+      VIDXIR_USE_MOCK_PROVIDERS: "false",
     };
 
     /**
@@ -262,10 +262,10 @@ async function main(): Promise<void> {
     const refusals: [string, Record<string, string>, string][] = [
       [
         "mock providers",
-        { TALLY_USE_MOCK_PROVIDERS: "true" },
-        "TALLY_USE_MOCK_PROVIDERS",
+        { VIDXIR_USE_MOCK_PROVIDERS: "true" },
+        "VIDXIR_USE_MOCK_PROVIDERS",
       ],
-      // Tally would report work it never did (§40, §42).
+      // Vidxir AI would report work it never did (§40, §42).
       ["console email", { EMAIL_PROVIDER: "console", RESEND_API_KEY: "" }, "EMAIL_PROVIDER"],
       // Every verification and reset email would go to stdout.
       [
@@ -1404,7 +1404,7 @@ async function main(): Promise<void> {
       new Error(
         'syntax error at or near "SELCT" — ' +
           "SELECT * FROM users WHERE email = 'victim@example.com'; " +
-          "dsn=postgresql://tally:probepassword@db.internal:5432/tally",
+          "dsn=postgresql://vidxir:probepassword@db.internal:5432/vidxir",
       ),
       { code: "42601", severity: "ERROR" },
     );
@@ -1447,7 +1447,7 @@ async function main(): Promise<void> {
         /**
          * The ambient AWS credentials, when Bedrock is the AI transport. Read
          * from `process.env` rather than `e` on purpose: they are deliberately
-         * absent from Tally's typed configuration (§33), which is exactly why a
+         * absent from Vidxir AI's typed configuration (§33), which is exactly why a
          * copy appearing in a browser chunk would be worth catching.
          */
         process.env["AWS_SECRET_ACCESS_KEY"],
@@ -1631,7 +1631,7 @@ async function main(): Promise<void> {
      */
     must(
       !(isProduction() && usingMockProviders()),
-      "this process is running in production with mock providers; Tally would report " +
+      "this process is running in production with mock providers; Vidxir AI would report " +
         "work it never did (§40)",
     );
 
@@ -1643,12 +1643,12 @@ async function main(): Promise<void> {
      */
     must(
       !(isProduction() && realPublishBlocked()),
-      "TALLY_BLOCK_REAL_PUBLISH is being honoured in production; every publish would " +
+      "VIDXIR_BLOCK_REAL_PUBLISH is being honoured in production; every publish would " +
         "be refused while the UI reported success (§42)",
     );
     must(
       usingMockProviders() ===
-        (e.NODE_ENV !== "production" && e.TALLY_USE_MOCK_PROVIDERS),
+        (e.NODE_ENV !== "production" && e.VIDXIR_USE_MOCK_PROVIDERS),
       "usingMockProviders() disagrees with the environment it reads",
     );
     must(
@@ -1712,7 +1712,7 @@ async function main(): Promise<void> {
       ["charged with sk_live_51ProbeNotReal0000", "sk_live_51ProbeNotReal0000"],
       ["signed with whsec_ProbeNotRealSecret00", "whsec_ProbeNotRealSecret00"],
       [
-        "connection to postgresql://tally:probepassword@db.internal:5432/tally failed",
+        "connection to postgresql://vidxir:probepassword@db.internal:5432/vidxir failed",
         "probepassword",
       ],
       [

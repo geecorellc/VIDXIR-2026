@@ -44,7 +44,7 @@ function stubRequest(options: {
   return {
     headers,
     method: options.method ?? "GET",
-    nextUrl: { origin: options.origin ?? "https://app.tally.test" },
+    nextUrl: { origin: options.origin ?? "https://app.vidxir.test" },
   } as unknown as import("next/server").NextRequest;
 }
 
@@ -61,9 +61,9 @@ const ORIGINAL_HOPS = process.env["TRUSTED_PROXY_HOPS"];
 
 beforeEach(() => {
   // The integration harness sets these; `lib/env` requires them to parse at all.
-  process.env["DATABASE_URL"] ??= "postgresql://tally:tally@localhost:5432/tally_unit";
+  process.env["DATABASE_URL"] ??= "postgresql://vidxir:vidxir@localhost:5432/vidxir_unit";
   process.env["REDIS_URL"] ??= "redis://127.0.0.1:6379";
-  process.env["S3_BUCKET"] ??= "tally-unit";
+  process.env["S3_BUCKET"] ??= "vidxir-unit";
   process.env["S3_ACCESS_KEY_ID"] ??= "unit";
   process.env["S3_SECRET_ACCESS_KEY"] ??= "unit";
   process.env["ENCRYPTION_KEY"] ??= "a".repeat(64);
@@ -165,8 +165,8 @@ describe("assertSameOrigin", () => {
       assertSameOrigin(
         stubRequest({
           method: "POST",
-          origin: "https://app.tally.test",
-          headers: { origin: "https://app.tally.test" },
+          origin: "https://app.vidxir.test",
+          headers: { origin: "https://app.vidxir.test" },
         }),
       ),
     ).not.toThrow();
@@ -177,7 +177,7 @@ describe("assertSameOrigin", () => {
       assertSameOrigin(
         stubRequest({
           method: "POST",
-          origin: "https://app.tally.test",
+          origin: "https://app.vidxir.test",
           headers: { origin: "https://evil.example" },
         }),
       ),
@@ -197,8 +197,8 @@ describe("assertSameOrigin", () => {
       assertSameOrigin(
         stubRequest({
           method: "DELETE",
-          origin: "https://app.tally.test",
-          headers: { origin: "http://app.tally.test" },
+          origin: "https://app.vidxir.test",
+          headers: { origin: "http://app.vidxir.test" },
         }),
       ),
     ).toThrow(/Cross-origin/);
@@ -219,7 +219,7 @@ describe("assertSameOrigin", () => {
       assertSameOrigin(
         stubRequest({
           method: "POST",
-          origin: "https://app.tally.test",
+          origin: "https://app.vidxir.test",
           headers: {
             "sec-fetch-site": "cross-site",
             origin: "https://evil.example",

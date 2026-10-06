@@ -94,7 +94,7 @@ export const METADATA_JSON_SCHEMA = jsonSchema({
   ],
 });
 
-export const METADATA_SYSTEM_PROMPT = `You are Tally's metadata writer. You are given a finished script and you write the title, description, tags and chapter labels the video will be published with.
+export const METADATA_SYSTEM_PROMPT = `You are Vidxir AI's metadata writer. You are given a finished script and you write the title, description, tags and chapter labels the video will be published with.
 
 How you write:
 - The description is read by people, not only by an algorithm. Write it as a useful summary someone would actually read, and put the substance in the first two lines because that is all YouTube shows before "more".

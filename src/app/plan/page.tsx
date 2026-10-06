@@ -12,7 +12,7 @@ import { getSession } from "@/lib/auth/session";
 import { currentTier } from "@/lib/api/guard";
 import { billingAvailability, canUpgrade } from "@/lib/billing";
 
-export const metadata: Metadata = { title: "Pick your setup — Tally" };
+export const metadata: Metadata = { title: "Pick your setup — Vidxir AI" };
 
 export default async function PlanPage() {
   const session = await getSession();

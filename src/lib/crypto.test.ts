@@ -12,9 +12,9 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 const TEST_ENV = {
   NODE_ENV: "test",
-  DATABASE_URL: "postgres://tally:tally@127.0.0.1:5432/tally_test",
+  DATABASE_URL: "postgres://vidxir:vidxir@127.0.0.1:5432/vidxir_test",
   REDIS_URL: "redis://127.0.0.1:6379",
-  S3_BUCKET: "tally-test",
+  S3_BUCKET: "vidxir-test",
   S3_ACCESS_KEY_ID: "test",
   S3_SECRET_ACCESS_KEY: "test",
   ENCRYPTION_KEY: "a".repeat(64),

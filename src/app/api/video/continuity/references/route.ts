@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
      * Signed per still, in parallel.
      *
      * The bucket is private, so a stored key is not viewable on its own — the same
-     * arrangement every other asset in Tally is served under. A failure to sign one
+     * arrangement every other asset in Vidxir AI is served under. A failure to sign one
      * URL leaves that still without a preview rather than failing the whole panel.
      */
     const stored = await Promise.all(

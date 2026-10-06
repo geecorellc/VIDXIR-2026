@@ -1,7 +1,7 @@
 /**
- * Tally design tokens.
+ * Vidxir AI design tokens.
  *
- * These values are lifted verbatim from the JSX prototype (tally-app.jsx),
+ * These values are lifted verbatim from the JSX prototype (vidxir-app.jsx),
  * which §3/§44 of the spec designate as the source of truth for the visual
  * direction. The prototype styled everything with inline style objects; rather
  * than re-implement the look in a CSS framework (which would inevitably drift),
@@ -28,7 +28,7 @@ export const color = {
   /** Nearly invisible divider. */
   borderFaint: "#1C1719",
 
-  /** Tally red — the single accent colour. */
+  /** Vidxir AI red — the single accent colour. */
   accent: "#E8332B",
   accentLight: "#FF5A50",
   accentDark: "#9E1F19",

@@ -43,13 +43,13 @@
  *  16. those stills are real landscape PNGs under the `reference/` prefix, found again
  *      by the reader, not re-drawn by a second run, and selected per scene by the
  *      entities that scene commits to
- *  17. with `TALLY_CONTINUITY_ENGINE_ENABLED=false` the stage is a no-op that records
+ *  17. with `VIDXIR_CONTINUITY_ENGINE_ENABLED=false` the stage is a no-op that records
  *      nothing
  *  18. every provider call this run made was the mock — asserted from `api_usage`
  *
  * ## Cost and safety
  *
- * `TALLY_USE_MOCK_PROVIDERS=true` is set at module scope, before anything reads the
+ * `VIDXIR_USE_MOCK_PROVIDERS=true` is set at module scope, before anything reads the
  * environment, so `videoGenProviderIds()` resolves to `["mock"]` and every
  * regeneration is a solid PNG synthesised in-process. Step 1 asserts that rather
  * than assuming it, and step 15 audits `api_usage` afterwards to prove no other
@@ -88,26 +88,26 @@ import "@/lib/load-env";
 // snapshots the environment on first read.
 import type { NarrativeBeat } from "@/lib/continuity/scene-state";
 
-const PREFIX = "tally-verify-continuity";
+const PREFIX = "vidxir-verify-continuity";
 process.env["QUEUE_PREFIX"] = PREFIX;
 
 /**
  * Both flags, set before anything can read them.
  *
- * `.env.local` has `TALLY_USE_MOCK_PROVIDERS=false` and the continuity flag unset,
+ * `.env.local` has `VIDXIR_USE_MOCK_PROVIDERS=false` and the continuity flag unset,
  * which is the right default for a developer's web app and the wrong one for this
  * script. `process.loadEnvFile` runs from the hoisted `load-env` import above and
  * does not overwrite variables already present — but it ran *first*, so these
  * assignments are what win, and no `env()` call has happened yet.
  */
-process.env["TALLY_USE_MOCK_PROVIDERS"] = "true";
-process.env["TALLY_CONTINUITY_ENGINE_ENABLED"] = "true";
+process.env["VIDXIR_USE_MOCK_PROVIDERS"] = "true";
+process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"] = "true";
 
 /** Generous: four mock generations plus a check take seconds, not minutes. */
 const JOB_TIMEOUT_MS = 5 * 60_000;
 
-const FIXTURE_EMAIL = "continuity-verify@tally.local";
-const OTHER_EMAIL = "continuity-verify-other@tally.local";
+const FIXTURE_EMAIL = "continuity-verify@vidxir.local";
+const OTHER_EMAIL = "continuity-verify-other@vidxir.local";
 
 /** The model the fixture project is built with. Free, local, and honest about it. */
 const MOCK_MODEL = "mock/placeholder";
@@ -241,7 +241,7 @@ async function main(): Promise<void> {
     e.NODE_ENV !== "production",
     "refusing to run against NODE_ENV=production: this script writes fixture rows.",
   );
-  assert(continuityEnabled(), "TALLY_CONTINUITY_ENGINE_ENABLED did not take effect.");
+  assert(continuityEnabled(), "VIDXIR_CONTINUITY_ENGINE_ENABLED did not take effect.");
   assert(
     usingMockProviders(),
     "mock providers are off — a regeneration would reach a paid generation API.",
@@ -1301,7 +1301,7 @@ async function main(): Promise<void> {
     .from(schema.qualityChecks)
     .where(eq(schema.qualityChecks.projectId, projectId));
 
-  process.env["TALLY_CONTINUITY_ENGINE_ENABLED"] = "false";
+  process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"] = "false";
   resetEnvCache();
   assert(!continuityEnabled(), "the flag did not turn off");
   assert(
@@ -1317,7 +1317,7 @@ async function main(): Promise<void> {
     await requireSucceeded(offJobId, "continuity check with the flag off");
     offResult = await jobResult(offJobId);
   } finally {
-    process.env["TALLY_CONTINUITY_ENGINE_ENABLED"] = "true";
+    process.env["VIDXIR_CONTINUITY_ENGINE_ENABLED"] = "true";
     resetEnvCache();
   }
 
@@ -1349,7 +1349,7 @@ async function main(): Promise<void> {
     "the flag-off run moved the project",
   );
   ok(
-    "TALLY_CONTINUITY_ENGINE_ENABLED=false: the stage succeeds as a no-op, records " +
+    "VIDXIR_CONTINUITY_ENGINE_ENABLED=false: the stage succeeds as a no-op, records " +
       "nothing and queues nothing — the pre-continuity behaviour exactly",
   );
 

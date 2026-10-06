@@ -2,7 +2,7 @@
  * OAuth `state` handling for the Google consent round-trip (§6, §34).
  *
  * The threat this closes is login-CSRF on the connect flow: an attacker
- * completes consent with *their* Google account and tricks a signed-in Tally
+ * completes consent with *their* Google account and tricks a signed-in Vidxir AI
  * user into loading the resulting callback URL, which would attach the
  * attacker's channel to the victim's account.
  *
@@ -29,7 +29,7 @@ import { isProduction } from "@/lib/env";
 import { ValidationError } from "@/lib/errors";
 
 const PURPOSE = "youtube-oauth-state";
-export const OAUTH_STATE_COOKIE = "tally_oauth_state";
+export const OAUTH_STATE_COOKIE = "vidxir_oauth_state";
 /** Long enough to read a consent screen, short enough to limit replay. */
 const STATE_TTL_MS = 10 * 60 * 1000;
 

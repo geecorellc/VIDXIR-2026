@@ -8,7 +8,7 @@
  * a raw `sql` template, which postgres.js rejects at Bind. Billing has the same
  * exposure: `webhook.ts` contains exactly one raw `sql` fragment (the `lastEventAt`
  * comparison), the Stripe SDK is a real dependency that must load outside a bundler,
- * and the webhook route is the one route in Tally that is *not* wrapped in
+ * and the webhook route is the one route in Vidxir AI that is *not* wrapped in
  * `handle()`.
  *
  * So this runs, with no test framework, no aliases and no mocked modules:
@@ -331,7 +331,7 @@ async function main(): Promise<void> {
   detail(`self-serve upgrade available: ${String(canUpgrade())}`);
   if (usingMockProviders()) {
     detail(
-      "TALLY_USE_MOCK_PROVIDERS is on, so the billing provider resolves to `mock`, " +
+      "VIDXIR_USE_MOCK_PROVIDERS is on, so the billing provider resolves to `mock`, " +
         "which never reports configured and can never grant a paid tier (§40)",
     );
   }

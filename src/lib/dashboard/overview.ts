@@ -3,12 +3,12 @@
  *
  * The prototype hard-coded "6 channels / 817K subscribers / 631K views /
  * $4,280 revenue". Every one of those becomes a real query here, and — this is
- * the important part — anything Tally cannot know yet comes back as `null` so
+ * the important part — anything Vidxir AI cannot know yet comes back as `null` so
  * the tile renders a dash instead of a fabricated figure (§42).
  *
  * Estimated revenue is read from the `analytics_snapshots` rows Phase 9's ingest
  * writes — and is still `null` whenever nothing was actually read from YouTube.
- * Earnings need the `yt-analytics-monetary.readonly` scope, which Tally does not
+ * Earnings need the `yt-analytics-monetary.readonly` scope, which Vidxir AI does not
  * request at consent, so the honest tile for most accounts says the access is
  * missing rather than showing $0.00. `revenueSummary` distinguishes the reasons
  * and the hint below names the one that applies (Phase 9 §7).
@@ -32,7 +32,7 @@ import type { ProjectStatus } from "@/lib/projects/state-machine";
 import { isWorking } from "@/lib/projects/state-machine";
 
 export interface OverviewStat {
-  /** Formatted value, or null when Tally has no real figure yet. */
+  /** Formatted value, or null when Vidxir AI has no real figure yet. */
   value: string | null;
   /** Why the value is null, shown under the dash. */
   emptyHint?: string;

@@ -14,7 +14,7 @@
  *  - **Invent numbers.** "$0 vs $4,000" is a great thumbnail and a lie unless the
  *    script contains those figures.
  *  - **Ask for a person, a logo or a brand mark.** The compositor draws text over
- *    a licensed stock frame. A concept requiring a face Tally cannot produce would
+ *    a licensed stock frame. A concept requiring a face Vidxir AI cannot produce would
  *    render as a headline over an unrelated image — a design that looks broken
  *    rather than one that was never possible.
  *
@@ -140,7 +140,7 @@ export const THUMBNAIL_JSON_SCHEMA = jsonSchema({
   required: ["concepts"],
 });
 
-export const THUMBNAIL_SYSTEM_PROMPT = `You are Tally's thumbnail designer. You are given a finished script and you write the four competing thumbnail concepts the creator will choose between.
+export const THUMBNAIL_SYSTEM_PROMPT = `You are Vidxir AI's thumbnail designer. You are given a finished script and you write the four competing thumbnail concepts the creator will choose between.
 
 How thumbnails are produced here, which constrains what you may design:
 - The image is a licensed stock photograph or video frame, chosen by searching a stock library with the terms you supply, with your headline text burned over it.

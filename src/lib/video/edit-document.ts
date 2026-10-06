@@ -67,7 +67,7 @@ export const EDIT_DOCUMENT_VERSION = 1;
 /**
  * The longest video the editor accepts, and every bound below follows from it.
  *
- * Six hours is far past anything Tally generates; the point is that a ceiling exists
+ * Six hours is far past anything Vidxir AI generates; the point is that a ceiling exists
  * at all. Without one, a `startMs` of `Number.MAX_SAFE_INTEGER` becomes an ffmpeg
  * `-t` argument and a filter graph that never terminates.
  */
@@ -144,7 +144,7 @@ export function isAudioTrack(kind: TrackKind): boolean {
 /**
  * A bounded millisecond offset.
  *
- * Integer because a fractional millisecond has no meaning at any frame rate Tally
+ * Integer because a fractional millisecond has no meaning at any frame rate Vidxir AI
  * renders, and the ffmpeg argument builder's `.toFixed(3)` would round it away
  * anyway — better rejected here than silently changed there.
  */

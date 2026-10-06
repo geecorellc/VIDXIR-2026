@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { AuthForm } from "@/components/auth/AuthForm";
 
 export const metadata: Metadata = {
-  title: "Create your studio — Tally",
+  title: "Create your studio — Vidxir AI",
 };
 
 export default function SignupPage() {

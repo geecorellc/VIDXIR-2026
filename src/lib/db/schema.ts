@@ -1,5 +1,5 @@
 /**
- * Tally relational schema (§21).
+ * Vidxir AI relational schema (§21).
  *
  * Conventions:
  *  - Every user-owned table carries `userId` even when it could be reached
@@ -116,11 +116,11 @@ export const creditReasonEnum = pgEnum("credit_reason", [
 ]);
 
 export const automationLevelEnum = pgEnum("automation_level", [
-  /** Tally researches and drafts; user approves every step. */
+  /** Vidxir AI researches and drafts; user approves every step. */
   "manual",
-  /** Tally produces a finished video; user approves before publishing. */
+  /** Vidxir AI produces a finished video; user approves before publishing. */
   "assisted",
-  /** Tally researches, produces and publishes on schedule. */
+  /** Vidxir AI researches, produces and publishes on schedule. */
   "autopilot",
 ]);
 
@@ -385,7 +385,7 @@ export const subscriptions = pgTable(
 );
 
 /**
- * Every billing-provider event Tally has seen (§24, §32).
+ * Every billing-provider event Vidxir AI has seen (§24, §32).
  *
  * Two jobs, both load-bearing:
  *
@@ -409,7 +409,7 @@ export const billingEvents = pgTable(
     providerEventId: varchar("provider_event_id", { length: 128 }).notNull(),
     eventType: varchar("event_type", { length: 96 }).notNull(),
     /**
-     * Nullable: an event can arrive for a customer Tally cannot resolve to a user
+     * Nullable: an event can arrive for a customer Vidxir AI cannot resolve to a user
      * (a subscription created directly in the Stripe dashboard, say). It is still
      * recorded — silently dropping it would erase the only evidence it happened.
      */
@@ -640,7 +640,7 @@ export const creditLedger = pgTable(
  * Reading the amount back out of Stripe's session metadata would be the obvious
  * alternative and is worse: metadata is writable by anyone with the API key, and the
  * amount paid is in a currency, not in credits. This table means the credit grant is
- * decided by Tally at a moment when nothing external has been consulted.
+ * decided by Vidxir AI at a moment when nothing external has been consulted.
  */
 export const creditPurchases = pgTable(
   "credit_purchases",
@@ -1060,7 +1060,7 @@ export const researchResults = pgTable(
   ],
 );
 
-/** A Tally-generated original angle derived from research signals (§7). */
+/** A Vidxir AI-generated original angle derived from research signals (§7). */
 export const ideas = pgTable(
   "ideas",
   {
@@ -1108,15 +1108,15 @@ export const ideas = pgTable(
       .$type<string[]>()
       .default(sql`'[]'::jsonb`),
 
-    // §8 component scores, 0-100. Tally-generated, not YouTube metrics.
+    // §8 component scores, 0-100. Vidxir AI-generated, not YouTube metrics.
     trendScore: real("trend_score"),
     opportunityScore: real("opportunity_score"),
     competitionScore: real("competition_score"),
     audienceFitScore: real("audience_fit_score"),
     velocityScore: real("velocity_score"),
     freshnessScore: real("freshness_score"),
-    /** Weighted composite — the "Tally Opportunity Score". */
-    tallyScore: real("tally_score"),
+    /** Weighted composite — the "Vidxir AI Opportunity Score". */
+    vidxirScore: real("vidxir_score"),
     /** The weights used, so a historical score stays explainable. */
     scoreBreakdown: jsonb("score_breakdown").$type<Record<string, number>>(),
 
@@ -1133,7 +1133,7 @@ export const ideas = pgTable(
   (t) => [
     index("ideas_channel_state_idx").on(t.channelId, t.state),
     index("ideas_user_id_idx").on(t.userId),
-    index("ideas_score_idx").on(t.channelId, t.tallyScore),
+    index("ideas_score_idx").on(t.channelId, t.vidxirScore),
   ],
 );
 

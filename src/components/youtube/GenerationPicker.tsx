@@ -3,7 +3,7 @@
 /**
  * Generation method picker (Phase 11 §9, §10, §16, §19, §21; Phase 12 §3, §4).
  *
- * The "VIDEO GENERATION" step of §18: stock footage, or AI video and which Tally
+ * The "VIDEO GENERATION" step of §18: stock footage, or AI video and which Vidxir AI
  * model, and into what frame. Four things about it are load-bearing.
  *
  * **The catalogue is not in this file.** It is fetched from
@@ -326,7 +326,7 @@ export function GenerationPicker({
 
       {selectedMode === "AI_VIDEO" && (
         <div>
-          <Legend>Tally AI video models</Legend>
+          <Legend>Vidxir AI video models</Legend>
 
           {compatible.length === 0 ? (
             <Card tone="warning" pad={14}>

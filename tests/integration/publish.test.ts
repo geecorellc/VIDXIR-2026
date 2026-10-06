@@ -16,14 +16,14 @@
  *
  * Mocked: `uploadVideo` and `setThumbnail` — the two functions that talk to
  * youtube.com. That is not a shortcut, it is §9: a real upload would put a test
- * video on a real channel, and `.env.local` sets `TALLY_BLOCK_REAL_PUBLISH=true`
- * precisely so that cannot happen by accident. Everything on Tally's side of those
+ * video on a real channel, and `.env.local` sets `VIDXIR_BLOCK_REAL_PUBLISH=true`
+ * precisely so that cannot happen by accident. Everything on Vidxir AI's side of those
  * two calls is exercised for real; the two calls themselves are covered by
  * `providers/youtube`'s own error-translation tests and, for the wiring, by
  * `scripts/verify-publish.ts` running under real Node.
  *
  * Stated plainly so the §20 report can be honest: **these tests do not prove that
- * a byte ever reached Google.** They prove that Tally's bookkeeping around the
+ * a byte ever reached Google.** They prove that Vidxir AI's bookkeeping around the
  * upload is correct, including every failure ordering.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -198,7 +198,7 @@ suite("youtube publishing (integration)", () => {
       });
       const put = await putObject({
         key,
-        body: Buffer.from("tally-test-video-bytes"),
+        body: Buffer.from("vidxir-test-video-bytes"),
         contentType: "video/mp4",
       });
       const [videoAsset] = await db
@@ -236,7 +236,7 @@ suite("youtube publishing (integration)", () => {
       });
       const put = await putObject({
         key,
-        body: options.thumbnailBytes ?? Buffer.from("tally-test-thumbnail-bytes"),
+        body: options.thumbnailBytes ?? Buffer.from("vidxir-test-thumbnail-bytes"),
         contentType: "image/jpeg",
       });
       const [imageAsset] = await db
@@ -385,7 +385,7 @@ suite("youtube publishing (integration)", () => {
 
   describe("a confirmed upload", () => {
     it("records the publication from YouTube's response and then marks PUBLISHED", async () => {
-      const { user, project, channelId, variantId } = await fixture("pub@tally.test");
+      const { user, project, channelId, variantId } = await fixture("pub@vidxir.test");
 
       const { result, publishJobId } = await publish({
         userId: user.id,
@@ -423,7 +423,7 @@ suite("youtube publishing (integration)", () => {
       expect(job!.completedAt).not.toBeNull();
     }, 120_000);
 
-    it("mirrors YouTube's own statuses rather than what Tally asked for", async () => {
+    it("mirrors YouTube's own statuses rather than what Vidxir AI asked for", async () => {
       /**
        * The upload was requested public; YouTube is still processing and reports it
        * private. Storing the request instead of the response is how a UI ends up
@@ -433,7 +433,7 @@ suite("youtube publishing (integration)", () => {
         uploadResult({ uploadStatus: "processed", privacyStatus: "private" }),
       );
 
-      const { user, project } = await fixture("mirror@tally.test");
+      const { user, project } = await fixture("mirror@vidxir.test");
       await publish({ userId: user.id, projectId: project.id }, { visibility: "public" });
 
       const [publication] = await publicationRows(project.id);
@@ -442,7 +442,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("sends the composed description, the metadata and the video bytes", async () => {
-      const { user, project } = await fixture("payload@tally.test");
+      const { user, project } = await fixture("payload@vidxir.test");
       await publish({ userId: user.id, projectId: project.id });
 
       const call = youtube.uploadVideo.mock.calls[0]![0] as Record<string, unknown>;
@@ -472,7 +472,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("counts the publication once against the month's usage", async () => {
-      const { user, project } = await fixture("usage@tally.test");
+      const { user, project } = await fixture("usage@vidxir.test");
       await publish({ userId: user.id, projectId: project.id });
 
       const { db } = await import("@/lib/db");
@@ -488,7 +488,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("uploads private with publishAt when the publish is scheduled", async () => {
-      const { user, project } = await fixture("sched@tally.test");
+      const { user, project } = await fixture("sched@vidxir.test");
       await setTier(user.id, "studio");
       const when = new Date(Date.now() + 6 * 60 * 60 * 1000);
 
@@ -498,7 +498,7 @@ suite("youtube publishing (integration)", () => {
 
       /**
        * The upload happens now; YouTube flips the video public at `publishAt`. That
-       * is what makes the schedule survive Tally being down — a job held in the
+       * is what makes the schedule survive Vidxir AI being down — a job held in the
        * queue until 18:00 does not go live at 18:00 if the worker is restarted (§19).
        */
       await publish(
@@ -532,7 +532,7 @@ suite("youtube publishing (integration)", () => {
 
   describe("failure never publishes", () => {
     it("leaves the project PUBLISHING and records nothing when the upload is retryable", async () => {
-      const { user, project } = await fixture("retry@tally.test");
+      const { user, project } = await fixture("retry@vidxir.test");
 
       const { YouTubeUploadError } = await import("@/lib/errors");
       // A 500 from Google. The worker has an attempt left, and flashing FAILED
@@ -572,7 +572,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("moves the project to FAILED with the real code when the failure is permanent", async () => {
-      const { user, project } = await fixture("perm@tally.test");
+      const { user, project } = await fixture("perm@vidxir.test");
 
       const { ProviderError } = await import("@/lib/errors");
       // `uploadLimitExceeded` — the channel's daily cap. No number of retries
@@ -619,7 +619,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("does not upload at all when the rendered file is missing", async () => {
-      const { user, project } = await fixture("novideo@tally.test", {
+      const { user, project } = await fixture("novideo@vidxir.test", {
         withVideo: false,
       });
 
@@ -652,7 +652,7 @@ suite("youtube publishing (integration)", () => {
        * `selected_variant_id` is null — which is the state a user who generated
        * thumbnails and then navigated away is actually in.
        */
-      const { user, project } = await fixture("nothumb@tally.test", {
+      const { user, project } = await fixture("nothumb@vidxir.test", {
         thumbnail: "unselected",
       });
 
@@ -670,7 +670,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("refuses when the video has no metadata", async () => {
-      const { user, project } = await fixture("nometa@tally.test", {
+      const { user, project } = await fixture("nometa@vidxir.test", {
         withMetadata: false,
       });
 
@@ -693,7 +693,7 @@ suite("youtube publishing (integration)", () => {
        * the click and the worker, and a thumbnail deselected in between must stop
        * the upload — publishing the wrong asset is worse than not publishing (§7).
        */
-      const { user, project } = await fixture("vanish@tally.test");
+      const { user, project } = await fixture("vanish@vidxir.test");
 
       const { startPublish, executePublish } = await import("@/lib/publish/service");
       const started = await startPublish({
@@ -727,7 +727,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("refuses a thumbnail larger than YouTube's 2 MB limit", async () => {
-      const { user, project } = await fixture("bigthumb@tally.test", {
+      const { user, project } = await fixture("bigthumb@vidxir.test", {
         // Just over the ceiling. Discovering this from the API costs a full upload
         // of the bytes and a confusing 400.
         thumbnailBytes: Buffer.alloc(2 * 1024 * 1024 + 1, 0x41),
@@ -757,7 +757,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("stays published when YouTube accepts the video but rejects the thumbnail", async () => {
-      const { user, project } = await fixture("thumbfail@tally.test");
+      const { user, project } = await fixture("thumbfail@vidxir.test");
 
       const { ProviderError } = await import("@/lib/errors");
       youtube.setThumbnail.mockRejectedValue(
@@ -793,9 +793,9 @@ suite("youtube publishing (integration)", () => {
        * §8: a grant with only `youtube.upload` cannot set a thumbnail or edit
        * details. Uploading anyway would produce a live video with the wrong picture,
        * so the channel goes back through the existing reconnect flow instead of
-       * Tally assuming an old token has new permissions.
+       * Vidxir AI assuming an old token has new permissions.
        */
-      const { user, project } = await fixture("legacy@tally.test", {
+      const { user, project } = await fixture("legacy@vidxir.test", {
         legacyScopes: true,
       });
 
@@ -835,7 +835,7 @@ suite("youtube publishing (integration)", () => {
        * before the bookkeeping finished. The video is on the channel; uploading
        * again would put a second copy there, and that cannot be undone.
        */
-      const { user, project } = await fixture("reconcile@tally.test");
+      const { user, project } = await fixture("reconcile@vidxir.test");
 
       const { startPublish, executePublish } = await import("@/lib/publish/service");
       const started = await startPublish({
@@ -871,11 +871,11 @@ suite("youtube publishing (integration)", () => {
     it("keeps one publication when the same video id is recorded twice", async () => {
       /**
        * The layer beneath the reconcile check: if two workers somehow both upload,
-       * the unique index on `youtube_video_id` is what stops Tally reporting two
+       * the unique index on `youtube_video_id` is what stops Vidxir AI reporting two
        * publications for one video — and the usage counter must not move twice
        * either.
        */
-      const { user, project } = await fixture("dupe@tally.test");
+      const { user, project } = await fixture("dupe@vidxir.test");
       await publish({ userId: user.id, projectId: project.id });
 
       const { db } = await import("@/lib/db");
@@ -910,7 +910,7 @@ suite("youtube publishing (integration)", () => {
        * illegal — so the video would be on YouTube with the project marked FAILED,
        * and every subsequent retry would hit the same wall.
        */
-      const { user, project } = await fixture("failed-retry@tally.test");
+      const { user, project } = await fixture("failed-retry@vidxir.test");
 
       const { ProviderError } = await import("@/lib/errors");
       youtube.uploadVideo.mockRejectedValueOnce(
@@ -930,7 +930,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("refuses a second publish for a project that is already live", async () => {
-      const { user, project } = await fixture("already@tally.test");
+      const { user, project } = await fixture("already@vidxir.test");
       await publish({ userId: user.id, projectId: project.id });
 
       const { startPublish } = await import("@/lib/publish/service");
@@ -955,7 +955,7 @@ suite("youtube publishing (integration)", () => {
        * correct and pinning one would make a harmless reordering look like a
        * regression. What must not happen is a second upload.
        */
-      const { user, project } = await fixture("inflight@tally.test");
+      const { user, project } = await fixture("inflight@vidxir.test");
 
       const { startPublish } = await import("@/lib/publish/service");
       await startPublish({
@@ -992,7 +992,7 @@ suite("youtube publishing (integration)", () => {
        * accepts as publishable. Without the active-job check a second click here
        * would queue a second upload of the same video to the same channel.
        */
-      const { user, project } = await fixture("inflight-sched@tally.test");
+      const { user, project } = await fixture("inflight-sched@vidxir.test");
       await setTier(user.id, "studio");
       const when = new Date(Date.now() + 6 * 60 * 60 * 1000);
 
@@ -1036,7 +1036,7 @@ suite("youtube publishing (integration)", () => {
     });
 
     it("rejects a jump from READY_TO_PUBLISH straight to PUBLISHED", async () => {
-      const { user, project } = await fixture("jump@tally.test");
+      const { user, project } = await fixture("jump@vidxir.test");
       const { transition } = await import("@/lib/projects/service");
 
       await expect(
@@ -1048,7 +1048,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("is terminal: a published project cannot be re-published or rewound", async () => {
-      const { user, project } = await fixture("terminal@tally.test");
+      const { user, project } = await fixture("terminal@vidxir.test");
       await publish({ userId: user.id, projectId: project.id });
 
       const { transition } = await import("@/lib/projects/service");
@@ -1062,7 +1062,7 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("reports 100% progress once published", async () => {
-      const { user, project } = await fixture("progress@tally.test");
+      const { user, project } = await fixture("progress@vidxir.test");
       await publish({ userId: user.id, projectId: project.id });
 
       const { getProject } = await import("@/lib/projects/service");
@@ -1077,8 +1077,8 @@ suite("youtube publishing (integration)", () => {
 
   describe("cross-tenant publishing", () => {
     it("will not publish another user's project", async () => {
-      const owner = await fixture("owner@tally.test");
-      const intruder = await createUser({ email: "intruder@tally.test" });
+      const owner = await fixture("owner@vidxir.test");
+      const intruder = await createUser({ email: "intruder@vidxir.test" });
 
       const { startPublish } = await import("@/lib/publish/service");
       // `getProject` is tenant-scoped, so a foreign project id is simply not found.
@@ -1103,8 +1103,8 @@ suite("youtube publishing (integration)", () => {
        * A's video using user B's token. `loadPublishJob` scopes by `userId`, so the
        * row is invisible.
        */
-      const victim = await fixture("victim@tally.test");
-      const attacker = await fixture("attacker@tally.test");
+      const victim = await fixture("victim@vidxir.test");
+      const attacker = await fixture("attacker@vidxir.test");
 
       const { startPublish, executePublish } = await import("@/lib/publish/service");
       const victimJob = await startPublish({
@@ -1139,7 +1139,7 @@ suite("youtube publishing (integration)", () => {
        * payload's stops project A's video being uploaded under project B's chosen
        * visibility and thumbnail.
        */
-      const first = await fixture("same-a@tally.test");
+      const first = await fixture("same-a@vidxir.test");
 
       const { db } = await import("@/lib/db");
       const { createProject, transition } = await import("@/lib/projects/service");
@@ -1209,7 +1209,7 @@ suite("youtube publishing (integration)", () => {
        * user. §10's exact scenario: the video is real, the token is real, and they
        * belong to different channels — so the video would land on the wrong one.
        */
-      const owner = await fixture("chan-a@tally.test");
+      const owner = await fixture("chan-a@vidxir.test");
       const otherChannelId = await createChannel(owner.user.id, {
         youtubeChannelId: "UCotherchannel0000000000",
         title: "Second channel",
@@ -1251,7 +1251,7 @@ suite("youtube publishing (integration)", () => {
 
   describe("readiness", () => {
     it("names every missing prerequisite in workflow order", async () => {
-      const { user, project } = await fixture("blocked@tally.test", {
+      const { user, project } = await fixture("blocked@vidxir.test", {
         withVideo: false,
         thumbnail: "none",
         withMetadata: false,
@@ -1270,15 +1270,15 @@ suite("youtube publishing (integration)", () => {
     }, 120_000);
 
     it("is ready when every asset exists", async () => {
-      const { user, project } = await fixture("ready@tally.test");
+      const { user, project } = await fixture("ready@vidxir.test");
       const { publishReadiness } = await import("@/lib/publish/service");
       const readiness = await publishReadiness(user.id, project.id);
       expect(readiness).toEqual({ ready: true, blocked: [] });
     }, 120_000);
 
     it("does not see another user's assets as this project's", async () => {
-      const owner = await fixture("assets-owner@tally.test");
-      const intruder = await createUser({ email: "assets-intruder@tally.test" });
+      const owner = await fixture("assets-owner@vidxir.test");
+      const intruder = await createUser({ email: "assets-intruder@vidxir.test" });
 
       const { publishReadiness } = await import("@/lib/publish/service");
       // Every read in `publishReadiness` carries `userId`, so a foreign caller sees

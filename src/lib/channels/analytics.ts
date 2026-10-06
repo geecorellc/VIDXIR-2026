@@ -28,7 +28,7 @@
  *    column, and §8's scoring would silently inherit the fiction.
  *
  *  - **Revenue is exact, or explicitly unavailable.** Earnings need the
- *    `yt-analytics-monetary.readonly` scope. Tally does not request it at
+ *    `yt-analytics-monetary.readonly` scope. Vidxir AI does not request it at
  *    consent, so the honest state for nearly every channel is
  *    `revenue_state = 'scope_missing'` — a permission fact, not $0.00. When it
  *    *is* granted, the figure is carried from the API to a `numeric` column as a
@@ -91,7 +91,7 @@ export interface IngestResult {
   channelRows: number;
   /** Per-video daily rows written. */
   videoRows: number;
-  /** Video ids YouTube reported that Tally has no `published_videos` row for. */
+  /** Video ids YouTube reported that Vidxir AI has no `published_videos` row for. */
   unmatchedVideoIds: string[];
   /**
    * Whether earnings were requested at all, and if not, why. Surfaced so a
@@ -110,8 +110,8 @@ export interface IngestResult {
  *
  * Two queries rather than one: the channel totals (dimension `day`) and the
  * per-video breakdown (`day,video`). They are not derivable from each other —
- * channel totals include traffic to videos Tally did not publish, which is
- * exactly the baseline §26 needs in order to say whether Tally is helping.
+ * channel totals include traffic to videos Vidxir AI did not publish, which is
+ * exactly the baseline §26 needs in order to say whether Vidxir AI is helping.
  *
  * `userId` and `channelId` are the caller's already-authorised pair. The grant is
  * re-read from the database here rather than passed in, because whether to ask
@@ -241,9 +241,9 @@ async function writeChannelRows(
 /**
  * Per-video rows, upserted on `analytics_snapshots_video_date_key`.
  *
- * Videos Tally did not publish are reported back rather than stored: the table's
+ * Videos Vidxir AI did not publish are reported back rather than stored: the table's
  * foreign key requires a `published_videos` row, and inventing one would claim
- * Tally uploaded something it did not.
+ * Vidxir AI uploaded something it did not.
  */
 async function writeVideoRows(
   userId: string,
@@ -350,7 +350,7 @@ function metrics(row: AnalyticsRow, now: Date) {
  * inlined. The cases, in order:
  *
  *  - revenue was not requested → `not_requested`, nothing stored. This is the
- *    normal path: Tally does not hold the monetary scope.
+ *    normal path: Vidxir AI does not hold the monetary scope.
  *  - requested but the provider returned no cell → `unavailable`. YouTube omits
  *    the metric for days below its reporting threshold, and for non-monetised
  *    channels. Absent, not zero.

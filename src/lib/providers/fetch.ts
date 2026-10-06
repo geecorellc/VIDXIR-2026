@@ -2,7 +2,7 @@
  * Guarded remote asset fetch (§34, §22).
  *
  * The visuals and music stages download files from provider CDNs. That is the one
- * place in Tally where a URL chosen by an upstream API is passed to an HTTP client
+ * place in Vidxir AI where a URL chosen by an upstream API is passed to an HTTP client
  * running inside our network, which is the classic SSRF shape: a compromised or
  * merely sloppy provider response naming `http://169.254.169.254/` or
  * `http://localhost:5432/` would be fetched by us, from inside, with our
@@ -38,7 +38,7 @@ import { logger } from "@/lib/logger";
 const log = logger.child({ component: "asset-fetch" });
 
 /**
- * Registrable domains Tally downloads media from, by provider.
+ * Registrable domains Vidxir AI downloads media from, by provider.
  *
  * Matching is exact-or-subdomain, so `videos.pexels.com` is covered by
  * `pexels.com` while `pexels.com.attacker.net` is not. Kept in code rather than
@@ -398,7 +398,7 @@ async function request(
       signal: controller.signal,
       headers: {
         // Some CDNs 403 an unidentified client.
-        "user-agent": "Tally/1.0 (+https://tally.video)",
+        "user-agent": "Vidxir/1.0 (+https://vidxir.com)",
         ...(options.accept ? { accept: options.accept } : {}),
         ...options.headers,
       },

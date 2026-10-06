@@ -31,7 +31,7 @@
  *
  * ## What happens when the row is missing
  *
- * A payment for a Tally credit price with no matching purchase row — a session created
+ * A payment for a Vidxir AI credit price with no matching purchase row — a session created
  * directly in the dashboard, or a row lost to a rolled-back transaction.
  * `completeCreditPurchase` falls back to `packForPriceId`, which maps a *configured*
  * price back to its pack, and credits from the catalogue. A price this deployment does
@@ -236,7 +236,7 @@ export async function completeCreditPurchase(input: {
    * The row belongs to someone else.
    *
    * Not reachable through the normal path — the webhook resolves the account from the
-   * session's own `client_reference_id`, which Tally set — but the check is here
+   * session's own `client_reference_id`, which Vidxir AI set — but the check is here
    * because the alternative is unbounded: crediting `input.userId` for a row owned by
    * another account would move credits between tenants on a forged
    * `client_reference_id`, and §34's rule is that the tenant predicate is part of the
@@ -256,7 +256,7 @@ export async function completeCreditPurchase(input: {
   }
 
   /**
-   * The pack, from Tally's own row where there is one, and from the *configured*
+   * The pack, from Vidxir AI's own row where there is one, and from the *configured*
    * price otherwise. `packForPriceId` returns null for a price this deployment does
    * not sell, which credits nothing — a price created in the dashboard must not be
    * able to mint credits.

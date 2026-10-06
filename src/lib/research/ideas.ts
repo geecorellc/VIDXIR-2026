@@ -16,7 +16,7 @@
  *  3. A post-generation similarity check rejects any title that is substantially
  *     a source title. The model is asked not to copy; this makes it verifiable.
  *
- * Scores are computed **here in code**, not by the model. The Tally Opportunity
+ * Scores are computed **here in code**, not by the model. The Vidxir AI Opportunity
  * Score has to be reproducible and explainable — a number a language model felt
  * was about right is neither, and §8 requires a configurable formula.
  */
@@ -161,7 +161,7 @@ const IDEA_JSON_SCHEMA = jsonSchema({
   required: ["ideas"],
 });
 
-const SYSTEM_PROMPT = `You are Tally's research analyst. You study public YouTube performance data for one topic area and propose ORIGINAL video ideas.
+const SYSTEM_PROMPT = `You are Vidxir AI's research analyst. You study public YouTube performance data for one topic area and propose ORIGINAL video ideas.
 
 Your discipline:
 - Diagnose, do not copy. The evidence shows what earned attention; your job is to work out WHY and then propose something new that serves that same demand better or from a different angle.
@@ -358,7 +358,7 @@ export async function generateIdeas(
     });
   }
 
-  return out.sort((a, b) => b.scores.tallyScore - a.scores.tallyScore);
+  return out.sort((a, b) => b.scores.vidxirScore - a.scores.vidxirScore);
 }
 
 function toSignalInput(signal: CollectedSignal): SignalInput {
@@ -581,7 +581,7 @@ export async function persistIdeas(
         audienceFitScore: idea.scores.audienceFit,
         velocityScore: idea.scores.velocity,
         freshnessScore: idea.scores.freshness,
-        tallyScore: idea.scores.tallyScore,
+        vidxirScore: idea.scores.vidxirScore,
         // The weights in force when this idea was scored, so a score read six
         // weeks from now can still be explained even after the formula is tuned.
         // Spelled out field by field because the column is an untyped

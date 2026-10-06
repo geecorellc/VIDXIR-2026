@@ -330,7 +330,7 @@ export interface GenerationOptions {
   /** Configured *and* included in the plan — i.e. the AI mode is actually usable. */
   aiAvailable: boolean;
   /**
-   * Every quality Tally knows, for rendering a consistent control.
+   * Every quality Vidxir AI knows, for rendering a consistent control.
    *
    * The *per-model* list is the authority on what is selectable; this exists so the
    * UI can show an unsupported tier as unavailable rather than making options
@@ -386,7 +386,7 @@ export function generationOptions(tier: PlanTier): GenerationOptions {
         mode: "AI_VIDEO",
         label: "AI video",
         description:
-          "Each scene generated from its description by a Tally AI video model. " +
+          "Each scene generated from its description by a Vidxir AI video model. " +
           "Slower, and costs more credits per video.",
         locked: !aiAllowed,
       },

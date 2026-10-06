@@ -19,7 +19,7 @@
  * Status codes are chosen for Stripe's retry behaviour, not for tidiness:
  *
  *  - **200** — verified and processed, *including* duplicates, stale deliveries and
- *    event types Tally does not use. Those are successful outcomes; a non-2xx would
+ *    event types Vidxir AI does not use. Those are successful outcomes; a non-2xx would
  *    make Stripe redeliver an event that will never be applied, and repeated
  *    failures eventually disable the endpoint.
  *  - **403** — signature verification failed. Stripe does not retry 4xx, which is
@@ -134,6 +134,6 @@ function json(
 ): NextResponse {
   return NextResponse.json(body, {
     status,
-    headers: { "x-tally-trace-id": traceId },
+    headers: { "x-vidxir-trace-id": traceId },
   });
 }

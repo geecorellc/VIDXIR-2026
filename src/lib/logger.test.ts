@@ -78,7 +78,7 @@ describe("redactValue", () => {
     // The realistic shape: postgres.js quotes the DSN in a connection error, and
     // that error reaches `log.error(..., { error })` from the readiness probe.
     const out = redactValue(
-      "connection to postgresql://tally:hunter2@db.internal:5432/tally failed",
+      "connection to postgresql://vidxir:hunter2@db.internal:5432/vidxir failed",
     );
     expect(out).not.toContain("hunter2");
     expect(out).toContain("postgresql://[redacted]@");

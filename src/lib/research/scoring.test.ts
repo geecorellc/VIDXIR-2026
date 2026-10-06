@@ -2,7 +2,7 @@
  * Scoring tests (§8, §39).
  *
  * These assert the *properties* the score has to hold rather than pinning exact
- * numbers, because the constants are meant to be tuned. Pinning `tallyScore` to
+ * numbers, because the constants are meant to be tuned. Pinning `vidxirScore` to
  * 63.4 would make every future adjustment look like a regression. What must not
  * change without a deliberate decision:
  *
@@ -379,7 +379,7 @@ describe("scoreOpportunity", () => {
       "audienceFit",
       "velocity",
       "freshness",
-      "tallyScore",
+      "vidxirScore",
     ] as const) {
       expect(result[key]).toBeGreaterThanOrEqual(0);
       expect(result[key]).toBeLessThanOrEqual(100);
@@ -411,7 +411,7 @@ describe("scoreOpportunity", () => {
       weightOverrides: { freshness: 100 },
     });
     // Same evidence, opposite emphasis: a fast but nearly-stale topic.
-    expect(velocityHeavy.tallyScore).toBeGreaterThan(freshnessHeavy.tallyScore);
+    expect(velocityHeavy.vidxirScore).toBeGreaterThan(freshnessHeavy.vidxirScore);
     expect(velocityHeavy.velocity).toBe(freshnessHeavy.velocity);
   });
 
@@ -429,8 +429,8 @@ describe("scoreOpportunity", () => {
       fit,
       now: NOW,
     });
-    expect(Number.isFinite(result.tallyScore)).toBe(true);
-    expect(result.tallyScore).toBeGreaterThanOrEqual(0);
+    expect(Number.isFinite(result.vidxirScore)).toBe(true);
+    expect(result.vidxirScore).toBeGreaterThanOrEqual(0);
   });
 
   it("scores a live, fast, low-competition topic above a stale dominated one", () => {
@@ -476,7 +476,7 @@ describe("scoreOpportunity", () => {
       fit,
       now: NOW,
     });
-    expect(good.tallyScore).toBeGreaterThan(bad.tallyScore);
+    expect(good.vidxirScore).toBeGreaterThan(bad.vidxirScore);
   });
 });
 

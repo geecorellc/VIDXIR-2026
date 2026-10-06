@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
 
     /**
      * Refuse a second subscription rather than letting Stripe create one. Two live
-     * subscriptions would bill the customer twice with no way to tell from Tally's
+     * subscriptions would bill the customer twice with no way to tell from Vidxir AI's
      * UI; plan *changes* belong in the portal, which swaps the price on the
      * existing subscription.
      */

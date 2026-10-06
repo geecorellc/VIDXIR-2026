@@ -5,7 +5,7 @@ import { getSession } from "@/lib/auth/session";
 import { getProfile } from "@/lib/onboarding/service";
 
 export const metadata: Metadata = {
-  title: "Set up your studio — Tally",
+  title: "Set up your studio — Vidxir AI",
 };
 
 export default async function OnboardingPage() {

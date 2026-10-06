@@ -25,11 +25,11 @@
  *    "never fake it" applies to our own optimism too: a field the caller relies
  *    on must be present, not assumed. This matters more on Bedrock, which does
  *    not accept `strict` tool schemas, so Zod is the only shape guarantee there.
- *  - **No mock.** With `TALLY_USE_MOCK_PROVIDERS` the capability registry
+ *  - **No mock.** With `VIDXIR_USE_MOCK_PROVIDERS` the capability registry
  *    reports `mock` and callers show a configuration state; there is deliberately
  *    no canned-script generator here. A believable fake script is exactly the
  *    thing that makes a broken pipeline look like a working one.
- *  - **Credentials are never read from Tally's own config on Bedrock.** The
+ *  - **Credentials are never read from Vidxir AI's own config on Bedrock.** The
  *    Bedrock client resolves them through the standard AWS chain (environment,
  *    shared config/credentials file, SSO cache, container and instance roles), so
  *    an access key never has to live in `.env.local` or in this repo (§33).
@@ -96,7 +96,7 @@ const BEDROCK_HINT =
   "Set BEDROCK_REGION to a region where your account has access to the Claude " +
   "model in BEDROCK_MODEL. AWS credentials come from the standard credential " +
   "chain (environment, shared credentials file, SSO, or an instance/container " +
-  "role) and are never read from Tally's configuration.";
+  "role) and are never read from Vidxir AI's configuration.";
 
 /**
  * True when the selected transport has everything it needs to be *attempted*.
@@ -159,7 +159,7 @@ function client(): AiClient {
       cachedClient = {
         key: cacheKey,
         // No credentials passed: omitting them is what selects the standard AWS
-        // provider chain, which is the only place Tally will read them from (§33).
+        // provider chain, which is the only place Vidxir AI will read them from (§33).
         client: new AnthropicBedrockMantle({ awsRegion: region, ...CLIENT_OPTIONS }),
       };
     }
@@ -525,7 +525,7 @@ export async function generateJson<T extends z.ZodTypeAny>(
 }
 
 /**
- * Map an SDK error onto Tally's taxonomy (§30).
+ * Map an SDK error onto Vidxir AI's taxonomy (§30).
  *
  * The distinction that matters: 429 and 5xx are worth another attempt, 401 and
  * 400 are not. Retrying a bad request forever is how a queue fills up.

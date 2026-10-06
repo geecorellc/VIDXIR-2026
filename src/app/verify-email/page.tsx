@@ -71,7 +71,7 @@ function VerifyEmailInner() {
             fontSize: 13,
           }}
         >
-          <RefreshCw size={15} className="tally-spin" aria-hidden="true" />
+          <RefreshCw size={15} className="vidxir-spin" aria-hidden="true" />
           Checking your verification link
         </div>
       </AuthShell>

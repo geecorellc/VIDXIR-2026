@@ -20,7 +20,7 @@ import { ArrowRight, Info } from "lucide-react";
 import { PlanCards } from "@/components/billing/PlanCards";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
-import { TallyLogo } from "@/components/ui/TallyLogo";
+import { VidxirLogo } from "@/components/ui/VidxirLogo";
 import { color, eyebrow, font } from "@/lib/design/tokens";
 import { planByTier, type PlanTier } from "@/lib/plans";
 
@@ -101,12 +101,12 @@ export function PlanChooser({
 
   return (
     <div
-      className="tally-scroll"
+      className="vidxir-scroll"
       style={{ minHeight: "100vh", overflowY: "auto", padding: "50px 20px" }}
     >
       <div style={{ maxWidth: 900, margin: "0 auto" }}>
         <div style={{ textAlign: "center", marginBottom: 40 }}>
-          <TallyLogo size={24} />
+          <VidxirLogo size={24} />
           <h1
             style={{
               fontFamily: font.display,

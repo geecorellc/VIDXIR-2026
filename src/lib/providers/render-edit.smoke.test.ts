@@ -66,7 +66,7 @@ const SOURCE = { width: 160, height: 90 } as const;
 let dir: string;
 
 beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), "tally-edit-smoke-"));
+  dir = await mkdtemp(join(tmpdir(), "vidxir-edit-smoke-"));
 });
 
 afterAll(async () => {

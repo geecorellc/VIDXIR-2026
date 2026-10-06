@@ -674,12 +674,12 @@ describe("editFfmpegArgs — text and captions (§Phase B.6, B.7)", () => {
       document([
         track("video-0", "video", [videoClip({ id: "v", startMs: 0, durationMs: 4_000 })]),
       ]),
-      { subtitlePath: "C:\\Users\\dev\\AppData\\Local\\Temp\\tally\\captions.srt" },
+      { subtitlePath: "C:\\Users\\dev\\AppData\\Local\\Temp\\vidxir\\captions.srt" },
     );
 
     // An unescaped colon silently becomes a *different filter option* rather than
     // erroring, which is why this is asserted rather than assumed.
-    expect(filterGraph).toContain("C\\\\:/Users/dev/AppData/Local/Temp/tally/captions.srt");
+    expect(filterGraph).toContain("C\\\\:/Users/dev/AppData/Local/Temp/vidxir/captions.srt");
   });
 
   it("omits both filters when there is nothing to draw", () => {

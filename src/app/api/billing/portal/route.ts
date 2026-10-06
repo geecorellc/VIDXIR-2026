@@ -3,9 +3,9 @@
  *
  * Card changes, invoice history, plan switches and cancellation all live on
  * Stripe's hosted pages. That is a deliberate choice rather than a shortcut: it
- * means Tally never receives a card number, so there is no cardholder data in this
+ * means Vidxir AI never receives a card number, so there is no cardholder data in this
  * codebase to protect (§34), and cancellation is always available to the user
- * without Tally mediating it.
+ * without Vidxir AI mediating it.
  *
  * Whatever the user does there arrives back as a webhook. This route grants
  * nothing and revokes nothing.

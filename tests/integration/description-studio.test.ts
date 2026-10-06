@@ -401,7 +401,7 @@ suite("described idea mode (integration)", () => {
       );
       const { eq } = await import("drizzle-orm");
 
-      const { user, project } = await describedProject("research@tally.test");
+      const { user, project } = await describedProject("research@vidxir.test");
       const { runId, result, error } = await runDescriptionResearch(
         user.id,
         project.id,
@@ -455,7 +455,7 @@ suite("described idea mode (integration)", () => {
     });
 
     it("searches for the interpreted keywords, not the raw sentence", async () => {
-      const { user, project } = await describedProject("probes@tally.test");
+      const { user, project } = await describedProject("probes@vidxir.test");
       const { error } = await runDescriptionResearch(user.id, project.id);
 
       // Asserted before the calls are read: a run that threw before the search
@@ -477,7 +477,7 @@ suite("described idea mode (integration)", () => {
     });
 
     it("derives the search language and region from the brief", async () => {
-      const { user, project } = await describedProject("region@tally.test");
+      const { user, project } = await describedProject("region@vidxir.test");
       const { error } = await runDescriptionResearch(user.id, project.id);
 
       // See the note above: without this, a run that failed before searching
@@ -516,7 +516,7 @@ suite("described idea mode (integration)", () => {
         throw new Error("unexpected AI call");
       });
 
-      const user = await createUser({ email: "language@tally.test" });
+      const user = await createUser({ email: "language@vidxir.test" });
       await saveStep(user.id, {
         niche: "Backen",
         contentStyle: "documentary",
@@ -543,7 +543,7 @@ suite("described idea mode (integration)", () => {
     });
 
     it("puts the description in the angle prompt as the subject, not as instructions", async () => {
-      const { user, project } = await describedProject("prompt@tally.test");
+      const { user, project } = await describedProject("prompt@vidxir.test");
       await runDescriptionResearch(user.id, project.id);
 
       const anglePrompt = ai.generateJson.mock.calls
@@ -573,7 +573,7 @@ suite("described idea mode (integration)", () => {
         new NotConfiguredError("Claude", ["ANTHROPIC_API_KEY"]),
       );
 
-      const { user, project } = await describedProject("unconfigured@tally.test");
+      const { user, project } = await describedProject("unconfigured@vidxir.test");
       const { runId, error } = await runDescriptionResearch(user.id, project.id);
 
       // Rethrown so the worker can decide about a retry — and it must not retry a
@@ -614,7 +614,7 @@ suite("described idea mode (integration)", () => {
       const { eq } = await import("drizzle-orm");
       const { executeResearchRun } = await import("@/lib/research/service");
 
-      const { user, project } = await describedProject("seedless@tally.test");
+      const { user, project } = await describedProject("seedless@vidxir.test");
 
       // Unreachable through any start function; asserted because the alternative is
       // researching whatever the empty context happens to yield.
@@ -660,7 +660,7 @@ suite("described idea mode (integration)", () => {
       const { jobs } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const { user, project } = await describedProject("jobrow@tally.test");
+      const { user, project } = await describedProject("jobrow@vidxir.test");
       const { startDescriptionResearchRun } = await import("@/lib/research/service");
 
       const { jobId, runId } = await startDescriptionResearchRun({
@@ -698,7 +698,7 @@ suite("described idea mode (integration)", () => {
     });
 
     it("refuses a second research run on the same project", async () => {
-      const { user, project } = await describedProject("dupe@tally.test");
+      const { user, project } = await describedProject("dupe@vidxir.test");
       const { startDescriptionResearchRun } = await import("@/lib/research/service");
 
       await startDescriptionResearchRun({
@@ -722,7 +722,7 @@ suite("described idea mode (integration)", () => {
     });
 
     it("still allows a different idea to be researched concurrently", async () => {
-      const { user, project } = await describedProject("concurrent@tally.test");
+      const { user, project } = await describedProject("concurrent@vidxir.test");
       const { createProject } = await import("@/lib/projects/service");
       const { startDescriptionResearchRun } = await import("@/lib/research/service");
 
@@ -763,7 +763,7 @@ suite("described idea mode (integration)", () => {
       const { researchRuns } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const { user, project } = await describedProject("handler@tally.test");
+      const { user, project } = await describedProject("handler@vidxir.test");
       const { startDescriptionResearchRun } = await import("@/lib/research/service");
       const { researchHandler } = await import("@/worker/handlers/research");
       const { markJobSucceeded } = await import("@/lib/queue/jobs");
@@ -794,7 +794,7 @@ suite("described idea mode (integration)", () => {
     });
 
     it("researches the stored description, not one supplied in the payload", async () => {
-      const { user, project } = await describedProject("payload@tally.test");
+      const { user, project } = await describedProject("payload@vidxir.test");
       const { startDescriptionResearchRun } = await import("@/lib/research/service");
       const { researchHandler } = await import("@/worker/handlers/research");
       const { markJobSucceeded } = await import("@/lib/queue/jobs");
@@ -833,7 +833,7 @@ suite("described idea mode (integration)", () => {
     });
 
     it("refuses a payload that identifies no seed at all", async () => {
-      const { user, project } = await describedProject("nopayload@tally.test");
+      const { user, project } = await describedProject("nopayload@vidxir.test");
       const { startDescriptionResearchRun } = await import("@/lib/research/service");
       const { researchHandler } = await import("@/worker/handlers/research");
 
@@ -856,7 +856,7 @@ suite("described idea mode (integration)", () => {
       const { startResearchRun } = await import("@/lib/research/service");
       const { researchHandler } = await import("@/worker/handlers/research");
 
-      const user = await describedUser("mismatch@tally.test");
+      const user = await describedUser("mismatch@vidxir.test");
       const channelId = await createChannel(user.id);
       const started = await startResearchRun({
         userId: user.id,
@@ -888,7 +888,7 @@ suite("described idea mode (integration)", () => {
     it("refuses to execute another user's run with a valid run id", async () => {
       const { executeResearchRun } = await import("@/lib/research/service");
 
-      const { user, project } = await describedProject("owner@tally.test");
+      const { user, project } = await describedProject("owner@vidxir.test");
       const { startDescriptionResearchRun } = await import("@/lib/research/service");
       const started = await startDescriptionResearchRun({
         userId: user.id,
@@ -897,7 +897,7 @@ suite("described idea mode (integration)", () => {
         projectId: project.id,
       });
 
-      const attacker = await describedUser("attacker@tally.test");
+      const attacker = await describedUser("attacker@vidxir.test");
 
       // A real run id, owned by somebody else. The ownership predicate is in the SQL,
       // so this is a property of the query rather than of a caller's diligence.
@@ -945,7 +945,7 @@ suite("described idea mode (integration)", () => {
       const { projects, researchRuns } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await describedUser("route@tally.test");
+      const user = await describedUser("route@vidxir.test");
       await signIn(user);
 
       const result = await post({ description: DESCRIPTION });
@@ -986,7 +986,7 @@ suite("described idea mode (integration)", () => {
       const { researchRuns } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await describedUser("whitespace@tally.test");
+      const user = await describedUser("whitespace@vidxir.test");
       await signIn(user);
 
       const result = await post({
@@ -1005,7 +1005,7 @@ suite("described idea mode (integration)", () => {
     });
 
     it("refuses a description too short to research", async () => {
-      const user = await describedUser("short@tally.test");
+      const user = await describedUser("short@vidxir.test");
       await signIn(user);
 
       const result = await post({ description: "cars" });
@@ -1019,7 +1019,7 @@ suite("described idea mode (integration)", () => {
       const { projects } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await describedUser("long@tally.test");
+      const user = await describedUser("long@vidxir.test");
       await signIn(user);
 
       // This string reaches a model. An unbounded one is an unbounded bill.
@@ -1045,7 +1045,7 @@ suite("described idea mode (integration)", () => {
       const { projects } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await describedUser("badmodel@tally.test");
+      const user = await describedUser("badmodel@vidxir.test");
       // Scale, so the plan checks pass and the refusal is about the *model* rather
       // than about the entitlement. On starter this would 402 first and prove nothing
       // about whether an unknown id can be stored.
@@ -1075,7 +1075,7 @@ suite("described idea mode (integration)", () => {
 
       // Starter by default. A real Tal model id, which is the point: the refusal is
       // the entitlement, not the name.
-      const user = await describedUser("starterai@tally.test");
+      const user = await describedUser("starterai@vidxir.test");
       await signIn(user);
 
       const result = await post({
@@ -1097,7 +1097,7 @@ suite("described idea mode (integration)", () => {
       const { projects } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const user = await describedUser("selection@tally.test");
+      const user = await describedUser("selection@vidxir.test");
       await setTier(user.id, "scale");
       await signIn(user);
 
@@ -1112,7 +1112,7 @@ suite("described idea mode (integration)", () => {
        * `mock/placeholder`, not a Tal model, and that is the environment being
        * honest rather than the test being weak.
        *
-       * The suite runs with `TALLY_USE_MOCK_PROVIDERS=true`, under which
+       * The suite runs with `VIDXIR_USE_MOCK_PROVIDERS=true`, under which
        * `videoGenProviderIds()` returns `["mock"]` and nothing else — so a Tal model
        * is refused here with a 400, because this deployment has not configured the
        * provider behind it. That is exactly the §21 rule ("a client must not be able

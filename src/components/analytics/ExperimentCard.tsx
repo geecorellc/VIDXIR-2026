@@ -9,7 +9,7 @@
  *
  * The footer note is deliberate: no significance test has been run, because the
  * impression data a real one needs is not available from YouTube's API. Saying so
- * is better than a confidence figure Tally cannot compute.
+ * is better than a confidence figure Vidxir AI cannot compute.
  */
 import { Card } from "@/components/ui/Card";
 import { color, font } from "@/lib/design/tokens";

@@ -17,7 +17,7 @@
  *     provider abstraction. This module resolves plans, reads and writes rows, and
  *     assembles text.
  *  2. **Nothing here can fail a build.** Every entry point is written so that a
- *     failure inside continuity degrades to the behaviour Tally had before this
+ *     failure inside continuity degrades to the behaviour Vidxir AI had before this
  *     layer existed. §22: continuity is a quality feature, and a quality feature
  *     that can lose a paid render is a defect.
  */
@@ -240,7 +240,7 @@ export interface PlanContinuityResult {
  *
  * **Never throws.** A planning failure logs and returns `planned: false`, and the
  * scene plan proceeds without continuity. That is a video without continuity
- * constraints, which is the video Tally has always produced; the alternative is
+ * constraints, which is the video Vidxir AI has always produced; the alternative is
  * failing an approved script's build because a bible could not be drafted.
  */
 export async function planContinuity(

@@ -123,7 +123,7 @@ export interface StartPublishInput {
   /**
    * When set, the video is uploaded *now* as private and YouTube flips it public
    * at this time. That is YouTube's own `status.publishAt`, so the schedule
-   * survives Tally being down — which is the point of scheduling rather than
+   * survives Vidxir AI being down — which is the point of scheduling rather than
    * holding the job in the queue.
    */
   scheduledFor?: Date | null;
@@ -296,7 +296,7 @@ export async function startPublish(
       /**
        * A scheduled publish still uploads immediately — as private, with
        * YouTube's `publishAt` set. Delaying the *job* would mean the schedule
-       * only holds while Tally is running, and an upload that starts at 18:00
+       * only holds while Vidxir AI is running, and an upload that starts at 18:00
        * does not go live at 18:00 (§19).
        */
       traceId: input.traceId ?? project.traceId,
@@ -444,7 +444,7 @@ export type PublishStageResult = {
   thumbnailSet: boolean;
   /**
    * §29: YouTube's altered/synthetic-content disclosure has no Data API field —
-   * it is made in Studio. True means Tally has *not* filed it and the user must.
+   * it is made in Studio. True means Vidxir AI has *not* filed it and the user must.
    */
   disclosureOutstanding: boolean;
 };
@@ -586,7 +586,7 @@ async function runPublish(
   if (missing.length > 0) {
     throw new ReauthRequiredError(
       channel.id,
-      "This channel was connected before Tally needed permission to set " +
+      "This channel was connected before Vidxir AI needed permission to set " +
         "thumbnails and edit video details. Reconnect it to publish.",
     );
   }
@@ -699,7 +699,7 @@ async function runPublish(
 
   /**
    * YouTube has confirmed the upload. This insert is the moment the video becomes
-   * published as far as Tally is concerned, and everything after it is
+   * published as far as Vidxir AI is concerned, and everything after it is
    * bookkeeping that must not be able to un-publish it.
    */
   const record = await recordPublication({
@@ -817,7 +817,7 @@ async function finalise(
  * `onConflictDoNothing` on the unique video id, then a re-read. The conflict is
  * the pathological retry — YouTube accepted the upload, the process died before
  * this insert, the retry uploaded again — and returning the *existing* row means
- * Tally reports one publication for one project instead of two.
+ * Vidxir AI reports one publication for one project instead of two.
  */
 async function recordPublication(values: {
   userId: string;
@@ -882,12 +882,12 @@ async function recordPublication(values: {
   /**
    * The unique index rejected the insert and the row is not visible to this user.
    * That means the video id belongs to *another tenant's* publication — the only
-   * way one YouTube video id maps to two Tally users is a shared channel, which
+   * way one YouTube video id maps to two Vidxir AI users is a shared channel, which
    * is a real state (two people connecting the same channel) and not one to
    * silently absorb.
    */
   throw new ConflictError(
-    "This video id is already recorded against another Tally account. The same " +
+    "This video id is already recorded against another Vidxir AI account. The same " +
       "YouTube channel appears to be connected twice.",
   );
 }

@@ -5,7 +5,7 @@
  * (`applyTestNamespaceEnv` below) and then, until this module existed, never emptied
  * either. Postgres was reset between tests by `resetDatabase()`, so the leak was
  * invisible in test outcomes and accumulated across runs instead: a development machine
- * was found holding 7,316 orphaned `tally-test:*` Redis keys and 1,841 orphaned storage
+ * was found holding 7,316 orphaned `vidxir-test:*` Redis keys and 1,841 orphaned storage
  * prefixes totalling 1.31 GB, none of which any worker or test would ever read again.
  *
  * The danger in a cleanup like this is obvious — it deletes by pattern, and the patterns
@@ -15,7 +15,7 @@
  *
  *  1. **Exact-match namespace guard.** `namespaceIssue()` refuses unless the prefix and
  *     bucket are *exactly* the harness's own constants. Anything else — the application
- *     default `tally`, the development bucket `tally-media`, a staging namespace, a typo
+ *     default `vidxir`, the development bucket `vidxir-media`, a staging namespace, a typo
  *     — is refused, not pattern-matched. So pointing a test run at a real namespace
  *     turns cleanup off rather than aiming it at production data. The guard is a pure
  *     function so it can be tested without a delete anywhere near it.
@@ -51,8 +51,8 @@ import Redis from "ioredis";
  * teardown for, and the guard below would be checking a value the thing it guards
  * supplied.
  */
-export const TEST_QUEUE_PREFIX = "tally-test";
-export const TEST_BUCKET = "tally-test";
+export const TEST_QUEUE_PREFIX = "vidxir-test";
+export const TEST_BUCKET = "vidxir-test";
 
 /**
  * The connection and namespace variables the harness runs against.
@@ -67,7 +67,7 @@ export function applyTestNamespaceEnv(): void {
   /**
    * A Redis namespace of their own.
    *
-   * `QUEUE_PREFIX` defaults to `tally`, which is also what a developer's worker
+   * `QUEUE_PREFIX` defaults to `vidxir`, which is also what a developer's worker
    * consumes, so without this an integration run enqueues real BullMQ messages into the
    * development queue and then TRUNCATEs the `jobs` rows they point at. A running worker
    * then picks up hundreds of jobs it can never complete. That happened: the first
@@ -89,8 +89,8 @@ export function applyTestNamespaceEnv(): void {
    * that cannot be written to is worse than no test bucket, because the failure surfaces
    * as a `StorageError` from application code and reads like a bug in the pipeline.
    */
-  process.env["S3_ACCESS_KEY_ID"] ??= "tallyminio";
-  process.env["S3_SECRET_ACCESS_KEY"] ??= "tallyminio";
+  process.env["S3_ACCESS_KEY_ID"] ??= "vidxirminio";
+  process.env["S3_SECRET_ACCESS_KEY"] ??= "vidxirminio";
   process.env["S3_FORCE_PATH_STYLE"] ??= "true";
 }
 
@@ -98,8 +98,8 @@ export function applyTestNamespaceEnv(): void {
  * Why this namespace must not be emptied, or null when it may be.
  *
  * Exact equality rather than a "looks like a test namespace" test. A `startsWith`
- * check would accept `tally-test` *and* anything a developer typed that happens to
- * begin with it, and a "not equal to tally" check would accept every namespace in the
+ * check would accept `vidxir-test` *and* anything a developer typed that happens to
+ * begin with it, and a "not equal to vidxir" check would accept every namespace in the
  * world except one. Equality inverts the failure: the only way to reach a delete is to
  * be in precisely the namespace the harness created, so every mistake — including ones
  * nobody predicted — lands on "refuse".
@@ -172,7 +172,7 @@ export async function cleanupTestNamespace(): Promise<CleanupResult> {
  *
  * The match is `<prefix>:*`. BullMQ, the rate limiter and the advisory locks all build
  * their keys as `<prefix>:<something>`, and the colon is what makes the pattern
- * unambiguous — `tally-test:*` cannot match a `tally:*` key, and no amount of
+ * unambiguous — `vidxir-test:*` cannot match a `vidxir:*` key, and no amount of
  * development data shares the prefix.
  */
 async function cleanupRedis(): Promise<number> {

@@ -11,7 +11,7 @@
  *    nocookie, scheme-less, `http://`, and a watch link copied from inside a
  *    playlist.
  *  - **The canonical URL is regenerated, never echoed.** A tracking parameter or
- *    an affiliate tag in the paste must not survive into anything Tally stores or
+ *    an affiliate tag in the paste must not survive into anything Vidxir AI stores or
  *    renders as a link.
  *  - **Host matching is exact.** `youtu.be.evil.invalid` and `notyoutube.com` are
  *    the two failures a suffix check would wave through, and both are asserted.
@@ -111,7 +111,7 @@ describe("parseYouTubeLink — accepted forms (§23 cases 1, 3)", () => {
   it("regenerates the canonical URL instead of echoing the paste (§23 case 1)", () => {
     // The point of `canonicalUrl`: a tracking parameter, an affiliate tag or a
     // `redirect` target in the paste must not survive into a stored row or into an
-    // anchor Tally renders.
+    // anchor Vidxir AI renders.
     const parsed = parseYouTubeLink(
       `https://www.youtube.com/watch?v=${ID}&utm_source=evil&si=trackingtoken&redirect=https://evil.invalid`,
     );
@@ -151,7 +151,7 @@ describe("parseYouTubeLink — rejected input (§23 case 2)", () => {
     refuses(`https://notyoutube.com/watch?v=${ID}`, /not a youtube link/i);
     refuses(`https://youtube.com.evil.invalid/watch?v=${ID}`, /not a youtube link/i);
     refuses(`https://evil.invalid/youtube.com/watch?v=${ID}`, /not a youtube link/i);
-    // A subdomain Tally has not listed is refused too: an exact list means an
+    // A subdomain Vidxir AI has not listed is refused too: an exact list means an
     // attacker cannot invent `anything.youtube.com` and be trusted.
     refuses(`https://studio.youtube.com/watch?v=${ID}`, /not a youtube link/i);
   });

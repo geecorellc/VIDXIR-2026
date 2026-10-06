@@ -12,7 +12,7 @@ import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { VerifyEmailBanner } from "@/components/dashboard/VerifyEmailBanner";
-import { TallyLogo } from "@/components/ui/TallyLogo";
+import { VidxirLogo } from "@/components/ui/VidxirLogo";
 import { color, font } from "@/lib/design/tokens";
 
 export interface DashboardShellProps {
@@ -100,7 +100,7 @@ export function DashboardShell({
       )}
 
       <main
-        className="tally-scroll"
+        className="vidxir-scroll"
         style={{
           flex: 1,
           minWidth: 0,
@@ -123,7 +123,7 @@ export function DashboardShell({
               zIndex: 20,
             }}
           >
-            <TallyLogo size={16} />
+            <VidxirLogo size={16} />
             <button
               type="button"
               onClick={() => setDrawerOpen((open) => !open)}

@@ -183,7 +183,7 @@ suite("edit document persistence", () => {
       );
       const { assembleTimeline } = await import("@/lib/video/service");
 
-      const { user, project } = await builtProject("seed-equal@tally.test");
+      const { user, project } = await builtProject("seed-equal@vidxir.test");
 
       // The pipeline's own answer, from the real rows.
       const expected = await assembleTimeline(user.id, project.id);
@@ -199,7 +199,7 @@ suite("edit document persistence", () => {
 
     it("reads the measured scene offsets rather than recomputing them", async () => {
       const { getOrSeedEditDocument } = await import("@/lib/video/edit-service");
-      const { user, project } = await builtProject("seed-offsets@tally.test");
+      const { user, project } = await builtProject("seed-offsets@vidxir.test");
 
       const stored = await getOrSeedEditDocument(user.id, project.id);
       const video = stored.document.tracks.find((t) => t.id === "video-0");
@@ -216,7 +216,7 @@ suite("edit document persistence", () => {
       const { and, eq } = await import("drizzle-orm");
       const { getOrSeedEditDocument } = await import("@/lib/video/edit-service");
 
-      const { user, project } = await builtProject("seed-assets@tally.test");
+      const { user, project } = await builtProject("seed-assets@vidxir.test");
       const stored = await getOrSeedEditDocument(user.id, project.id);
 
       const sources = stored.document.tracks
@@ -242,7 +242,7 @@ suite("edit document persistence", () => {
 
     it("stores the caption style the render used, not what the brand kit claimed", async () => {
       const { getOrSeedEditDocument } = await import("@/lib/video/edit-service");
-      const { user, project } = await builtProject("seed-style@tally.test");
+      const { user, project } = await builtProject("seed-style@vidxir.test");
 
       const stored = await getOrSeedEditDocument(user.id, project.id);
 
@@ -256,7 +256,7 @@ suite("edit document persistence", () => {
       const { getOrSeedEditDocument, saveEditDocument } = await import(
         "@/lib/video/edit-service"
       );
-      const { user, project } = await builtProject("seed-once@tally.test");
+      const { user, project } = await builtProject("seed-once@vidxir.test");
 
       const first = await getOrSeedEditDocument(user.id, project.id);
 
@@ -287,7 +287,7 @@ suite("edit document persistence", () => {
       const { eq } = await import("drizzle-orm");
       const { getOrSeedEditDocument } = await import("@/lib/video/edit-service");
 
-      const { user, project } = await builtProject("seed-race@tally.test");
+      const { user, project } = await builtProject("seed-race@vidxir.test");
 
       // Two tabs opening the editor at the same moment. Both seed; the unique index
       // decides, and neither call may surface a duplicate-key error.
@@ -313,7 +313,7 @@ suite("edit document persistence", () => {
       const { getOrSeedEditDocument } = await import("@/lib/video/edit-service");
       const { AssetMissingError } = await import("@/lib/errors");
 
-      const { user, project } = await builtProject("seed-incomplete@tally.test");
+      const { user, project } = await builtProject("seed-incomplete@vidxir.test");
 
       await db
         .update(scenes)
@@ -335,7 +335,7 @@ suite("edit document persistence", () => {
         "@/lib/video/edit-service"
       );
 
-      const { user, project } = await builtProject("never-edited@tally.test");
+      const { user, project } = await builtProject("never-edited@vidxir.test");
 
       // Nothing in the pipeline writes a document, so a project that is never opened
       // renders from its scene rows exactly as it did before this table existed.
@@ -355,7 +355,7 @@ suite("edit document persistence", () => {
       const { getOrSeedEditDocument, saveEditDocument, loadEditDocument } = await import(
         "@/lib/video/edit-service"
       );
-      const { user, project } = await builtProject("save-ok@tally.test");
+      const { user, project } = await builtProject("save-ok@vidxir.test");
 
       const opened = await getOrSeedEditDocument(user.id, project.id);
       const document = JSON.parse(JSON.stringify(opened.document)) as typeof opened.document;
@@ -382,7 +382,7 @@ suite("edit document persistence", () => {
       );
       const { ConflictError } = await import("@/lib/errors");
 
-      const { user, project } = await builtProject("save-conflict@tally.test");
+      const { user, project } = await builtProject("save-conflict@vidxir.test");
       const opened = await getOrSeedEditDocument(user.id, project.id);
 
       const firstTab = JSON.parse(JSON.stringify(opened.document)) as typeof opened.document;
@@ -417,7 +417,7 @@ suite("edit document persistence", () => {
         "@/lib/video/edit-service"
       );
 
-      const { user, project } = await builtProject("save-invalid@tally.test");
+      const { user, project } = await builtProject("save-invalid@vidxir.test");
       const opened = await getOrSeedEditDocument(user.id, project.id);
 
       const malicious = JSON.parse(JSON.stringify(opened.document)) as Record<
@@ -450,8 +450,8 @@ suite("edit document persistence", () => {
       const { getOrSeedEditDocument, loadEditDocument, compileProjectEdit } =
         await import("@/lib/video/edit-service");
 
-      const owner = await builtProject("iso-owner@tally.test");
-      const intruder = await createUser({ email: "iso-intruder@tally.test" });
+      const owner = await builtProject("iso-owner@vidxir.test");
+      const intruder = await createUser({ email: "iso-intruder@vidxir.test" });
 
       await getOrSeedEditDocument(owner.user.id, owner.project.id);
 
@@ -477,8 +477,8 @@ suite("edit document persistence", () => {
       const { getOrSeedEditDocument } = await import("@/lib/video/edit-service");
       const { ForbiddenError } = await import("@/lib/errors");
 
-      const owner = await builtProject("iso3-owner@tally.test");
-      const intruder = await createUser({ email: "iso3-intruder@tally.test" });
+      const owner = await builtProject("iso3-owner@vidxir.test");
+      const intruder = await createUser({ email: "iso3-intruder@vidxir.test" });
 
       const foreign = await getOrSeedEditDocument(
         intruder.id,
@@ -505,8 +505,8 @@ suite("edit document persistence", () => {
         loadEditDocument,
       } = await import("@/lib/video/edit-service");
 
-      const owner = await builtProject("iso2-owner@tally.test");
-      const intruder = await createUser({ email: "iso2-intruder@tally.test" });
+      const owner = await builtProject("iso2-owner@vidxir.test");
+      const intruder = await createUser({ email: "iso2-intruder@vidxir.test" });
 
       const opened = await getOrSeedEditDocument(owner.user.id, owner.project.id);
 
@@ -568,7 +568,7 @@ suite("edit document persistence", () => {
       const { getOrSeedEditDocument, saveEditDocument, loadEditDocument } =
         await import("@/lib/video/edit-service");
 
-      const owner = await builtProject("asset-own@tally.test");
+      const owner = await builtProject("asset-own@vidxir.test");
       const opened = await getOrSeedEditDocument(owner.user.id, owner.project.id);
 
       // A real edit, so this is not just "the seeded document round-trips": the first
@@ -597,8 +597,8 @@ suite("edit document persistence", () => {
       const { getOrSeedEditDocument, saveEditDocument, loadEditDocument } =
         await import("@/lib/video/edit-service");
 
-      const owner = await builtProject("asset-victim@tally.test");
-      const attacker = await builtProject("asset-attacker@tally.test");
+      const owner = await builtProject("asset-victim@vidxir.test");
+      const attacker = await builtProject("asset-attacker@vidxir.test");
 
       // A real asset row, owned by the victim. The attacker knows both its id and its
       // key — which is the point: neither may be enough.
@@ -642,7 +642,7 @@ suite("edit document persistence", () => {
         "@/lib/video/edit-service"
       );
 
-      const owner = await builtProject("asset-unknown@tally.test");
+      const owner = await builtProject("asset-unknown@vidxir.test");
       const opened = await getOrSeedEditDocument(owner.user.id, owner.project.id);
 
       // A well-formed uuid that is not an asset at all. The message must match the
@@ -663,8 +663,8 @@ suite("edit document persistence", () => {
       const { getOrSeedEditDocument, saveEditDocument, loadEditDocument } =
         await import("@/lib/video/edit-service");
 
-      const owner = await builtProject("asset-key@tally.test");
-      const victim = await builtProject("asset-key-victim@tally.test");
+      const owner = await builtProject("asset-key@vidxir.test");
+      const victim = await builtProject("asset-key-victim@vidxir.test");
 
       const victimAsset = await db
         .insert(assets)

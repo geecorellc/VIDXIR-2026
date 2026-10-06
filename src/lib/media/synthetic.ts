@@ -1,7 +1,7 @@
 /**
  * Real files for the development mocks (§40).
  *
- * When `TALLY_USE_MOCK_PROVIDERS=true` the voice, visuals and music providers
+ * When `VIDXIR_USE_MOCK_PROVIDERS=true` the voice, visuals and music providers
  * must still produce **actual media** — a valid WAV of a known length, a valid
  * PNG of known dimensions — because everything downstream is real code operating
  * on real bytes: the checksum, the storage upload, the duration recorded on the

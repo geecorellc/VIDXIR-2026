@@ -10,7 +10,7 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 
-const SESSION_COOKIE = "tally_session";
+const SESSION_COOKIE = "vidxir_session";
 
 /** Paths that require a session cookie to be present. */
 const PROTECTED_PREFIXES = ["/dashboard", "/onboarding", "/plan"];

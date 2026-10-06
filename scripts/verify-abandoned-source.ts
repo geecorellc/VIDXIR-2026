@@ -14,7 +14,7 @@
  *
  * The distinction it is checking is the whole point of the fix:
  *
- *   a user submitted a URL   ≠   Tally successfully analysed the source
+ *   a user submitted a URL   ≠   Vidxir AI successfully analysed the source
  *
  * `projects.source_video_id` is written the moment a link is pasted, before any worker
  * runs. `research_runs.source_analysis`, `source_title` and `source_channel_title` are
@@ -55,7 +55,7 @@
  * first. `buildScriptPrompt` renders the prompt as a string in-process and is not sent
  * anywhere: no AI provider, no YouTube API, no Stripe call, no credit spent.
  *
- * `TALLY_USE_MOCK_PROVIDERS=true` is set at module scope as belt-and-braces, so that if a
+ * `VIDXIR_USE_MOCK_PROVIDERS=true` is set at module scope as belt-and-braces, so that if a
  * future edit to one of these loaders did reach a provider registry, it would resolve to
  * the mock rather than to a paid backend.
  *
@@ -78,12 +78,12 @@ import "@/lib/load-env";
 /**
  * Set before anything can read it.
  *
- * `.env.local` has `TALLY_USE_MOCK_PROVIDERS=false`, which is right for a developer's web
+ * `.env.local` has `VIDXIR_USE_MOCK_PROVIDERS=false`, which is right for a developer's web
  * app and wrong here. `process.loadEnvFile` runs from the hoisted `load-env` import above
  * and does not overwrite variables already present — but it ran *first*, so this
  * assignment wins, and no `env()` call has happened yet.
  */
-process.env["TALLY_USE_MOCK_PROVIDERS"] = "true";
+process.env["VIDXIR_USE_MOCK_PROVIDERS"] = "true";
 
 let step = 0;
 
@@ -120,7 +120,7 @@ function assertNoId(value: unknown, videoId: string, what: string): void {
 }
 
 async function main(): Promise<void> {
-  console.log("\nTally abandoned-source exposure verification\n");
+  console.log("\nVidxir AI abandoned-source exposure verification\n");
 
   const { env, usingMockProviders } = await import("@/lib/env");
   const e = env();
@@ -277,11 +277,11 @@ async function main(): Promise<void> {
     /**
      * The whole payload, minus the two fields that legitimately carry the id.
      *
-     * `project.sourceVideoId` is provenance §22 requires Tally to keep, and
+     * `project.sourceVideoId` is provenance §22 requires Vidxir AI to keep, and
      * `project.title` is the stored row, which is deliberately not rewritten — the fix is
      * that no screen renders it raw, proved on the next line. `source.videoId` is excluded
      * only in the analysed case, where the card is real and the id is the thing the user
-     * pasted, shown as part of a source Tally genuinely read.
+     * pasted, shown as part of a source Vidxir AI genuinely read.
      */
     const scrubbedStudio = {
       ...studio,

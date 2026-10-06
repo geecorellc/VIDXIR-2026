@@ -4,7 +4,7 @@
  * A redirect, not a JSON endpoint, and deliberately so. The consent URL carries
  * the client id, the scope list and the signed state nonce; building it here and
  * answering with a 302 keeps all three out of the browser bundle (§34). The user
- * types their password into Google's page, never into Tally (§6).
+ * types their password into Google's page, never into Vidxir AI (§6).
  *
  * The plan's channel limit is checked *before* consent rather than after. Sending
  * someone through a Google authorisation only to refuse the result would be

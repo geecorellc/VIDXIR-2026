@@ -15,7 +15,7 @@
  * only the key onto the run differs.
  *
  * Everything the screen shows is persisted. §18 requires progress to come from
- * Tally's own job records, and §42 forbids inventing what has not happened, so a
+ * Vidxir AI's own job records, and §42 forbids inventing what has not happened, so a
  * run that is still queued yields empty result and angle lists rather than
  * placeholders — the caller renders "researching", not fabricated rows.
  */
@@ -69,7 +69,7 @@ export interface AngleView {
   trendSignal: string | null;
   topic: string | null;
   targetKeywords: string[];
-  tallyScore: number | null;
+  vidxirScore: number | null;
   state: string;
 }
 
@@ -235,7 +235,7 @@ export async function getLinkStudioData(
             trendSignal: ideas.trendSignal,
             topic: ideas.topic,
             targetKeywords: ideas.targetKeywords,
-            tallyScore: ideas.tallyScore,
+            vidxirScore: ideas.vidxirScore,
             state: ideas.state,
           })
           .from(ideas)
@@ -246,7 +246,7 @@ export async function getLinkStudioData(
               ne(ideas.state, "rejected"),
             ),
           )
-          .orderBy(desc(ideas.tallyScore))
+          .orderBy(desc(ideas.vidxirScore))
           .limit(12)
       : Promise.resolve([]),
 
@@ -282,7 +282,7 @@ export async function getLinkStudioData(
      * cancelled or failed before it read the video leaves an id with nothing behind
      * it. The card then rendered its own last resort — the bare eleven-character
      * video id as the headline, "not reported" under every figure — which reads as
-     * though Tally analysed the video and understood nothing about it. The truthful
+     * though Vidxir AI analysed the video and understood nothing about it. The truthful
      * answer at that point is that there is no analysis yet, and the panel's empty
      * state already says exactly that.
      *

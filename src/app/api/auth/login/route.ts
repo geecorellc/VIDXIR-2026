@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       userId: result.userId,
       emailVerified: result.emailVerified,
       // Login skips plan selection and goes straight to the dashboard, matching
-      // the prototype's TallyApp flow — unless onboarding was never finished.
+      // the prototype's VidxirApp flow — unless onboarding was never finished.
       nextStep: result.onboarded ? ("dashboard" as const) : ("onboarding" as const),
     };
   });

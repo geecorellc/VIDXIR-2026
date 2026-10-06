@@ -68,12 +68,12 @@ suite("auth (integration)", () => {
 
     it("refuses a duplicate email without confirming it is registered", async () => {
       const { signup } = await import("@/lib/auth/service");
-      await createUser({ email: "taken@tally.test" });
+      await createUser({ email: "taken@vidxir.test" });
 
       await expect(
         signup({
           name: "Impostor",
-          email: "taken@tally.test",
+          email: "taken@vidxir.test",
           password: "Some-Other-Pass-9",
         }),
       ).rejects.toMatchObject({ code: "conflict" });
@@ -81,13 +81,13 @@ suite("auth (integration)", () => {
       // The message must not say "already registered" — that is an account oracle.
       await signup({
         name: "Impostor",
-        email: "other@tally.test",
+        email: "other@vidxir.test",
         password: "Some-Other-Pass-9",
       }).catch(() => undefined);
       await expect(
         signup({
           name: "Impostor",
-          email: "taken@tally.test",
+          email: "taken@vidxir.test",
           password: "Some-Other-Pass-9",
         }),
       ).rejects.toThrow(/cannot be used to sign up/i);
@@ -97,7 +97,7 @@ suite("auth (integration)", () => {
       const { signup, login } = await import("@/lib/auth/service");
       await signup({
         name: "Case Test",
-        email: "  MiXeD@Tally.TEST ",
+        email: "  MiXeD@Vidxir AI.TEST ",
         password: "Case-Test-Pass-2",
       });
 
@@ -105,20 +105,20 @@ suite("auth (integration)", () => {
       await expect(
         signup({
           name: "Case Test",
-          email: "mixed@tally.test",
+          email: "mixed@vidxir.test",
           password: "Case-Test-Pass-2",
         }),
       ).rejects.toMatchObject({ code: "conflict" });
 
       await expect(
-        login("MIXED@TALLY.TEST", "Case-Test-Pass-2"),
+        login("MIXED@VIDXIR.TEST", "Case-Test-Pass-2"),
       ).resolves.toMatchObject({ emailVerified: false });
     });
 
     it("rejects a password below the length floor", async () => {
       const { signup } = await import("@/lib/auth/service");
       await expect(
-        signup({ name: "Short", email: "short@tally.test", password: "abc123" }),
+        signup({ name: "Short", email: "short@vidxir.test", password: "abc123" }),
       ).rejects.toMatchObject({ code: "validation_failed" });
 
       // And the account must not exist afterwards.
@@ -149,7 +149,7 @@ suite("auth (integration)", () => {
       const wrongPassword = await login(user.email, "definitely-wrong-1").catch(
         (e: Error) => e.message,
       );
-      const noSuchUser = await login("nobody@tally.test", "definitely-wrong-1").catch(
+      const noSuchUser = await login("nobody@vidxir.test", "definitely-wrong-1").catch(
         (e: Error) => e.message,
       );
 
@@ -370,7 +370,7 @@ suite("auth (integration)", () => {
       const { requestPasswordReset } = await import("@/lib/auth/service");
       // Both paths resolve; only the side effect differs.
       await expect(
-        requestPasswordReset("nobody-at-all@tally.test"),
+        requestPasswordReset("nobody-at-all@vidxir.test"),
       ).resolves.toBeUndefined();
 
       const user = await createUser();

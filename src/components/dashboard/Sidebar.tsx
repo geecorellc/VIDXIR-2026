@@ -31,7 +31,7 @@ import {
   Youtube,
   type LucideIcon,
 } from "lucide-react";
-import { TallyLogo } from "@/components/ui/TallyLogo";
+import { VidxirLogo } from "@/components/ui/VidxirLogo";
 import { color, font, radius } from "@/lib/design/tokens";
 import { NAV_ITEMS, SECONDARY_NAV, type NavItem } from "@/lib/nav";
 import { api } from "@/services/api-client";
@@ -120,8 +120,8 @@ export function Sidebar({
       }}
     >
       <div style={{ padding: "0 8px", marginBottom: 30 }}>
-        <Link href="/dashboard" aria-label="Tally — dashboard">
-          <TallyLogo size={20} />
+        <Link href="/dashboard" aria-label="Vidxir AI — dashboard">
+          <VidxirLogo size={20} />
         </Link>
       </div>
 

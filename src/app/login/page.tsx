@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { AuthForm } from "@/components/auth/AuthForm";
 
 export const metadata: Metadata = {
-  title: "Log in — Tally",
+  title: "Log in — Vidxir AI",
 };
 
 interface Props {

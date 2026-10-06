@@ -511,7 +511,7 @@ async function accessTokenFor(
  * asking — specifically revenue, which fails the entire analytics query with a
  * 403 when the monetary scope is absent. Phase 9 §12 is the reason it reads the
  * `channels` row rather than accepting a scope list: a client-supplied
- * "monetary: true" would otherwise decide what Tally requests, and a client must
+ * "monetary: true" would otherwise decide what Vidxir AI requests, and a client must
  * never widen its own authorisation.
  *
  * Returns null when the channel is not this user's, matching the tenant-scoped

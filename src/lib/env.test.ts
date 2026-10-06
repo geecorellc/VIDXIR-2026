@@ -6,7 +6,7 @@
  * a development flag. Four of those mistakes are silent by nature — the process
  * starts, every page renders, and the damage only shows up later:
  *
- *  - `TALLY_USE_MOCK_PROVIDERS=true` in production means Tally reports work it
+ *  - `VIDXIR_USE_MOCK_PROVIDERS=true` in production means Vidxir AI reports work it
  *    never did (§40, §42). Nothing about the running app looks wrong.
  *  - `EMAIL_PROVIDER=console` means every verification and reset email goes to
  *    stdout. Signup appears to succeed; nobody can confirm an address.
@@ -34,9 +34,9 @@ import { env, isProduction, realPublishBlocked, resetEnvCache, usingMockProvider
  * placeholders, not credentials — nothing here connects to anything.
  */
 const BASE = {
-  DATABASE_URL: "postgresql://tally:tally@localhost:5432/tally_unit",
+  DATABASE_URL: "postgresql://vidxir:vidxir@localhost:5432/vidxir_unit",
   REDIS_URL: "redis://127.0.0.1:6379",
-  S3_BUCKET: "tally-unit",
+  S3_BUCKET: "vidxir-unit",
   S3_ACCESS_KEY_ID: "unit",
   S3_SECRET_ACCESS_KEY: "unit",
   ENCRYPTION_KEY: "a".repeat(64),
@@ -47,8 +47,8 @@ const BASE = {
 const MANAGED = [
   "NODE_ENV",
   "APP_URL",
-  "TALLY_USE_MOCK_PROVIDERS",
-  "TALLY_BLOCK_REAL_PUBLISH",
+  "VIDXIR_USE_MOCK_PROVIDERS",
+  "VIDXIR_BLOCK_REAL_PUBLISH",
   "EMAIL_PROVIDER",
   "RESEND_API_KEY",
   "BILLING_PROVIDER",
@@ -93,7 +93,7 @@ function configure(vars: Record<string, string | undefined>): void {
 /** A complete production configuration, which every case below then breaks. */
 const VALID_PRODUCTION = {
   NODE_ENV: "production",
-  APP_URL: "https://app.tally.example",
+  APP_URL: "https://app.vidxir.example",
   EMAIL_PROVIDER: "resend",
   RESEND_API_KEY: "unit-placeholder",
   BILLING_PROVIDER: "mock",
@@ -120,10 +120,10 @@ describe("production configuration refusals (§18)", () => {
   });
 
   it("refuses to start with mock providers in production", () => {
-    configure({ ...VALID_PRODUCTION, TALLY_USE_MOCK_PROVIDERS: "true" });
+    configure({ ...VALID_PRODUCTION, VIDXIR_USE_MOCK_PROVIDERS: "true" });
     // §40. The alternative to a startup failure is an app that fabricates
     // voiceovers and visuals for paying customers.
-    expect(() => env()).toThrow(/TALLY_USE_MOCK_PROVIDERS must be false in production/);
+    expect(() => env()).toThrow(/VIDXIR_USE_MOCK_PROVIDERS must be false in production/);
   });
 
   it("refuses to start with console email in production", () => {
@@ -158,7 +158,7 @@ describe("production configuration refusals (§18)", () => {
   });
 
   it("refuses an http APP_URL in production", () => {
-    configure({ ...VALID_PRODUCTION, APP_URL: "http://app.tally.example" });
+    configure({ ...VALID_PRODUCTION, APP_URL: "http://app.vidxir.example" });
     expect(() => env()).toThrow(/APP_URL must use https in production/);
   });
 
@@ -181,8 +181,8 @@ describe("development flags stay development-only (§17)", () => {
   it("permits mock providers and the publish guard outside production", () => {
     configure({
       NODE_ENV: "development",
-      TALLY_USE_MOCK_PROVIDERS: "true",
-      TALLY_BLOCK_REAL_PUBLISH: "true",
+      VIDXIR_USE_MOCK_PROVIDERS: "true",
+      VIDXIR_BLOCK_REAL_PUBLISH: "true",
     });
     expect(usingMockProviders()).toBe(true);
     expect(realPublishBlocked()).toBe(true);
@@ -190,14 +190,14 @@ describe("development flags stay development-only (§17)", () => {
 
   it("ignores the publish guard in production rather than trusting it", () => {
     /**
-     * `TALLY_BLOCK_REAL_PUBLISH=true` is not a startup error — it is not dangerous
+     * `VIDXIR_BLOCK_REAL_PUBLISH=true` is not a startup error — it is not dangerous
      * the way a mock provider is — but it must not be *honoured* in production
      * either. Honouring it would mean a production deployment silently refusing
      * every upload while the UI reported the pipeline as working, which is the
      * same class of lie §42 forbids, pointed the other way.
      */
-    configure({ ...VALID_PRODUCTION, TALLY_BLOCK_REAL_PUBLISH: "true" });
-    expect(env().TALLY_BLOCK_REAL_PUBLISH).toBe(true);
+    configure({ ...VALID_PRODUCTION, VIDXIR_BLOCK_REAL_PUBLISH: "true" });
+    expect(env().VIDXIR_BLOCK_REAL_PUBLISH).toBe(true);
     expect(realPublishBlocked()).toBe(false);
     expect(usingMockProviders()).toBe(false);
   });

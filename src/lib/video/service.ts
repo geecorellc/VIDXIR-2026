@@ -225,7 +225,7 @@ const COMPLETED_AFTER: Record<string, PipelineStage[]> = {
  * How often a hosted render is polled.
  *
  * 15 seconds: a 1080p render takes minutes, and polling every second would spend
- * an API call to learn nothing. The studio screen polls Tally every 4 seconds and
+ * an API call to learn nothing. The studio screen polls Vidxir AI every 4 seconds and
  * reads the stored value, so the number a user sees is at most 15 seconds stale —
  * which is invisible against a multi-minute render.
  */
@@ -635,7 +635,7 @@ export async function executeVoiceover(input: StageInput): Promise<{
      *
      * Wrapped because a continuity failure must not lose a voiceover: §22 applies to
      * this stage as much as to the visuals stage, and the fallback is the behaviour
-     * Tally had before character voices existed — one voice for every scene. An empty
+     * Vidxir AI had before character voices existed — one voice for every scene. An empty
      * map is the ordinary result and costs nothing at the provider.
      */
     const voices = await sceneVoiceAssignments(input, sceneRows);
@@ -1154,7 +1154,7 @@ async function paidGeneration<T>(args: {
  *
  * Advisory, and deliberately so: `chargeCredits` is the authority, charges per scene
  * against a locked row, and refuses on its own. This exists for a different reason —
- * cost. Without it a user with five credits gets scene one generated at Tally's expense
+ * cost. Without it a user with five credits gets scene one generated at Vidxir AI's expense
  * and then a failed project, and the eighty-scene version of that is eighty provider
  * calls for a video that could never complete.
  *
@@ -3288,7 +3288,7 @@ async function loadSettings(
  * ask for it, and this function only resolves a context and hands the answer over.
  *
  * **Never throws.** Every failure path returns an empty map, which the caller treats
- * as "no character voices" — the behaviour every Tally voiceover had before this
+ * as "no character voices" — the behaviour every Vidxir AI voiceover had before this
  * existed. §22 is the reason: a voiceover is paid work, and losing one because a
  * bible could not be read would make voice continuity a liability rather than a
  * quality feature. The distinction §8 asks for is kept here: this function answers

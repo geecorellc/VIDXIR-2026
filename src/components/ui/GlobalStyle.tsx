@@ -32,7 +32,7 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-.tally-root {
+.vidxir-root {
   background: ${color.bg};
   color: ${color.text};
   font-family: ${font.body};
@@ -40,14 +40,14 @@ html, body {
 }
 
 /* Thin dark scrollbars so panels do not gain bright chrome. */
-.tally-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
-.tally-scroll::-webkit-scrollbar-track { background: transparent; }
-.tally-scroll::-webkit-scrollbar-thumb {
+.vidxir-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.vidxir-scroll::-webkit-scrollbar-track { background: transparent; }
+.vidxir-scroll::-webkit-scrollbar-thumb {
   background: ${color.borderLight};
   border-radius: 999px;
 }
-.tally-scroll::-webkit-scrollbar-thumb:hover { background: #3A3236; }
-.tally-scroll { scrollbar-width: thin; scrollbar-color: ${color.borderLight} transparent; }
+.vidxir-scroll::-webkit-scrollbar-thumb:hover { background: #3A3236; }
+.vidxir-scroll { scrollbar-width: thin; scrollbar-color: ${color.borderLight} transparent; }
 
 ::selection { background: ${color.accent}; color: #fff; }
 
@@ -61,7 +61,7 @@ html, body {
 
 a { color: inherit; }
 
-@keyframes tally-pulse {
+@keyframes vidxir-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.55; transform: scale(0.88); }
 }
@@ -93,12 +93,12 @@ a { color: inherit; }
   background-position: 0 0, 1px 2px;
 }
 
-.tally-fade-up { animation: fadeUp 320ms ease both; }
-.tally-spin { animation: spin 900ms linear infinite; }
+.vidxir-fade-up { animation: fadeUp 320ms ease both; }
+.vidxir-spin { animation: spin 900ms linear infinite; }
 
 /* Live-status dot (prototype: the pulsing indicator beside a connected channel).
    Colour and size stay inline so callers can tint it per status. */
-.tally-dot { animation: tally-pulse 1.9s ease-in-out infinite; }
+.vidxir-dot { animation: vidxir-pulse 1.9s ease-in-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

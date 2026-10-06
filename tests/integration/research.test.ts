@@ -280,7 +280,7 @@ suite("research engine (integration)", () => {
       );
       const { eq } = await import("drizzle-orm");
 
-      const { user, channelId } = await seedChannel("persist@tally.test");
+      const { user, channelId } = await seedChannel("persist@vidxir.test");
       const { runId } = await runResearch(user.id, channelId);
 
       const runRows = await db
@@ -318,7 +318,7 @@ suite("research engine (integration)", () => {
       const { researchResults } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const { user, channelId } = await seedChannel("stats@tally.test");
+      const { user, channelId } = await seedChannel("stats@vidxir.test");
       const { runId } = await runResearch(user.id, channelId);
 
       const rows = await db
@@ -347,7 +347,7 @@ suite("research engine (integration)", () => {
           ids.map((id) => stats(id, `Huge ${id}`, { viewCount: huge })),
       );
 
-      const { user, channelId } = await seedChannel("huge@tally.test");
+      const { user, channelId } = await seedChannel("huge@vidxir.test");
       const { runId } = await runResearch(user.id, channelId);
 
       const rows = await db
@@ -366,7 +366,7 @@ suite("research engine (integration)", () => {
       const { jobs } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const { user, channelId } = await seedChannel("job@tally.test");
+      const { user, channelId } = await seedChannel("job@vidxir.test");
       const { jobId } = await runResearch(user.id, channelId);
 
       const rows = await db.select().from(jobs).where(eq(jobs.id, jobId));
@@ -386,7 +386,7 @@ suite("research engine (integration)", () => {
 
     it("refuses a second concurrent run for the same channel", async () => {
       const { startResearchRun } = await import("@/lib/research/service");
-      const { user, channelId } = await seedChannel("dupe@tally.test");
+      const { user, channelId } = await seedChannel("dupe@vidxir.test");
 
       await startResearchRun({ userId: user.id, channelId, tier: "starter" });
 
@@ -406,7 +406,7 @@ suite("research engine (integration)", () => {
       const { ideas, researchResults } = await import("@/lib/db/schema");
       const { eq, inArray } = await import("drizzle-orm");
 
-      const { user, channelId } = await seedChannel("prov@tally.test");
+      const { user, channelId } = await seedChannel("prov@vidxir.test");
       const { runId } = await runResearch(user.id, channelId);
 
       const generated = await db
@@ -437,7 +437,7 @@ suite("research engine (integration)", () => {
       const { ideas } = await import("@/lib/db/schema");
       const { eq } = await import("drizzle-orm");
 
-      const { user, channelId } = await seedChannel("weights@tally.test");
+      const { user, channelId } = await seedChannel("weights@vidxir.test");
       const { runId } = await runResearch(user.id, channelId);
 
       const rows = await db.select().from(ideas).where(eq(ideas.runId, runId));
@@ -463,18 +463,18 @@ suite("research engine (integration)", () => {
       // must be ignored: an unauditable number must never reach the UI as a score.
       const batch = ideaBatch();
       ai.generateJson.mockResolvedValue({
-        ideas: batch.ideas.map((idea) => ({ ...idea, tallyScore: 99 })),
+        ideas: batch.ideas.map((idea) => ({ ...idea, vidxirScore: 99 })),
       });
 
-      const { user, channelId } = await seedChannel("codescore@tally.test");
+      const { user, channelId } = await seedChannel("codescore@vidxir.test");
       const { runId } = await runResearch(user.id, channelId);
 
       const rows = await db.select().from(ideas).where(eq(ideas.runId, runId));
       expect(rows.length).toBeGreaterThan(0);
       for (const row of rows) {
-        expect(row.tallyScore).not.toBe(99);
-        expect(row.tallyScore ?? -1).toBeGreaterThanOrEqual(0);
-        expect(row.tallyScore ?? 101).toBeLessThanOrEqual(100);
+        expect(row.vidxirScore).not.toBe(99);
+        expect(row.vidxirScore ?? -1).toBeGreaterThanOrEqual(0);
+        expect(row.vidxirScore ?? 101).toBeLessThanOrEqual(100);
       }
     });
 
@@ -511,7 +511,7 @@ suite("research engine (integration)", () => {
         ],
       });
 
-      const { user, channelId } = await seedChannel("derivative@tally.test");
+      const { user, channelId } = await seedChannel("derivative@vidxir.test");
       const { runId } = await runResearch(user.id, channelId);
 
       const rows = await db.select().from(ideas).where(eq(ideas.runId, runId));
@@ -538,7 +538,7 @@ suite("research engine (integration)", () => {
         new NotConfiguredError("Claude", ["ANTHROPIC_API_KEY"]),
       );
 
-      const { user, channelId } = await seedChannel("nokey@tally.test");
+      const { user, channelId } = await seedChannel("nokey@vidxir.test");
       const { runId } = await runResearch(user.id, channelId);
 
       const runRows = await db
@@ -578,7 +578,7 @@ suite("research engine (integration)", () => {
       google.fetchMostPopular.mockResolvedValue([]);
       google.fetchVideosByIds.mockResolvedValue([]);
 
-      const { user, channelId } = await seedChannel("empty@tally.test");
+      const { user, channelId } = await seedChannel("empty@vidxir.test");
       const { runId, result } = await runResearch(user.id, channelId);
 
       expect("error" in result).toBe(true);
@@ -609,7 +609,7 @@ suite("research engine (integration)", () => {
         return [hit("vid-late", "Recovered result", "UCincumbent", 4)];
       });
 
-      const { user, channelId } = await seedChannel("degraded@tally.test");
+      const { user, channelId } = await seedChannel("degraded@vidxir.test");
       const { runId } = await runResearch(user.id, channelId);
 
       const rows = await db
@@ -627,8 +627,8 @@ suite("research engine (integration)", () => {
       const { executeResearchRun, startResearchRun } = await import(
         "@/lib/research/service"
       );
-      const owner = await seedChannel("iso-owner@tally.test");
-      const other = await seedChannel("iso-other@tally.test");
+      const owner = await seedChannel("iso-owner@vidxir.test");
+      const other = await seedChannel("iso-other@vidxir.test");
 
       const started = await startResearchRun({
         userId: owner.user.id,
@@ -650,8 +650,8 @@ suite("research engine (integration)", () => {
 
     it("will not start a run for a channel the user does not own", async () => {
       const { startResearchRun } = await import("@/lib/research/service");
-      const owner = await seedChannel("iso-start-owner@tally.test");
-      const other = await createUser({ email: "iso-start-other@tally.test" });
+      const owner = await seedChannel("iso-start-owner@vidxir.test");
+      const other = await createUser({ email: "iso-start-other@vidxir.test" });
 
       await expect(
         startResearchRun({
@@ -664,8 +664,8 @@ suite("research engine (integration)", () => {
 
     it("does not load another user's research context", async () => {
       const { loadResearchContext } = await import("@/lib/research/signals");
-      const owner = await seedChannel("iso-ctx-owner@tally.test");
-      const other = await createUser({ email: "iso-ctx-other@tally.test" });
+      const owner = await seedChannel("iso-ctx-owner@vidxir.test");
+      const other = await createUser({ email: "iso-ctx-other@vidxir.test" });
 
       await expect(
         loadResearchContext(owner.user.id, owner.channelId),
@@ -680,8 +680,8 @@ suite("research engine (integration)", () => {
       const { eq } = await import("drizzle-orm");
       const { setIdeaState } = await import("@/lib/research/ideas");
 
-      const owner = await seedChannel("iso-idea-owner@tally.test");
-      const other = await createUser({ email: "iso-idea-other@tally.test" });
+      const owner = await seedChannel("iso-idea-owner@vidxir.test");
+      const other = await createUser({ email: "iso-idea-other@vidxir.test" });
       const { runId } = await runResearch(owner.user.id, owner.channelId);
 
       const rows = await db.select().from(ideas).where(eq(ideas.runId, runId));
@@ -704,7 +704,7 @@ suite("research engine (integration)", () => {
       const { loadResearchContext } = await import("@/lib/research/signals");
 
       // §27: "Don't assume shared settings."
-      const first = await seedChannel("multi@tally.test", "woodworking");
+      const first = await seedChannel("multi@vidxir.test", "woodworking");
       const secondChannelId = await createChannel(first.user.id, {
         youtubeChannelId: "UCsecondchannel0000000",
         title: "Second Channel",
@@ -747,7 +747,7 @@ suite("research engine (integration)", () => {
       const { eq } = await import("drizzle-orm");
       const { createProject } = await import("@/lib/projects/service");
 
-      const { user, channelId } = await seedChannel("toproject@tally.test");
+      const { user, channelId } = await seedChannel("toproject@vidxir.test");
       const { runId } = await runResearch(user.id, channelId);
 
       const rows = await db.select().from(ideas).where(eq(ideas.runId, runId));
@@ -783,7 +783,7 @@ suite("research engine (integration)", () => {
         "@/lib/projects/service"
       );
 
-      const { user, channelId } = await seedChannel("quota@tally.test");
+      const { user, channelId } = await seedChannel("quota@vidxir.test");
       await createProject({
         userId: user.id,
         channelId,

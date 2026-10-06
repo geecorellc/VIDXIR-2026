@@ -14,7 +14,7 @@
  * b-roll on the wrong words. §42 applies to timings as much as to progress bars.
  *
  * §48: without `ELEVENLABS_API_KEY` this throws `NotConfiguredError` naming the
- * variable. There is a mock, gated on `TALLY_USE_MOCK_PROVIDERS`, and it produces
+ * variable. There is a mock, gated on `VIDXIR_USE_MOCK_PROVIDERS`, and it produces
  * a real WAV of a real length rather than pretending — see `media/synthetic.ts`.
  */
 import { env, usingMockProviders } from "@/lib/env";
@@ -299,7 +299,7 @@ export async function synthesize(
  * ElevenLabs' own defaults for the two settings it always requires.
  *
  * Named rather than inline so the fallback is visible: a character voice that tunes
- * neither gets exactly what every Tally voiceover got before voice continuity
+ * neither gets exactly what every Vidxir AI voiceover got before voice continuity
  * existed, which is what makes the tuning additive.
  */
 const ELEVENLABS_DEFAULT_STABILITY = 0.5;

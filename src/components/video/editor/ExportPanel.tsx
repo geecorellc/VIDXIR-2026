@@ -164,7 +164,7 @@ export function ExportPanel({ projectId, saveState, flush }: ExportPanelProps) {
           onClick={start}
           loading={busy}
           disabled={running || blocked}
-          icon={running ? <Loader2 size={13} className="tally-spin" /> : <Film size={13} />}
+          icon={running ? <Loader2 size={13} className="vidxir-spin" /> : <Film size={13} />}
         >
           {running ? "Exporting…" : succeeded ? "Export again" : "Export video"}
         </Btn>

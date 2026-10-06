@@ -14,8 +14,8 @@ type Sql = ReturnType<typeof postgres>;
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 
 const globalForDb = globalThis as unknown as {
-  __tallySql?: Sql;
-  __tallyDb?: Database;
+  __vidxirSql?: Sql;
+  __vidxirDb?: Database;
 };
 
 function createClient(): { sql: Sql; db: Database } {
@@ -54,16 +54,16 @@ function createClient(): { sql: Sql; db: Database } {
  *
  * Both handles are always cached together. An earlier version stored only the
  * Drizzle handle in production, which made `closeDb()` — whose guard is on
- * `__tallySql` — a silent no-op there, so the worker and scheduler exited on
+ * `__vidxirSql` — a silent no-op there, so the worker and scheduler exited on
  * SIGTERM without draining Postgres connections.
  */
 function client() {
-  if (!globalForDb.__tallyDb) {
+  if (!globalForDb.__vidxirDb) {
     const created = createClient();
-    globalForDb.__tallySql = created.sql;
-    globalForDb.__tallyDb = created.db;
+    globalForDb.__vidxirSql = created.sql;
+    globalForDb.__vidxirDb = created.db;
   }
-  return globalForDb.__tallyDb;
+  return globalForDb.__vidxirDb;
 }
 
 /**
@@ -79,9 +79,9 @@ export const db = new Proxy({} as Database, {
 
 /** Raw postgres.js handle for the rare query Drizzle cannot express. */
 export function rawSql(): Sql {
-  if (!globalForDb.__tallySql) client();
+  if (!globalForDb.__vidxirSql) client();
   // `client()` assigns both handles together, so this is non-null by construction.
-  return globalForDb.__tallySql as Sql;
+  return globalForDb.__vidxirSql as Sql;
 }
 
 /**
@@ -97,10 +97,10 @@ export async function pingDb(): Promise<void> {
 
 /** Close the pool. Used by workers on SIGTERM and by integration tests. */
 export async function closeDb(): Promise<void> {
-  if (globalForDb.__tallySql) {
-    await globalForDb.__tallySql.end({ timeout: 5 });
-    globalForDb.__tallySql = undefined;
-    globalForDb.__tallyDb = undefined;
+  if (globalForDb.__vidxirSql) {
+    await globalForDb.__vidxirSql.end({ timeout: 5 });
+    globalForDb.__vidxirSql = undefined;
+    globalForDb.__vidxirDb = undefined;
   }
 }
 

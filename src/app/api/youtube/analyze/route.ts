@@ -3,7 +3,7 @@
  *
  * The first step of link mode, and deliberately a step that changes nothing: it
  * creates no project, enqueues no job and spends no generation credit. It answers
- * one question — *what is this video?* — so the user can see what Tally understood
+ * one question — *what is this video?* — so the user can see what Vidxir AI understood
  * before committing a video from their monthly allowance to it.
  *
  * Two things happen here rather than anywhere else. The URL is parsed **on the

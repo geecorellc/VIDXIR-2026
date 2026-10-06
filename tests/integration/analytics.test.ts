@@ -39,9 +39,9 @@
  * Mocked: `fetchAnalytics` only — the single network call. §17 permits stubbing the
  * provider transport, and the alternative is not "a better test", it is either no
  * test or live YouTube quota spend against a channel this repository does not own.
- * Stated plainly for the §20 report: **these tests do not prove Tally can reach the
+ * Stated plainly for the §20 report: **these tests do not prove Vidxir AI can reach the
  * YouTube Analytics API.** They prove that every row it writes and every figure it
- * reports is correct on Tally's side of that boundary, which is the half YouTube
+ * reports is correct on Vidxir AI's side of that boundary, which is the half YouTube
  * cannot verify for us.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -165,7 +165,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
    * A user with a channel, and optionally the monetary scope.
    *
    * `createChannel` writes the Phase 2 grant (`youtube.upload` only), so the
-   * revenue tests widen it explicitly — which is also the point: whether Tally
+   * revenue tests widen it explicitly — which is also the point: whether Vidxir AI
    * asks YouTube for money is decided by the stored grant, never by an argument
    * (§12).
    */
@@ -305,7 +305,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
 
   describe("ingestion", () => {
     it("writes one channel row per day", async () => {
-      const { user, channelId } = await tenant("ingest-basic@tally.test");
+      const { user, channelId } = await tenant("ingest-basic@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       respondWith([metricsRow("2026-06-01"), metricsRow("2026-06-02")]);
 
@@ -330,7 +330,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * upserts. There is no way to observe the difference without a real
        * database.
        */
-      const { user, channelId } = await tenant("ingest-idem@tally.test");
+      const { user, channelId } = await tenant("ingest-idem@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       const window = { startDate: "2026-06-01", endDate: "2026-06-02" };
 
@@ -358,7 +358,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * ingests could both delete and both insert. Here they both upsert, and the
        * outcome is the same as one ingest.
        */
-      const { user, channelId } = await tenant("ingest-race@tally.test");
+      const { user, channelId } = await tenant("ingest-race@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       const window = { startDate: "2026-06-01", endDate: "2026-06-01" };
       respondWith([metricsRow("2026-06-01")]);
@@ -372,7 +372,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     });
 
     it("upserts per-video rows and reports videos it does not own", async () => {
-      const { user, channelId } = await tenant("ingest-video@tally.test");
+      const { user, channelId } = await tenant("ingest-video@vidxir.test");
       const video = await publishedVideo(user.id, channelId, "vidOWNED0001");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
 
@@ -380,8 +380,8 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
         [metricsRow("2026-06-01")],
         [
           metricsRow("2026-06-01", { videoId: "vidOWNED0001", views: 700 }),
-          // A video on the channel that Tally did not publish. Inventing a
-          // `published_videos` row for it would claim Tally uploaded it.
+          // A video on the channel that Vidxir AI did not publish. Inventing a
+          // `published_videos` row for it would claim Vidxir AI uploaded it.
           metricsRow("2026-06-01", { videoId: "vidFOREIGN01", views: 300 }),
         ],
       );
@@ -407,7 +407,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
       // The two partial indexes must not interfere: one day produces one
       // channel-scoped row and one video-scoped row, and neither displaces the
       // other.
-      const { user, channelId } = await tenant("ingest-both@tally.test");
+      const { user, channelId } = await tenant("ingest-both@vidxir.test");
       await publishedVideo(user.id, channelId, "vidBOTH00001");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
 
@@ -432,7 +432,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * which a reader can tell apart from "never ingested" (null source) and
        * from a measured zero.
        */
-      const { user, channelId } = await tenant("ingest-ctr@tally.test");
+      const { user, channelId } = await tenant("ingest-ctr@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       respondWith([metricsRow("2026-06-01")]);
       await ingestChannelAnalytics(user.id, channelId, {
@@ -453,7 +453,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * received, because the failure mode is a 403 that takes the view counts
        * down with it.
        */
-      const { user, channelId } = await tenant("ingest-noscope@tally.test");
+      const { user, channelId } = await tenant("ingest-noscope@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       respondWith([metricsRow("2026-06-01")]);
 
@@ -477,7 +477,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     });
 
     it("asks for revenue once the monetary scope is granted", async () => {
-      const { user, channelId } = await tenant("ingest-scope@tally.test", {
+      const { user, channelId } = await tenant("ingest-scope@vidxir.test", {
         monetary: true,
       });
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
@@ -499,7 +499,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     it("distinguishes a measured zero from an absent figure", async () => {
       // §6's three-way distinction, on the write path. Two days: one earned
       // nothing, one has no figure at all.
-      const { user, channelId } = await tenant("ingest-zero@tally.test", {
+      const { user, channelId } = await tenant("ingest-zero@vidxir.test", {
         monetary: true,
       });
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
@@ -520,8 +520,8 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     });
 
     it("refuses to ingest a channel belonging to another tenant", async () => {
-      const owner = await tenant("ingest-owner@tally.test");
-      const other = await tenant("ingest-other@tally.test");
+      const owner = await tenant("ingest-owner@vidxir.test");
+      const other = await tenant("ingest-other@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       respondWith([metricsRow("2026-06-01")]);
 
@@ -546,7 +546,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * 0, so a naive read turns "no data" into "zero views" — a claim about
        * performance rather than about collection.
        */
-      const { user, channelId } = await tenant("report-empty@tally.test");
+      const { user, channelId } = await tenant("report-empty@vidxir.test");
       const { channelPerformance } = await import("@/lib/analytics/report");
 
       const performance = await channelPerformance(user.id, channelId, RANGE);
@@ -558,7 +558,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     it("reports a measured zero as an available zero", async () => {
       // The other half of the same distinction: a day that genuinely had no views
       // must read back as 0, not as unavailable.
-      const { user, channelId } = await tenant("report-zero@tally.test");
+      const { user, channelId } = await tenant("report-zero@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       const { channelPerformance } = await import("@/lib/analytics/report");
       respondWith([metricsRow("2026-06-01", { views: 0, likes: 0 })]);
@@ -578,7 +578,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * figure is coming later, and impression CTR never is — it is not in the
        * API at any scope.
        */
-      const { user, channelId } = await tenant("report-ctr@tally.test");
+      const { user, channelId } = await tenant("report-ctr@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       const { channelPerformance } = await import("@/lib/analytics/report");
       respondWith([metricsRow("2026-06-01")]);
@@ -600,7 +600,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * over thirty days. The assertion is on the string, so a float anywhere in
        * the path — Postgres column, driver, or the JS sum — shows up.
        */
-      const { user, channelId } = await tenant("report-money@tally.test", {
+      const { user, channelId } = await tenant("report-money@vidxir.test", {
         monetary: true,
       });
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
@@ -625,7 +625,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     });
 
     it("says why revenue is missing rather than reporting zero", async () => {
-      const { user, channelId } = await tenant("report-noscope@tally.test");
+      const { user, channelId } = await tenant("report-noscope@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       const { revenueSummary } = await import("@/lib/analytics/report");
       respondWith([metricsRow("2026-06-01")]);
@@ -646,7 +646,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * §7: YouTube revises recent earnings for weeks. A provisional total that
        * renders as settled is a small lie the UI would repeat every day.
        */
-      const { user, channelId } = await tenant("report-final@tally.test", {
+      const { user, channelId } = await tenant("report-final@vidxir.test", {
         monetary: true,
       });
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
@@ -685,11 +685,11 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
 
     it("refuses to total across currencies rather than converting", async () => {
       /**
-       * §7. Converting would need a rate Tally does not have and would produce a
+       * §7. Converting would need a rate Vidxir AI does not have and would produce a
        * figure YouTube never reported. The honest answer is a refusal with a
        * stated reason.
        */
-      const { user, channelId } = await tenant("report-mixed@tally.test", {
+      const { user, channelId } = await tenant("report-mixed@vidxir.test", {
         monetary: true,
       });
       const { db } = await import("@/lib/db");
@@ -730,7 +730,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * roughly doubles the total. Asserted by ingesting both scopes for one day
        * and checking the total is the channel figure alone.
        */
-      const { user, channelId } = await tenant("report-double@tally.test", {
+      const { user, channelId } = await tenant("report-double@vidxir.test", {
         monetary: true,
       });
       await publishedVideo(user.id, channelId, "vidDOUBLE001");
@@ -758,7 +758,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     it("lists per-video attribution, and includes a video with no analytics", async () => {
       // A left join, deliberately: a published video with nothing ingested yet
       // must still appear, with unavailable metrics rather than zeroes.
-      const { user, channelId } = await tenant("report-pervideo@tally.test", {
+      const { user, channelId } = await tenant("report-pervideo@vidxir.test", {
         monetary: true,
       });
       await publishedVideo(user.id, channelId, "vidHASDATA01");
@@ -786,8 +786,8 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
 
     it("preserves gaps in the daily series rather than zero-filling them", async () => {
       // A zero-filled gap draws a chart that says traffic stopped; a gap says
-      // Tally has no figure. §6.
-      const { user, channelId } = await tenant("report-series@tally.test");
+      // Vidxir AI has no figure. §6.
+      const { user, channelId } = await tenant("report-series@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       const { dailySeries } = await import("@/lib/analytics/report");
       respondWith([metricsRow("2026-06-01"), metricsRow("2026-06-03")]);
@@ -804,8 +804,8 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     });
 
     it("does not read another tenant's analytics", async () => {
-      const owner = await tenant("report-owner@tally.test", { monetary: true });
-      const other = await tenant("report-intruder@tally.test");
+      const owner = await tenant("report-owner@vidxir.test", { monetary: true });
+      const other = await tenant("report-intruder@vidxir.test");
       const { ingestChannelAnalytics } = await import("@/lib/channels/analytics");
       const { channelPerformance, revenueSummary } = await import(
         "@/lib/analytics/report"
@@ -882,7 +882,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * §8: no second thumbnail pipeline. The arms reference the Phase 6a rows,
        * and the count of `thumbnail_variants` is unchanged by creating a test.
        */
-      const { user, channelId } = await tenant("exp-create@tally.test");
+      const { user, channelId } = await tenant("exp-create@vidxir.test");
       const video = await publishedVideo(user.id, channelId, "vidCREATE001");
       const variantIds = await variants(user.id, video.projectId, 3);
       const { db } = await import("@/lib/db");
@@ -921,7 +921,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * Asserted with two *concurrent* creates, where a pre-check would let both
        * through.
        */
-      const { user, channelId } = await tenant("exp-conflict@tally.test");
+      const { user, channelId } = await tenant("exp-conflict@vidxir.test");
       const video = await publishedVideo(user.id, channelId, "vidCONFLIC01");
       const variantIds = await variants(user.id, video.projectId, 2);
       const { createExperiment } = await import("@/lib/analytics/experiments");
@@ -948,7 +948,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     it("refuses variants from another project", async () => {
       // Testing another project's thumbnails on this video would attribute one
       // video's impressions to an unrelated image.
-      const { user, channelId } = await tenant("exp-crossproj@tally.test");
+      const { user, channelId } = await tenant("exp-crossproj@vidxir.test");
       const video = await publishedVideo(user.id, channelId, "vidCROSSPR01");
       const other = await publishedVideo(user.id, channelId, "vidOTHERPR01");
       const foreign = await variants(user.id, other.projectId, 2);
@@ -966,8 +966,8 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     });
 
     it("refuses another tenant's variants and another tenant's video", async () => {
-      const owner = await tenant("exp-owner@tally.test");
-      const other = await tenant("exp-thief@tally.test");
+      const owner = await tenant("exp-owner@vidxir.test");
+      const other = await tenant("exp-thief@vidxir.test");
       const ownerVideo = await publishedVideo(
         owner.user.id,
         owner.channelId,
@@ -1006,7 +1006,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     it("refuses a variant with no rendered image", async () => {
       // An arm with no image can never earn an impression, so the test would be
       // permanently insufficient rather than merely slow.
-      const { user, channelId } = await tenant("exp-noimage@tally.test");
+      const { user, channelId } = await tenant("exp-noimage@vidxir.test");
       const video = await publishedVideo(user.id, channelId, "vidNOIMAGE01");
       const variantIds = await variants(user.id, video.projectId, 2, {
         withImage: false,
@@ -1031,7 +1031,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * implementation would double the impressions here.
        */
       const { user, experimentId, armIds } = await runningExperiment(
-        "exp-obs@tally.test",
+        "exp-obs@vidxir.test",
       );
       const { getExperiment, recordObservations } = await import(
         "@/lib/analytics/experiments"
@@ -1073,8 +1073,8 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     it("drops an arm id from another experiment instead of writing it", async () => {
       // §12: arm ids are re-resolved against the experiment and the user, so a
       // foreign id is skipped rather than stored under this test.
-      const mine = await runningExperiment("exp-mine@tally.test");
-      const theirs = await runningExperiment("exp-theirs@tally.test");
+      const mine = await runningExperiment("exp-mine@vidxir.test");
+      const theirs = await runningExperiment("exp-theirs@vidxir.test");
       const { getExperiment, recordObservations } = await import(
         "@/lib/analytics/experiments"
       );
@@ -1110,7 +1110,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * on 20 impressions, and the test stays open with no winner recorded.
        */
       const { user, experimentId, armIds } = await runningExperiment(
-        "exp-insuff@tally.test",
+        "exp-insuff@vidxir.test",
       );
       const { concludeExperiment, getExperiment, recordObservations } =
         await import("@/lib/analytics/experiments");
@@ -1151,7 +1151,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
        * which must be exactly what it was before the test concluded.
        */
       const { user, experimentId, armIds } = await runningExperiment(
-        "exp-winner@tally.test",
+        "exp-winner@vidxir.test",
       );
       const { db } = await import("@/lib/db");
       const { publishedVideos, thumbnailExperiments } = await import(
@@ -1221,7 +1221,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
 
     it("calls a narrow margin a tie rather than a winner", async () => {
       const { user, experimentId, armIds } = await runningExperiment(
-        "exp-tie@tally.test",
+        "exp-tie@vidxir.test",
       );
       const { concludeExperiment, getExperiment, recordObservations } =
         await import("@/lib/analytics/experiments");
@@ -1259,8 +1259,8 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     });
 
     it("cannot be concluded by another tenant", async () => {
-      const mine = await runningExperiment("exp-secure@tally.test");
-      const other = await tenant("exp-outsider@tally.test");
+      const mine = await runningExperiment("exp-secure@vidxir.test");
+      const other = await tenant("exp-outsider@vidxir.test");
       const {
         cancelExperiment,
         concludeExperiment,
@@ -1297,7 +1297,7 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
 
     it("records a cancellation as stopped, with no winner", async () => {
       const { user, experimentId } = await runningExperiment(
-        "exp-cancel@tally.test",
+        "exp-cancel@vidxir.test",
       );
       const { cancelExperiment, getExperiment } = await import(
         "@/lib/analytics/experiments"
@@ -1311,8 +1311,8 @@ suite("analytics and thumbnail A/B testing (integration)", () => {
     });
 
     it("lists only the caller's own tests", async () => {
-      const mine = await runningExperiment("exp-list-mine@tally.test");
-      const theirs = await runningExperiment("exp-list-theirs@tally.test");
+      const mine = await runningExperiment("exp-list-mine@vidxir.test");
+      const theirs = await runningExperiment("exp-list-theirs@vidxir.test");
       const { listExperiments } = await import("@/lib/analytics/experiments");
 
       const listed = await listExperiments(mine.user.id, mine.channelId, 10);

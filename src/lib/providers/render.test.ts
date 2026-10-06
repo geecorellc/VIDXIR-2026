@@ -229,7 +229,7 @@ describe("ffmpegArgs", () => {
     // escape character; unescaped it is a parse error, not a wrong-looking video.
     const g = graph(
       args({
-        subtitlePath: "C:\\Users\\SPECTRE\\AppData\\Local\\Temp\\tally\\captions.srt",
+        subtitlePath: "C:\\Users\\SPECTRE\\AppData\\Local\\Temp\\vidxir\\captions.srt",
         captionCues: [{ startMs: 0, endMs: 1_000, text: "hello" }],
       }),
     );
@@ -237,7 +237,7 @@ describe("ffmpegArgs", () => {
     const filter = /subtitles=([^:]*(?::[^:]*)*?):force_style/.exec(g);
     expect(filter).not.toBeNull();
     expect(filter![1]).not.toBe(
-      "C:\\Users\\SPECTRE\\AppData\\Local\\Temp\\tally\\captions.srt",
+      "C:\\Users\\SPECTRE\\AppData\\Local\\Temp\\vidxir\\captions.srt",
     );
     expect(filter![1]).toContain("captions.srt");
   });
@@ -251,7 +251,7 @@ describe("ffmpegArgs", () => {
       }),
     );
 
-    // ASS is &HAABBGGRR — reversed channels and inverted alpha. Tally red is
+    // ASS is &HAABBGGRR — reversed channels and inverted alpha. Vidxir AI red is
     // R=E8 G=33 B=2B, so BBGGRR is 2B33E8.
     expect(g).toContain("PrimaryColour=&H002B33E8");
   });

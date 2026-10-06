@@ -267,7 +267,7 @@ export async function markJobSucceeded(
  *
  * `blocked_not_configured` is a distinct terminal status rather than a failure,
  * because §48 requires a missing credential to read as a configuration state the
- * user can act on — not an error that looks like a bug in Tally. It also must not
+ * user can act on — not an error that looks like a bug in Vidxir AI. It also must not
  * be retried: no number of attempts will conjure an API key.
  *
  * An exhausted provider balance is classified the same way. The credential is

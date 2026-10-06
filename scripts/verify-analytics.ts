@@ -295,7 +295,7 @@ async function main(): Promise<void> {
 
     /**
      * Deliberately *without* `yt-analytics-monetary.readonly`, because that is the
-     * real state of a Tally channel: the scope is not requested at consent, so
+     * real state of a Vidxir AI channel: the scope is not requested at consent, so
      * revenue must come back as a permission state rather than as $0.00 (§7).
      * Step 11 asserts it.
      */
@@ -1047,7 +1047,7 @@ async function main(): Promise<void> {
     );
 
     /**
-     * And the revenue authorisation itself: whether Tally asks YouTube for money
+     * And the revenue authorisation itself: whether Vidxir AI asks YouTube for money
      * is decided by the *stored* grant, never by a caller's argument. The probe
      * channel has no monetary scope, so `canReadRevenue` must be false — a caller
      * cannot opt itself into a revenue request (§7, §12).

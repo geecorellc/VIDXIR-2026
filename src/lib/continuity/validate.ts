@@ -309,7 +309,7 @@ export function isVoiceCode(code: string): boolean {
  * scores — which would let a video with one voiced scene and eighty broken ones
  * score the same as the reverse.
  */
-interface Tally {
+interface Counts {
   expected: number;
   misses: number;
 }
@@ -330,7 +330,7 @@ function checkCharacters(
   input: ValidateInput,
   visuals: VisualIndex,
   issues: ContinuityIssue[],
-): Tally {
+): Counts {
   if (!input.capabilities.characters) return { expected: 0, misses: 0 };
 
   let expected = 0;
@@ -403,7 +403,7 @@ function checkCharacters(
  *
  *  - `continuity.voice.missing` — a character with no canonical voice in a project
  *    that uses them. A `warn`: the project voice narrated the scene, which is what
- *    Tally has always done, so it is a gap rather than a break.
+ *    Vidxir AI has always done, so it is a gap rather than a break.
  *  - `continuity.voice.drift` — one character voiced two different ways across the
  *    video. A `fail`: this is the failure the feature exists to prevent.
  *  - `continuity.voice.assignment_mismatch` — the voice used is not the voice the
@@ -423,7 +423,7 @@ function checkCharacters(
  * a real fix rather than a shrug, because `sceneVoicesFor` resolves the assignment from
  * the bible deterministically on every run — correcting the bible is enough.
  */
-function checkVoices(input: ValidateInput, issues: ContinuityIssue[]): Tally {
+function checkVoices(input: ValidateInput, issues: ContinuityIssue[]): Counts {
   if (!input.capabilities.characters) return { expected: 0, misses: 0 };
 
   /**
@@ -431,7 +431,7 @@ function checkVoices(input: ValidateInput, issues: ContinuityIssue[]): Tally {
    *
    * §25's requirement in one line: every project built before voice continuity
    * existed, and every project whose owner has not assigned a voice, scores exactly
-   * what it scored before — an empty tally deducts nothing.
+   * what it scored before — an empty vidxir deducts nothing.
    */
   if (!usesCharacterVoices(input.bible)) return { expected: 0, misses: 0 };
 
@@ -604,7 +604,7 @@ function checkVoices(input: ValidateInput, issues: ContinuityIssue[]): Tally {
    *
    * Whole-video rather than per-scene, and `info` rather than a deduction: an
    * assigned voice that is never used is a casting decision the operator may want to
-   * know about, not a continuity break. It contributes nothing to the tally, so it
+   * know about, not a continuity break. It contributes nothing to the vidxir, so it
    * cannot move the score.
    */
   const leads = new Set(

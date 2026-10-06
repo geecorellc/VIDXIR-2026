@@ -97,7 +97,7 @@ async function post(
   const response = await POST(request as never);
   return {
     status: response.status,
-    traceId: response.headers.get("x-tally-trace-id"),
+    traceId: response.headers.get("x-vidxir-trace-id"),
     body: (await response.json()) as RouteResult["body"],
   };
 }
@@ -130,7 +130,7 @@ suite("API input rejection (integration)", () => {
   });
 
   it("rejects a body that is not valid JSON", async () => {
-    const user = await onboardedUser("badjson@tally.test");
+    const user = await onboardedUser("badjson@vidxir.test");
     await signIn(user);
 
     const result = await postProjects({ body: '{"channelId": "abc"' });
@@ -143,7 +143,7 @@ suite("API input rejection (integration)", () => {
   });
 
   it("rejects a body sent without a JSON content-type", async () => {
-    const user = await onboardedUser("noctype@tally.test");
+    const user = await onboardedUser("noctype@vidxir.test");
     await signIn(user);
 
     const result = await postProjects({
@@ -156,7 +156,7 @@ suite("API input rejection (integration)", () => {
   });
 
   it("rejects an oversized body before parsing it", async () => {
-    const user = await onboardedUser("oversized@tally.test");
+    const user = await onboardedUser("oversized@vidxir.test");
     await signIn(user);
 
     /**
@@ -178,7 +178,7 @@ suite("API input rejection (integration)", () => {
   });
 
   it("rejects a malformed uuid without letting it reach a query", async () => {
-    const user = await onboardedUser("baduuid@tally.test");
+    const user = await onboardedUser("baduuid@vidxir.test");
     await signIn(user);
 
     for (const channelId of [
@@ -201,7 +201,7 @@ suite("API input rejection (integration)", () => {
   });
 
   it("rejects a cross-origin mutation before authenticating it", async () => {
-    const user = await onboardedUser("crossorigin@tally.test");
+    const user = await onboardedUser("crossorigin@vidxir.test");
     await signIn(user);
     const channelId = await createChannel(user.id);
 
@@ -228,8 +228,8 @@ suite("API input rejection (integration)", () => {
   });
 
   it("refuses a mutation naming another tenant's channel", async () => {
-    const owner = await onboardedUser("chanowner@tally.test");
-    const attacker = await onboardedUser("chanattacker@tally.test");
+    const owner = await onboardedUser("chanowner@vidxir.test");
+    const attacker = await onboardedUser("chanattacker@vidxir.test");
     const victimChannel = await createChannel(owner.id, {
       youtubeChannelId: "UCvictimchannel0000000",
     });
@@ -254,7 +254,7 @@ suite("API input rejection (integration)", () => {
   });
 
   it("does not leak internals through an error response", async () => {
-    const user = await onboardedUser("noleak@tally.test");
+    const user = await onboardedUser("noleak@vidxir.test");
     await signIn(user);
 
     const result = await postProjects({
@@ -631,7 +631,7 @@ suite("job enqueue safety (integration)", () => {
      */
     const { enqueue } = await import("@/lib/queue/jobs");
     const { getQueue } = await import("@/lib/queue/queues");
-    const user = await createUser({ email: "jobid@tally.test" });
+    const user = await createUser({ email: "jobid@vidxir.test" });
 
     const job = await enqueue({
       queue: "maintenance",
@@ -655,7 +655,7 @@ suite("job enqueue safety (integration)", () => {
   it("ignores a re-push of the same job id rather than running it twice", async () => {
     const { enqueue } = await import("@/lib/queue/jobs");
     const { getQueue } = await import("@/lib/queue/queues");
-    const user = await createUser({ email: "repush@tally.test" });
+    const user = await createUser({ email: "repush@vidxir.test" });
 
     const job = await enqueue({
       queue: "maintenance",
@@ -687,7 +687,7 @@ suite("job enqueue safety (integration)", () => {
      * which is visible and re-pushable.
      */
     const { enqueue } = await import("@/lib/queue/jobs");
-    const user = await createUser({ email: "ordering@tally.test" });
+    const user = await createUser({ email: "ordering@vidxir.test" });
 
     const job = await enqueue({
       queue: "maintenance",
@@ -709,7 +709,7 @@ suite("job enqueue safety (integration)", () => {
     // §15/§34: a payload is stored in Postgres *and* in Redis, and it is logged on
     // failure. It is the last place a token should be.
     const { enqueue } = await import("@/lib/queue/jobs");
-    const user = await createUser({ email: "payload@tally.test" });
+    const user = await createUser({ email: "payload@vidxir.test" });
     const channelId = await createChannel(user.id);
 
     const job = await enqueue({
@@ -769,7 +769,7 @@ suite("health and readiness (integration)", () => {
      *
      * This environment has no `GOOGLE_CLIENT_ID`, and `youtube` is one of the four
      * non-optional capabilities, so `not_ready` is the correct answer — an instance
-     * that cannot reach YouTube cannot serve Tally's core workflow. Asserting
+     * that cannot reach YouTube cannot serve Vidxir AI's core workflow. Asserting
      * `ready` here would have been asserting that readiness ignores configuration,
      * which is the opposite of what §16 asks for.
      */
@@ -836,7 +836,7 @@ suite("health and readiness (integration)", () => {
       "redis://",
       process.env["ENCRYPTION_KEY"] ?? "unset-encryption-key",
       process.env["SESSION_SECRET"] ?? "unset-session-secret",
-      "tallyminio",
+      "vidxirminio",
     ]) {
       expect(serialised, forbidden.slice(0, 12)).not.toContain(forbidden);
     }

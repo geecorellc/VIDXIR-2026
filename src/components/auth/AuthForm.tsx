@@ -16,7 +16,7 @@ import { useState } from "react";
 import { ArrowRight, Lock, Mail, User } from "lucide-react";
 import { Btn } from "@/components/ui/Btn";
 import { Field } from "@/components/ui/Field";
-import { TallyLogo } from "@/components/ui/TallyLogo";
+import { VidxirLogo } from "@/components/ui/VidxirLogo";
 import { color, display, font, radius } from "@/lib/design/tokens";
 import { ApiError, api } from "@/services/api-client";
 
@@ -128,7 +128,7 @@ export function AuthForm({ mode, redirectTo }: AuthFormProps) {
         }}
       >
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 26 }}>
-          <TallyLogo size={17} />
+          <VidxirLogo size={17} />
         </div>
 
         <div
@@ -198,7 +198,7 @@ export function AuthForm({ mode, redirectTo }: AuthFormProps) {
             }}
           >
             {isSignup
-              ? "Connect a channel, pick a niche, and let Tally start researching."
+              ? "Connect a channel, pick a niche, and let Vidxir AI start researching."
               : "Sign in to pick up where your channels left off."}
           </p>
 

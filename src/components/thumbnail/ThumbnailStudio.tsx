@@ -129,7 +129,7 @@ export function ThumbnailStudio({
       <EmptyCTA
         icon={<ImageIcon size={22} />}
         title="No video started"
-        body="Thumbnails are designed for a specific video. Start one in Research and Tally will design four concepts for it."
+        body="Thumbnails are designed for a specific video. Start one in Research and Vidxir AI will design four concepts for it."
         action={
           <Btn onClick={() => router.push("/dashboard/research")}>
             Find an idea <ChevronRight size={15} />
@@ -154,7 +154,7 @@ export function ThumbnailStudio({
           <Loader2
             size={20}
             color={color.accent}
-            className="tally-spin"
+            className="vidxir-spin"
             style={{ marginBottom: 12 }}
             aria-hidden="true"
           />

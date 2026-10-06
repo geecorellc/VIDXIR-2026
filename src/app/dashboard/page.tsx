@@ -5,7 +5,7 @@
  * order (Channels, Subscribers, Views 7d, Est. revenue), the 1.4fr/1fr split
  * with the niche demand chart beside Quick actions.
  *
- * Changed: every number is a real query result, and anything Tally has not
+ * Changed: every number is a real query result, and anything Vidxir AI has not
  * actually measured renders as "—" with the reason, per §42. The prototype's
  * static `searchDemand` array is replaced by the demand series from the user's
  * most recent successful research run; with no run yet, the card says so.
@@ -22,7 +22,7 @@ import { getSession } from "@/lib/auth/session";
 import { getOverview } from "@/lib/dashboard/overview";
 import { color } from "@/lib/design/tokens";
 
-export const metadata = { title: "Overview — Tally" };
+export const metadata = { title: "Overview — Vidxir AI" };
 
 export default async function OverviewPage() {
   const session = await getSession();
@@ -88,7 +88,7 @@ export default async function OverviewPage() {
           gap: 16,
           marginBottom: 20,
         }}
-        className="tally-overview-grid"
+        className="vidxir-overview-grid"
       >
         <Card>
           <h2
@@ -130,7 +130,7 @@ export default async function OverviewPage() {
       {/* Single-column below 900px, matching the shell's breakpoint. */}
       <style>{`
         @media (max-width: 900px) {
-          .tally-overview-grid { grid-template-columns: 1fr !important; }
+          .vidxir-overview-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </div>

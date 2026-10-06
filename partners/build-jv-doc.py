@@ -1,4 +1,4 @@
-"""Build the Tally AI Official JV Doc as a .docx, ready to upload to Google Docs.
+"""Build the Vidxir AI Official JV Doc as a .docx, ready to upload to Google Docs.
 
 Modelled on the Lyrixsa AI JV doc's section order and typography, re-coloured to
 the partners page's YouTube red/white rather than Lyrixsa's gold. Tables instead
@@ -169,14 +169,14 @@ def callout(title, body, fill="FFF4F4"):
 # Box art if it exists. There is none in the repo yet, so the cover degrades to
 # the title rather than shipping a placeholder image — drop a PNG at this path
 # and it appears on the next build.
-BOX = os.path.join(HERE, "assets", "img", "boxes", "tally-box-single.png")
+BOX = os.path.join(HERE, "assets", "img", "boxes", "vidxir-box-single.png")
 if os.path.exists(BOX):
     _p = doc.add_paragraph()
     _p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _p.paragraph_format.space_after = Pt(6)
     _p.add_run().add_picture(BOX, height=Inches(2.25))
 
-h1("Tally AI — Official JV Doc")
+h1("Vidxir AI — Official JV Doc")
 para(
     "Everything you need to promote, on a few pages. Every price, date and rule below is "
     "confirmed unless it is marked TO CONFIRM — quote the confirmed ones freely.",
@@ -191,7 +191,7 @@ para("Cart opens 11:00 AM EDT on the 23rd and shuts 11:59 PM EDT on the 28th —
 table(
     ["", "Detail"],
     [
-        ["Product", "Tally AI — keyword in, finished YouTube video published out"],
+        ["Product", "Vidxir AI — keyword in, finished YouTube video published out"],
         ["Positioning", "The faceless YouTube channel that runs itself — research, script, "
                         "voiceover, visuals, thumbnail and publish, in one dashboard"],
         ["Vendor", "Geecore Limited · sold on JVZoo"],
@@ -266,10 +266,10 @@ callout(
 )
 
 # ======================= 4. WHAT IS IT ================================
-h2("4. What Is Tally AI?")
+h2("4. What Is Vidxir AI?")
 para("The 30-second version for your emails:", bold=True, after=3)
 para(
-    "Your subscriber types a keyword. Tally AI researches the niche, writes the script, "
+    "Your subscriber types a keyword. Vidxir AI researches the niche, writes the script, "
     "generates the voiceover, the visuals, the music and the captions, renders the video, "
     "designs the thumbnail — and publishes it to a real YouTube channel with the title, "
     "description and tags already written. No camera, no microphone, no face on screen, and "
@@ -327,11 +327,11 @@ para(
 table(
     ["Tier", "Product", "Price", "Your 50%"],
     [
-        ["FE", "Tally AI Commercial", "$37 one-time", "$18.50"],
+        ["FE", "Vidxir AI Commercial", "$37 one-time", "$18.50"],
         ["OTO 1", "Unlimited Bundle — best value, everything included", "$497 per year",
          "$248.50/yr"],
-        ["OTO 2", "Tally AI Pro", "$97 one-time", "$48.50"],
-        ["OTO 2 DS", "Tally AI Pro — downsell", "$67 one-time", "$33.50"],
+        ["OTO 2", "Vidxir AI Pro", "$97 one-time", "$48.50"],
+        ["OTO 2 DS", "Vidxir AI Pro — downsell", "$67 one-time", "$33.50"],
         ["OTO 3", "Autopilot Engine", "$67 one-time", "$33.50"],
         ["OTO 3 DS", "Autopilot Engine — downsell", "$47 one-time", "$23.50"],
         ["OTO 4", "Agency & Reseller", "$197 one-time", "$98.50"],
@@ -547,7 +547,7 @@ bullet("— the window is not confirmed yet. Leave refunds out of your copy unti
 bullet("— the Bundle gives unlimited channels and unlimited videos, and a 10,000-credit monthly "
        "reset. Generation is metered. Writing it as limitless generation is a refund waiting to "
        "happen.", bold_head="“Unlimited everything” on the Bundle ")
-bullet("— Tally AI publishes to YouTube through the official API. It is not a Google or YouTube "
+bullet("— Vidxir AI publishes to YouTube through the official API. It is not a Google or YouTube "
        "product and is not endorsed by either.",
        bold_head="Any suggestion of a YouTube or Google partnership ")
 bullet("— no tool can promise that. Do not imply views, subscribers, watch time or monetisation.",
@@ -617,17 +617,17 @@ para(
     "Earnings disclaimer. Nothing in this document is a promise or projection of affiliate "
     "earnings. This is a first launch: no EPC, conversion rate, refund rate or affiliate income "
     "figure is quoted anywhere, because none exists yet. Results depend on your list, your "
-    "traffic and your promotion — including earning nothing. Tally AI is sold through JVZoo, a "
+    "traffic and your promotion — including earning nothing. Vidxir AI is sold through JVZoo, a "
     "marketplace platform that is not the seller of this product; the contract for any purchase "
-    "is between the buyer and Geecore Limited. Tally AI is an independent product and is not "
+    "is between the buyer and Geecore Limited. Vidxir AI is an independent product and is not "
     "affiliated with, sponsored by or endorsed by YouTube, Google or any other platform named "
     "here; YouTube is a trademark of Google LLC.",
     size=7.5,
     color=MUTE,
 )
-para("© 2026 Tally AI · Geecore Limited · Official JV Doc · 23–28 October 2026",
+para("© 2026 Vidxir AI · Geecore Limited · Official JV Doc · 23–28 October 2026",
      size=7.5, color=MUTE)
 
-out = os.path.join(HERE, "Tally AI - Official JV Doc.docx")
+out = os.path.join(HERE, "Vidxir AI - Official JV Doc.docx")
 doc.save(out)
 print("saved:", out)

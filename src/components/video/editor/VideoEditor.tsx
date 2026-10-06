@@ -319,7 +319,7 @@ export function VideoEditor({ projectId, projectTitle }: VideoEditorProps) {
     const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
-    link.download = `tally-cut-${projectId}.json`;
+    link.download = `vidxir-cut-${projectId}.json`;
     link.click();
     URL.revokeObjectURL(url);
   }

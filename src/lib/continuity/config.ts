@@ -194,7 +194,7 @@ export interface ContinuityPlan {
  * Stock-footage mode is `off` unconditionally. A stock library cannot be asked to
  * keep a character consistent — the clips are of different people by definition —
  * so constraining prompts and then failing scenes for drift would produce nothing
- * but noise on every video Tally built before this layer existed.
+ * but noise on every video Vidxir AI built before this layer existed.
  */
 export function resolveContinuityPlan(input: LevelInput): ContinuityPlan {
   const preschool = isPreschoolAudience(input.targetAudience);

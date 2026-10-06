@@ -193,7 +193,7 @@ export function ResearchBoard({
           <EmptyCTA
             icon={<Search size={22} />}
             title="No research yet"
-            body="Tally will read your niche on YouTube, score what is breaking out, and propose original angles you can actually make. Nothing here is pre-filled — the numbers come from a real run."
+            body="Vidxir AI will read your niche on YouTube, score what is breaking out, and propose original angles you can actually make. Nothing here is pre-filled — the numbers come from a real run."
             action={
               <Btn onClick={runResearch} loading={busy === "run"} icon={<Search size={15} />}>
                 Run research
@@ -213,7 +213,7 @@ export function ResearchBoard({
       )}
 
       <div
-        className="tally-research-top"
+        className="vidxir-research-top"
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(0, 1.2fr) minmax(260px, 1fr)",
@@ -237,7 +237,7 @@ export function ResearchBoard({
           {data.trending.length === 0 ? (
             <p style={{ margin: 0, fontSize: 13, color: color.textDim, lineHeight: 1.6 }}>
               Nothing yet. A completed research run lists the videos actually
-              breaking out in your niche here, with the views per hour Tally
+              breaking out in your niche here, with the views per hour Vidxir AI
               measured.
             </p>
           ) : (
@@ -310,7 +310,7 @@ export function ResearchBoard({
               color: color.textFaint,
             }}
           >
-            These are source signals, not templates. Tally builds an original
+            These are source signals, not templates. Vidxir AI builds an original
             angle from the underlying opportunity rather than reproducing someone
             else&apos;s video.
           </p>
@@ -333,7 +333,7 @@ export function ResearchBoard({
       </div>
 
       <div
-        className="tally-research-bottom"
+        className="vidxir-research-bottom"
         style={{
           display: "grid",
           gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
@@ -354,7 +354,7 @@ export function ResearchBoard({
           </h3>
           {data.competitors.length === 0 ? (
             <p style={{ margin: 0, fontSize: 13, color: color.textDim, lineHeight: 1.6 }}>
-              Competitors appear once research has run and Tally can see who is
+              Competitors appear once research has run and Vidxir AI can see who is
               winning the topics you are targeting.
             </p>
           ) : (
@@ -411,7 +411,7 @@ export function ResearchBoard({
             </h3>
             {data.ideas.length > 0 && (
               <span style={{ fontSize: 11.5, color: color.textFaint }}>
-                Tally Opportunity Score
+                Vidxir AI Opportunity Score
               </span>
             )}
           </div>
@@ -419,7 +419,7 @@ export function ResearchBoard({
           {data.ideas.length === 0 ? (
             <p style={{ margin: 0, fontSize: 13, color: color.textDim, lineHeight: 1.6 }}>
               {canGenerateIdeas
-                ? "Run research and Tally will propose original angles here, each with its own opportunity score."
+                ? "Run research and Vidxir AI will propose original angles here, each with its own opportunity score."
                 : "Idea generation needs the AI provider to be configured before it can propose angles."}
             </p>
           ) : (
@@ -464,16 +464,16 @@ export function ResearchBoard({
                     {idea.title}
                   </span>
                   <span
-                    title="Tally's own score — not a YouTube metric"
+                    title="Vidxir AI's own score — not a YouTube metric"
                     style={{
                       fontFamily: font.display,
                       fontSize: 12,
                       color:
-                        idea.tallyScore === null ? color.textFaint : color.accent,
+                        idea.vidxirScore === null ? color.textFaint : color.accent,
                       flexShrink: 0,
                     }}
                   >
-                    {idea.tallyScore === null ? "—" : Math.round(idea.tallyScore)}
+                    {idea.vidxirScore === null ? "—" : Math.round(idea.vidxirScore)}
                   </span>
                 </button>
               );
@@ -489,7 +489,7 @@ export function ResearchBoard({
                 color: color.textFaint,
               }}
             >
-              The Tally Opportunity Score is calculated by Tally from trend,
+              The Vidxir AI Opportunity Score is calculated by Vidxir AI from trend,
               competition, velocity and fit. It is not a YouTube metric.
             </p>
           )}
@@ -498,8 +498,8 @@ export function ResearchBoard({
 
       <style>{`
         @media (max-width: 900px) {
-          .tally-research-top,
-          .tally-research-bottom { grid-template-columns: 1fr !important; }
+          .vidxir-research-top,
+          .vidxir-research-bottom { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </div>

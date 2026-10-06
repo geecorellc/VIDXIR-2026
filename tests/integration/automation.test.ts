@@ -104,7 +104,7 @@ suite("automation engine (integration)", () => {
   }
 
   interface ChannelOptions {
-    /** Tally scores, highest wins. `null` stands for scoring never having finished. */
+    /** Vidxir AI scores, highest wins. `null` stands for scoring never having finished. */
     ideaScores?: Array<number | null>;
     disconnected?: boolean;
     reauthRequired?: boolean;
@@ -163,7 +163,7 @@ suite("automation engine (integration)", () => {
           channelId,
           title: `Idea scoring ${score ?? "nothing"}`,
           state: "new",
-          tallyScore: score,
+          vidxirScore: score,
         })
         .returning({ id: ideas.id });
       if (!row) throw new Error("Failed to insert test idea");
@@ -218,7 +218,7 @@ suite("automation engine (integration)", () => {
 
   describe("choosing which channels run", () => {
     it("starts a video for a due channel and advances its cadence", async () => {
-      const { user, channelId } = await channel("due@tally.test");
+      const { user, channelId } = await channel("due@vidxir.test");
       const now = new Date("2026-03-02T12:00:00Z");
 
       const { runAutomationTick } = await import("@/lib/automation/service");
@@ -244,7 +244,7 @@ suite("automation engine (integration)", () => {
     }, 120_000);
 
     it("ignores a channel whose automation is switched off", async () => {
-      const { user, channelId } = await channel("off@tally.test", { enabled: false });
+      const { user, channelId } = await channel("off@vidxir.test", { enabled: false });
 
       const { runAutomationTick } = await import("@/lib/automation/service");
       const result = await runAutomationTick(new Date("2026-03-02T12:00:00Z"));
@@ -257,7 +257,7 @@ suite("automation engine (integration)", () => {
     }, 120_000);
 
     it("ignores a channel that is not due yet", async () => {
-      const { user } = await channel("early@tally.test", {
+      const { user } = await channel("early@vidxir.test", {
         nextRunAt: new Date("2026-03-02T18:00:00Z"),
       });
 
@@ -275,7 +275,7 @@ suite("automation engine (integration)", () => {
        * script, a voiceover and a render would spend real provider budget on a video
        * with nowhere to go.
        */
-      const { user } = await channel("reauth@tally.test", {}, { reauthRequired: true });
+      const { user } = await channel("reauth@vidxir.test", {}, { reauthRequired: true });
 
       const { runAutomationTick } = await import("@/lib/automation/service");
       const result = await runAutomationTick(new Date("2026-03-02T12:00:00Z"));
@@ -285,7 +285,7 @@ suite("automation engine (integration)", () => {
     }, 120_000);
 
     it("skips a disconnected channel", async () => {
-      const { user } = await channel("gone@tally.test", {}, { disconnected: true });
+      const { user } = await channel("gone@vidxir.test", {}, { disconnected: true });
 
       const { runAutomationTick } = await import("@/lib/automation/service");
       const result = await runAutomationTick(new Date("2026-03-02T12:00:00Z"));
@@ -300,7 +300,7 @@ suite("automation engine (integration)", () => {
        * claiming would write null and leave the channel permanently due — logging on
        * every tick for ever. It is reported as a skip and left alone instead.
        */
-      const { user, channelId } = await channel("empty@tally.test", { publishDays: [] });
+      const { user, channelId } = await channel("empty@vidxir.test", { publishDays: [] });
 
       const { runAutomationTick } = await import("@/lib/automation/service");
       const result = await runAutomationTick(new Date("2026-03-02T12:00:00Z"));
@@ -318,7 +318,7 @@ suite("automation engine (integration)", () => {
   describe("choosing what to make", () => {
     it("picks the highest-scoring idea, not the newest", async () => {
       const { user, ideas: seeded } = await channel(
-        "score@tally.test",
+        "score@vidxir.test",
         {},
         // 88.25 is seeded second, so recency ordering would pick 61.
         { ideaScores: [42.5, 88.25, 61] },
@@ -330,7 +330,7 @@ suite("automation engine (integration)", () => {
 
       const created = await projectsFor(user.id);
       expect(created).toHaveLength(1);
-      // The whole point of the scoring engine: automation acts on the Tally
+      // The whole point of the scoring engine: automation acts on the Vidxir AI
       // Opportunity Score.
       expect(created[0]!.ideaId).toBe(best.id);
       expect(created[0]!.title).toBe("Idea scoring 88.25");
@@ -353,7 +353,7 @@ suite("automation engine (integration)", () => {
        * system never judged, so it is excluded outright.
        */
       const { user, channelId } = await channel(
-        "unscored@tally.test",
+        "unscored@vidxir.test",
         {},
         { ideaScores: [null, null] },
       );
@@ -374,7 +374,7 @@ suite("automation engine (integration)", () => {
     }, 120_000);
 
     it("skips a channel with no ideas at all without failing the pass", async () => {
-      const { user } = await channel("noideas@tally.test", {}, { ideaScores: [] });
+      const { user } = await channel("noideas@vidxir.test", {}, { ideaScores: [] });
 
       const { runAutomationTick } = await import("@/lib/automation/service");
       const result = await runAutomationTick(new Date("2026-03-02T12:00:00Z"));
@@ -400,7 +400,7 @@ suite("automation engine (integration)", () => {
        * left to save them: the only thing that can stop the second is the
        * compare-and-swap, so this case cannot pass without one.
        */
-      const { user, channelId } = await channel("cas@tally.test");
+      const { user, channelId } = await channel("cas@vidxir.test");
       const candidate = {
         channelId,
         userId: user.id,
@@ -448,7 +448,7 @@ suite("automation engine (integration)", () => {
        * asserted on the outcome rather than on the mechanism — the case above is
        * where the CAS is pinned deliberately.
        */
-      const { user } = await channel("race@tally.test");
+      const { user } = await channel("race@vidxir.test");
       const now = new Date("2026-03-02T12:00:00Z");
 
       const { runAutomationTick } = await import("@/lib/automation/service");
@@ -472,7 +472,7 @@ suite("automation engine (integration)", () => {
     it("claims once when four schedulers pile up", async () => {
       // A wider race. The CAS is either correct or it is not, but four callers
       // contending on one row makes a lucky pass much less likely than two.
-      const { user, channelId } = await channel("cas4@tally.test");
+      const { user, channelId } = await channel("cas4@vidxir.test");
       const candidate = {
         channelId,
         userId: user.id,
@@ -507,7 +507,7 @@ suite("automation engine (integration)", () => {
        * after the previous one, and that video is still rendering. Two concurrent
        * pipelines on one channel would race on `hasActiveJob` at every stage.
        */
-      const { user, channelId } = await channel("inflight@tally.test");
+      const { user, channelId } = await channel("inflight@vidxir.test");
 
       const { runAutomationTick } = await import("@/lib/automation/service");
       await runAutomationTick(new Date("2026-03-02T12:00:00Z"));
@@ -534,7 +534,7 @@ suite("automation engine (integration)", () => {
        * whose video reached a terminal state is free to start the next one, or
        * automation would stop for good after exactly one video.
        */
-      const { user } = await channel("resume@tally.test");
+      const { user } = await channel("resume@vidxir.test");
 
       const { runAutomationTick } = await import("@/lib/automation/service");
       await runAutomationTick(new Date("2026-03-02T12:00:00Z"));
@@ -563,7 +563,7 @@ suite("automation engine (integration)", () => {
        * between `createProject` and its transition leaves behind. The project check
        * misses it; `hasActiveJob` is the second line.
        */
-      const { user, channelId } = await channel("scriptjob@tally.test");
+      const { user, channelId } = await channel("scriptjob@vidxir.test");
 
       const { db } = await import("@/lib/db");
       const { jobs } = await import("@/lib/db/schema");
@@ -597,7 +597,7 @@ suite("automation engine (integration)", () => {
        * a skip rather than a failure, because waiting for the month to roll over is
        * the correct outcome, not an error to alarm an operator with.
        */
-      const { user } = await channel("limit@tally.test");
+      const { user } = await channel("limit@vidxir.test");
       await exhaustAllowance(user.id);
 
       const { runAutomationTick } = await import("@/lib/automation/service");
@@ -614,8 +614,8 @@ suite("automation engine (integration)", () => {
        * with a broken configuration would silently stop automation for every other
        * tenant on the instance.
        */
-      const broken = await channel("broken@tally.test");
-      const healthy = await channel("healthy@tally.test");
+      const broken = await channel("broken@vidxir.test");
+      const healthy = await channel("healthy@vidxir.test");
 
       const working = enqueue.getMockImplementation()!;
       enqueue.mockImplementation(async (input: Record<string, unknown>) => {
@@ -648,7 +648,7 @@ suite("automation engine (integration)", () => {
        * different instant — the reason `next_run_at` is recomputed against the zone
        * on every claim instead of being incremented by a fixed interval.
        */
-      const { channelId } = await channel("dst@tally.test", {
+      const { channelId } = await channel("dst@vidxir.test", {
         publishDays: [1],
         publishTimes: ["18:00"],
         timezone: "Europe/London",
@@ -678,8 +678,8 @@ suite("automation engine (integration)", () => {
        * leak of another customer's content strategy, and the single highest-scoring
        * row in the table would win for everyone.
        */
-      const a = await channel("tenant-a@tally.test", {}, { ideaScores: [10] });
-      const b = await channel("tenant-b@tally.test", {}, { ideaScores: [99] });
+      const a = await channel("tenant-a@vidxir.test", {}, { ideaScores: [10] });
+      const b = await channel("tenant-b@vidxir.test", {}, { ideaScores: [99] });
 
       const { runAutomationTick } = await import("@/lib/automation/service");
       const result = await runAutomationTick(new Date("2026-03-02T12:00:00Z"));
@@ -698,8 +698,8 @@ suite("automation engine (integration)", () => {
     }, 120_000);
 
     it("does not let one tenant's exhausted plan block another's automation", async () => {
-      const limited = await channel("limited@tally.test");
-      const fine = await channel("fine@tally.test");
+      const limited = await channel("limited@vidxir.test");
+      const fine = await channel("fine@vidxir.test");
       await exhaustAllowance(limited.user.id);
 
       const { runAutomationTick } = await import("@/lib/automation/service");
@@ -718,8 +718,8 @@ suite("automation engine (integration)", () => {
        * tampered queue payload would produce — claims nothing and starts nothing,
        * for either tenant.
        */
-      const owner = await channel("claim-owner@tally.test");
-      const other = await createUser({ email: "claim-other@tally.test" });
+      const owner = await channel("claim-owner@vidxir.test");
+      const other = await createUser({ email: "claim-other@vidxir.test" });
 
       const { runForChannel } = await import("@/lib/automation/service");
       const outcome = await runForChannel(

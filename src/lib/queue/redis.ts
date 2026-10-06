@@ -15,9 +15,9 @@ import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
 const globalForRedis = globalThis as unknown as {
-  __tallyRedis?: Redis;
-  __tallyQueueRedis?: Redis;
-  __tallySubscriber?: Redis;
+  __vidxirRedis?: Redis;
+  __vidxirQueueRedis?: Redis;
+  __vidxirSubscriber?: Redis;
 };
 
 function baseOptions(): RedisOptions {
@@ -42,8 +42,8 @@ function attachLogging(client: Redis, label: string): Redis {
 
 /** General-purpose client for non-blocking commands. */
 export function getRedis(): Redis {
-  if (!globalForRedis.__tallyRedis) {
-    globalForRedis.__tallyRedis = attachLogging(
+  if (!globalForRedis.__vidxirRedis) {
+    globalForRedis.__vidxirRedis = attachLogging(
       new Redis(env().REDIS_URL, {
         ...baseOptions(),
         maxRetriesPerRequest: 3,
@@ -51,7 +51,7 @@ export function getRedis(): Redis {
       "general",
     );
   }
-  return globalForRedis.__tallyRedis;
+  return globalForRedis.__vidxirRedis;
 }
 
 /**
@@ -59,8 +59,8 @@ export function getRedis(): Redis {
  * `maxRetriesPerRequest: null` so a command is never abandoned mid-operation.
  */
 export function queueConnection(): Redis {
-  if (!globalForRedis.__tallyQueueRedis) {
-    globalForRedis.__tallyQueueRedis = attachLogging(
+  if (!globalForRedis.__vidxirQueueRedis) {
+    globalForRedis.__vidxirQueueRedis = attachLogging(
       new Redis(env().REDIS_URL, {
         ...baseOptions(),
         maxRetriesPerRequest: null,
@@ -68,7 +68,7 @@ export function queueConnection(): Redis {
       "queue",
     );
   }
-  return globalForRedis.__tallyQueueRedis;
+  return globalForRedis.__vidxirQueueRedis;
 }
 
 /**
@@ -87,25 +87,25 @@ export function workerConnection(): Redis {
 
 /** Dedicated subscriber connection — a subscribed client cannot issue commands. */
 export function subscriberConnection(): Redis {
-  if (!globalForRedis.__tallySubscriber) {
-    globalForRedis.__tallySubscriber = attachLogging(
+  if (!globalForRedis.__vidxirSubscriber) {
+    globalForRedis.__vidxirSubscriber = attachLogging(
       new Redis(env().REDIS_URL, { ...baseOptions(), maxRetriesPerRequest: null }),
       "subscriber",
     );
   }
-  return globalForRedis.__tallySubscriber;
+  return globalForRedis.__vidxirSubscriber;
 }
 
 /** Close cached connections. Used by worker shutdown and tests. */
 export async function closeRedis(): Promise<void> {
   const clients = [
-    globalForRedis.__tallyRedis,
-    globalForRedis.__tallyQueueRedis,
-    globalForRedis.__tallySubscriber,
+    globalForRedis.__vidxirRedis,
+    globalForRedis.__vidxirQueueRedis,
+    globalForRedis.__vidxirSubscriber,
   ].filter((c): c is Redis => Boolean(c));
 
   await Promise.allSettled(clients.map((c) => c.quit()));
-  globalForRedis.__tallyRedis = undefined;
-  globalForRedis.__tallyQueueRedis = undefined;
-  globalForRedis.__tallySubscriber = undefined;
+  globalForRedis.__vidxirRedis = undefined;
+  globalForRedis.__vidxirQueueRedis = undefined;
+  globalForRedis.__vidxirSubscriber = undefined;
 }

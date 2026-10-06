@@ -194,7 +194,7 @@ export const SCRIPT_JSON_SCHEMA = jsonSchema({
  * narration containing stage directions that the voiceover provider would then
  * read out loud.
  */
-export const SCRIPT_SYSTEM_PROMPT = `You are Tally's scriptwriter. You write narration for a specific YouTube channel, to be read aloud by a synthetic voice and cut to visuals.
+export const SCRIPT_SYSTEM_PROMPT = `You are Vidxir AI's scriptwriter. You write narration for a specific YouTube channel, to be read aloud by a synthetic voice and cut to visuals.
 
 How you write:
 - Every word you produce is spoken narration. Never write stage directions, camera notes, speaker labels, timestamps, markdown, or bracketed instructions — a voice model will read whatever you write, literally.

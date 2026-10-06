@@ -18,7 +18,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import type { ComponentType } from "react";
-import { TallyLogo } from "@/components/ui/TallyLogo";
+import { VidxirLogo } from "@/components/ui/VidxirLogo";
 import { color, display, font, radius } from "@/lib/design/tokens";
 import { MARKETING_STAGES } from "@/lib/stages";
 
@@ -45,7 +45,7 @@ export default function LandingPage() {
           padding: "22px clamp(20px, 5vw, 56px)",
         }}
       >
-        <TallyLogo size={15} />
+        <VidxirLogo size={15} />
         <nav style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <Link
             href="/login"
@@ -134,7 +134,7 @@ export default function LandingPage() {
             margin: "0 0 34px",
           }}
         >
-          Tally studies your niche, finds the opportunity your competitors
+          Vidxir AI studies your niche, finds the opportunity your competitors
           missed, writes an original script, produces the video, and publishes it
           to YouTube on your schedule.
         </p>
@@ -254,9 +254,9 @@ export default function LandingPage() {
           flexWrap: "wrap",
         }}
       >
-        <TallyLogo size={12} still />
+        <VidxirLogo size={12} still />
         <span style={{ fontSize: 12, color: color.textFaint }}>
-          Tally creates original content. It does not repost other creators&apos;
+          Vidxir AI creates original content. It does not repost other creators&apos;
           videos.
         </span>
       </footer>

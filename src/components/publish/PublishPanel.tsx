@@ -63,7 +63,7 @@ export interface PublishPanelProps {
   schedulingAvailable: boolean;
   /** YouTube OAuth credentials present. */
   youtubeReady: boolean;
-  /** §40 — TALLY_BLOCK_REAL_PUBLISH is on, so uploads are refused. */
+  /** §40 — VIDXIR_BLOCK_REAL_PUBLISH is on, so uploads are refused. */
   publishBlockedByDevMode: boolean;
   error: { message: string; code: string | null } | null;
 }
@@ -176,7 +176,7 @@ export function PublishPanel({
   const warnings = qualityCheck?.findings.filter((f) => f.severity === "warn") ?? [];
 
   const blockedReason = publishBlockedByDevMode
-    ? "Publishing is blocked because development mode has TALLY_BLOCK_REAL_PUBLISH enabled."
+    ? "Publishing is blocked because development mode has VIDXIR_BLOCK_REAL_PUBLISH enabled."
     : !youtubeReady
       ? "YouTube is not configured — set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to publish."
       : !metadata
@@ -197,7 +197,7 @@ export function PublishPanel({
 
       <Card>
         <div
-          className="tally-publish-grid"
+          className="vidxir-publish-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "minmax(0, 1.4fr) minmax(240px, 1fr)",
@@ -518,7 +518,7 @@ export function PublishPanel({
               </>
             ) : uploading ? (
               <>
-                <Btn full disabled icon={<Loader2 size={15} className="tally-spin" />}>
+                <Btn full disabled icon={<Loader2 size={15} className="vidxir-spin" />}>
                   Uploading…
                 </Btn>
                 <div style={{ marginTop: 10 }}>
@@ -536,7 +536,7 @@ export function PublishPanel({
                     lineHeight: 1.5,
                   }}
                 >
-                  Tally will mark this Published only once YouTube confirms the
+                  Vidxir AI will mark this Published only once YouTube confirms the
                   upload.
                 </p>
               </>
@@ -617,7 +617,7 @@ export function PublishPanel({
 
       <style>{`
         @media (max-width: 900px) {
-          .tally-publish-grid { grid-template-columns: 1fr !important; }
+          .vidxir-publish-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </div>

@@ -1,5 +1,5 @@
 /**
- * StorageProvider — object storage for every binary Tally produces (§22, §32).
+ * StorageProvider — object storage for every binary Vidxir AI produces (§22, §32).
  *
  * Two rules are structural here rather than remembered:
  *  1. Bytes never enter Postgres. The `assets` table stores a `storage_key`; the
@@ -27,7 +27,7 @@ import { logger } from "@/lib/logger";
 const log = logger.child({ component: "storage" });
 
 /**
- * Kinds of object Tally stores, used to build readable keys.
+ * Kinds of object Vidxir AI stores, used to build readable keys.
  *
  * `reference` is its own folder rather than more objects under `visual`, and the
  * reason is lifecycle rather than tidiness. A visual is one scene's footage: it is

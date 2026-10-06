@@ -20,7 +20,7 @@ export const MARKETING_STAGES: readonly MarketingStage[] = [
   {
     n: "01",
     title: "Research",
-    body: "Tally watches your niche, scores what is breaking out, and finds the angle nobody has taken yet.",
+    body: "Vidxir AI watches your niche, scores what is breaking out, and finds the angle nobody has taken yet.",
     icon: "TrendingUp",
   },
   {

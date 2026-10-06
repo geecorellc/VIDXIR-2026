@@ -381,7 +381,7 @@ export async function cancelExperiment(
 /**
  * Which arm a given viewer bucket sees.
  *
- * Deterministic, server-side, and a pure function of values Tally controls: the
+ * Deterministic, server-side, and a pure function of values Vidxir AI controls: the
  * experiment id, the video id and the bucket. The same inputs always give the
  * same arm, so a viewer's experience is stable across requests, and because the
  * result is derived from the *stored* arm positions, a client cannot influence it
@@ -616,7 +616,7 @@ export interface ExperimentDecision {
    * whatever observations exist here came from a limited or manual source. §10
    * forbids overstating significance, and the honest answer with this data is
    * that no significance test has been run — a p-value computed over provider
-   * data Tally cannot obtain would be a fabricated number.
+   * data Vidxir AI cannot obtain would be a fabricated number.
    */
   statisticalConfidence: "not_established";
 }

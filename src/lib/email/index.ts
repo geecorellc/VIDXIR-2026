@@ -100,12 +100,12 @@ function appUrl(path: string): string {
   return `${env().APP_URL.replace(/\/$/, "")}${path}`;
 }
 
-/** Minimal dark-themed shell matching the Tally palette. */
+/** Minimal dark-themed shell matching the Vidxir AI palette. */
 function wrap(heading: string, body: string, cta?: { label: string; url: string }) {
   return `<!doctype html>
 <html><body style="margin:0;background:#0B0A0C;font-family:Inter,system-ui,sans-serif;color:#F5F3F1;padding:32px">
   <div style="max-width:520px;margin:0 auto;background:#141216;border:1px solid #241F22;border-radius:12px;padding:28px">
-    <div style="font-family:Oswald,Arial Narrow,sans-serif;text-transform:uppercase;letter-spacing:1.5px;font-size:13px;color:#E8332B;margin-bottom:18px">Tally</div>
+    <div style="font-family:Oswald,Arial Narrow,sans-serif;text-transform:uppercase;letter-spacing:1.5px;font-size:13px;color:#E8332B;margin-bottom:18px">Vidxir AI</div>
     <h1 style="font-family:Oswald,Arial Narrow,sans-serif;text-transform:uppercase;font-size:22px;margin:0 0 14px">${heading}</h1>
     <div style="font-size:14px;line-height:1.6;color:#B5AEB1">${body}</div>
     ${
@@ -126,11 +126,11 @@ export async function sendVerificationEmail(params: {
   const url = appUrl(`/verify-email?token=${encodeURIComponent(params.token)}`);
   await emailProvider().send({
     to: params.to,
-    subject: "Confirm your Tally account",
-    text: `Hi ${params.name},\n\nConfirm your email to finish setting up Tally:\n${url}\n\nThis link expires in 24 hours.`,
+    subject: "Confirm your Vidxir AI account",
+    text: `Hi ${params.name},\n\nConfirm your email to finish setting up Vidxir AI:\n${url}\n\nThis link expires in 24 hours.`,
     html: wrap(
       "Confirm your email",
-      `Hi ${params.name}, confirm your email address to finish setting up your Tally studio. This link expires in 24 hours.`,
+      `Hi ${params.name}, confirm your email address to finish setting up your Vidxir AI studio. This link expires in 24 hours.`,
       { label: "Confirm email", url },
     ),
   });
@@ -145,8 +145,8 @@ export async function sendPasswordResetEmail(params: {
   const url = appUrl(`/reset-password?token=${encodeURIComponent(params.token)}`);
   await emailProvider().send({
     to: params.to,
-    subject: "Reset your Tally password",
-    text: `Hi ${params.name},\n\nReset your Tally password:\n${url}\n\nThis link expires in 1 hour. If you did not request it, you can ignore this email.`,
+    subject: "Reset your Vidxir AI password",
+    text: `Hi ${params.name},\n\nReset your Vidxir AI password:\n${url}\n\nThis link expires in 1 hour. If you did not request it, you can ignore this email.`,
     html: wrap(
       "Reset your password",
       `Hi ${params.name}, use the button below to choose a new password. This link expires in 1 hour. If you did not request a reset, you can safely ignore this email.`,
@@ -167,10 +167,10 @@ export async function sendPublishNotificationEmail(params: {
   await emailProvider().send({
     to: params.to,
     subject: `Published: ${params.videoTitle}`,
-    text: `Hi ${params.name},\n\nTally published "${params.videoTitle}" to ${params.channelTitle}.\n${params.videoUrl}`,
+    text: `Hi ${params.name},\n\nVidxir AI published "${params.videoTitle}" to ${params.channelTitle}.\n${params.videoUrl}`,
     html: wrap(
       "Video published",
-      `Tally published <strong style="color:#F5F3F1">${params.videoTitle}</strong> to ${params.channelTitle}.`,
+      `Vidxir AI published <strong style="color:#F5F3F1">${params.videoTitle}</strong> to ${params.channelTitle}.`,
       { label: "View on YouTube", url: params.videoUrl },
     ),
   });

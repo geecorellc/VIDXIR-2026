@@ -31,7 +31,7 @@
  */
 import "@/lib/load-env";
 
-const PREFIX = "tally-verify";
+const PREFIX = "vidxir-verify";
 process.env["QUEUE_PREFIX"] = PREFIX;
 
 let step = 0;
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   const e = env();
   ok(
     `environment loaded (NODE_ENV=${e.NODE_ENV}, mocks=${String(
-      e.TALLY_USE_MOCK_PROVIDERS,
+      e.VIDXIR_USE_MOCK_PROVIDERS,
     )})`,
   );
 
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
    * recognisable local fixture, not a real account (the password hash is not a
    * valid scrypt digest, so it cannot be signed into).
    */
-  const email = "worker-verify@tally.local";
+  const email = "worker-verify@vidxir.local";
   const existing = await db
     .select({ id: users.id })
     .from(users)

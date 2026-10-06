@@ -3,10 +3,10 @@ import { GlobalStyle } from "@/components/ui/GlobalStyle";
 import { color } from "@/lib/design/tokens";
 
 export const metadata: Metadata = {
-  title: "Tally — One studio. Every stage of the video.",
+  title: "Vidxir AI — One studio. Every stage of the video.",
   description:
-    "Tally researches trends, writes original scripts, produces the video and publishes to YouTube on your schedule.",
-  applicationName: "Tally",
+    "Vidxir AI researches trends, writes original scripts, produces the video and publishes to YouTube on your schedule.",
+  applicationName: "Vidxir AI",
   robots: { index: true, follow: true },
 };
 
@@ -25,7 +25,7 @@ export default function RootLayout({
       <head>
         <GlobalStyle />
       </head>
-      <body className="tally-root">{children}</body>
+      <body className="vidxir-root">{children}</body>
     </html>
   );
 }

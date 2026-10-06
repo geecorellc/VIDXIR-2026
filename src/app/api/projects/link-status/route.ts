@@ -11,7 +11,7 @@
  * channel-less paths now rather than being duplicated for the second one, since the
  * question they ask is identical and only the key onto the run differs.
  *
- * §18: "show job progress using Tally's existing job/worker system. Do not create
+ * §18: "show job progress using Vidxir AI's existing job/worker system. Do not create
  * fake progress." Every number here comes from a `jobs` row written by a worker at a
  * real milestone. When nothing is running, `activeJob` is null and the counts below
  * describe what actually landed — there is no interpolation, no timer, and no
