@@ -29,7 +29,27 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    /**
+     * `suppressHydrationWarning` is required, not cosmetic.
+     *
+     * `ThemeScript` adds `vx-dark` to this element before React hydrates, so a
+     * dark-theme user's DOM reads `class="vx-dark"` where the server sent no
+     * class at all. React reports that as a hydration mismatch — correctly, in
+     * the sense that the attributes genuinely differ.
+     *
+     * The alternative fixes are both worse. Rendering the class on the server
+     * is impossible: the choice lives in localStorage, which a server component
+     * cannot read. Setting it from an effect instead would run after hydration
+     * and flash white at a dark-theme user on every navigation, which is the
+     * whole reason the pre-paint script exists.
+     *
+     * So the mismatch is intentional and this is React's documented escape
+     * hatch for it. Two constraints come with it: it covers only this element's
+     * own attributes, not any descendant's, and React makes no guarantee about
+     * reconciling attribute differences — which is why nothing renders a
+     * `className` here. The script owns this attribute outright.
+     */
+    <html lang="en" suppressHydrationWarning>
       <head>
         {/* Before GlobalStyle: the class must be set before the first paint. */}
         <ThemeScript />
