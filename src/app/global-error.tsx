@@ -66,7 +66,7 @@ export default function GlobalError({
               fontSize: 11,
               letterSpacing: 1.4,
               textTransform: "uppercase",
-              color: "hsl(295, 100%, 43%)",
+              color: "hsl(3, 74%, 48%)",
               marginBottom: 14,
             }}
           >
@@ -102,9 +102,9 @@ export default function GlobalError({
             onClick={reset}
             style={{
               padding: "11px 20px",
-              background: "hsl(295, 100%, 43%)",
+              background: "hsl(3, 74%, 48%)",
               color: "#fff",
-              border: "1px solid hsl(295, 100%, 43%)",
+              border: "1px solid hsl(3, 74%, 48%)",
               borderRadius: 8,
               fontSize: 14,
               fontWeight: 600,

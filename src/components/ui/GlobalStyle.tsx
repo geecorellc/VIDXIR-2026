@@ -2,10 +2,11 @@
  * Global stylesheet and the single home of every colour literal.
  *
  * `tokens.ts` exports `var(--vx-*)` references; this file defines what those
- * variables mean, once per theme. Light is the `:root` default, matching the
- * vidxr-dashboard reference; `.vx-dark` on <html> restores the original
- * dark/red direction verbatim. Because the tokens are indirections, switching
- * the class retheme s all 55 consuming modules with no re-render.
+ * variables mean, once per theme. Light is the `:root` default — the reference's
+ * neutrals, but on Vidxir red rather than its purple, so the accent is one brand
+ * colour in both themes; `.vx-dark` on <html> restores the original dark palette
+ * verbatim. Because the tokens are indirections, switching the class rethemes
+ * all 55 consuming modules with no re-render.
  *
  * Kept as an injected stylesheet rather than a CSS module because the app styles
  * everything with inline style objects, and this covers what inline styles
@@ -37,11 +38,20 @@ export function GlobalStyle() {
   --vx-border-light: hsl(0 0% 86%);
   --vx-border-faint: hsl(0 0% 94.5%);
 
-  --vx-accent: hsl(295 100% 43%);
-  --vx-accent-light: hsl(266 100% 64%);
-  --vx-accent-dark: hsl(295 100% 26%);
-  --vx-accent-bg-soft: hsl(295 100% 97%);
-  --vx-accent-glow: hsla(295 100% 43% / 0.4);
+  /**
+   * Vidxir red, not the reference's purple. The hue is 3 — the same hue as the
+   * dark theme's #E8332B — so the brand reads as one colour across both themes.
+   *
+   * Lightness is 48% rather than that palette's 54% because this one sits on
+   * white: at 54% the white button label lands at 4.23:1 and fails AA, and at
+   * 48% it is 5.04:1. Same colour, corrected for its background.
+   */
+  --vx-accent: hsl(3 74% 48%);
+  --vx-accent-light: hsl(6 85% 62%);
+  --vx-accent-dark: hsl(3 72% 30%);
+  /* Active-nav wash. Accent text on this is 4.57:1. */
+  --vx-accent-bg-soft: hsl(3 100% 97%);
+  --vx-accent-glow: hsla(3 74% 48% / 0.4);
   --vx-on-accent: hsl(0 0% 100%);
 
   --vx-text: hsl(0 0% 12%);
@@ -67,7 +77,9 @@ export function GlobalStyle() {
   --vx-control-border: hsl(0 0% 80%);
   --vx-field-error-border: hsl(0 72% 72%);
 
-  --vx-track-video: hsl(295 38% 92%);
+  /* Video is the accent's hue, as it is in the dark theme's #2A1E22. The other
+     five stay distinct hues — these tints exist to tell tracks apart. */
+  --vx-track-video: hsl(3 46% 93%);
   --vx-track-image: hsl(266 40% 92.5%);
   --vx-track-text: hsl(210 40% 92%);
   --vx-track-caption: hsl(160 34% 91.5%);
