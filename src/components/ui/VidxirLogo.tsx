@@ -25,7 +25,9 @@ export function VidxirLogo({ size = 14, label = true, still = false }: VidxirLog
           height: size,
           borderRadius: "50%",
           background: accentGradient,
-          boxShadow: `0 0 ${size}px ${color.accent}66`,
+          // `accentGlow` rather than `${accent}66`: the token is a var(), so
+          // concatenating an alpha suffix onto it would not parse.
+          boxShadow: `0 0 ${size}px ${color.accentGlow}`,
           animation: still ? undefined : "vidxir-pulse 2.4s ease-in-out infinite",
           flexShrink: 0,
         }}

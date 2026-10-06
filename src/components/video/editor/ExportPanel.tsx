@@ -188,8 +188,8 @@ export function ExportPanel({ projectId, saveState, flush }: ExportPanelProps) {
             fontSize: 11.5,
             color: color.warning,
             lineHeight: 1.5,
-            background: "#1E1710",
-            border: `1px solid #4A3A20`,
+            background: color.warningBg,
+            border: `1px solid ${color.warningBorder}`,
             borderRadius: radius.sm,
             padding: "7px 9px",
           }}

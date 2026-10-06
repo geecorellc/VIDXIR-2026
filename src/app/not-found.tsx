@@ -71,7 +71,7 @@ export default function NotFound() {
             display: "inline-block",
             padding: "11px 20px",
             background: color.accent,
-            color: "#fff",
+            color: color.onAccent,
             borderRadius: radius.md,
             fontSize: 14,
             fontWeight: 600,

@@ -56,7 +56,7 @@ export function Field({
           alignItems: "center",
           gap: 9,
           background: color.inputBg,
-          border: `1px solid ${error ? "#5A2A28" : color.border}`,
+          border: `1px solid ${error ? color.fieldErrorBorder : color.border}`,
           borderRadius: radius.md,
           padding: "0 12px",
         }}
@@ -149,7 +149,7 @@ export function TextAreaField({
         aria-describedby={describedBy}
         style={{
           background: color.inputBg,
-          border: `1px solid ${error ? "#5A2A28" : color.border}`,
+          border: `1px solid ${error ? color.fieldErrorBorder : color.border}`,
           borderRadius: radius.md,
           padding: "11px 12px",
           color: color.text,
@@ -217,7 +217,7 @@ export function SelectField({
         aria-describedby={describedBy}
         style={{
           background: color.inputBg,
-          border: `1px solid ${error ? "#5A2A28" : color.border}`,
+          border: `1px solid ${error ? color.fieldErrorBorder : color.border}`,
           borderRadius: radius.md,
           padding: "11px 12px",
           color: color.text,

@@ -107,7 +107,7 @@ export default function RouteError({
             style={{
               padding: "11px 20px",
               background: color.accent,
-              color: "#fff",
+              color: color.onAccent,
               border: `1px solid ${color.accent}`,
               borderRadius: radius.md,
               fontSize: 14,

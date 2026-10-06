@@ -4,10 +4,14 @@
  * Settings — per-channel strategy, brand kit and automation (§5, §27, §28, §18).
  *
  * The prototype had no settings screen; its equivalent values were the hard-coded
- * strings inside each tab. This screen is new work, so it follows the prototype's
- * visual language rather than inventing one: uppercase Oswald section eyebrows,
- * #141216 cards with a #241F22 border, red active states, and the same field and
- * choice-card components onboarding already uses.
+ * strings inside each tab. This screen is new work, so it follows the app's own
+ * visual language rather than inventing one: `tokens` surfaces and borders,
+ * accent active states, and the same field and choice-card components onboarding
+ * already uses.
+ *
+ * The hex strings further down are *not* chrome: they are the defaults for the
+ * user's brand colours, which are data stored on the channel and rendered as
+ * swatches. Those stay literal because they are values the user edits.
  *
  * The one structural rule worth naming: there is a channel *switcher*, and every
  * section below it edits only the selected channel. Nothing here is account-wide
@@ -815,7 +819,7 @@ function Toggle({
           flexShrink: 0,
           marginTop: 2,
           borderRadius: radius.sm,
-          border: `2px solid ${checked && !disabled ? color.accent : "#3A3336"}`,
+          border: `2px solid ${checked && !disabled ? color.accent : color.controlBorder}`,
           background: checked && !disabled ? color.accent : "transparent",
           cursor: disabled ? "not-allowed" : "pointer",
         }}

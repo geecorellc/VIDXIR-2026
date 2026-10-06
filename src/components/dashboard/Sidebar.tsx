@@ -3,14 +3,17 @@
 /**
  * Dashboard sidebar — ported from the prototype's `aside`.
  *
- * Preserved: 220px column, 1px #1C1719 right border, the seven nav items in
- * order, the red 2px left border + #1F1315 background on the active item, the
+ * Preserved: a fixed-width column with a hairline right border, the nav items in
+ * order, an accent left border + soft accent background on the active item, the
  * muted dot for stages that are not yet reachable, and the "PLAN · STUDIO"
  * footer above Log out.
  *
  * Changed: the active item comes from the URL (usePathname) rather than a `tab`
  * state variable, the locked dot is driven by real persisted project status, and
- * the plan label comes from the server (§23 — never a client-held value).
+ * the plan label comes from the server (§23 — never a client-held value). Every
+ * colour is a `tokens` value, so the rail themes with the rest of the app — the
+ * active item uses accent-on-soft-accent rather than white-on-accent, which was
+ * unreadable once the soft tint became near-white in the light theme.
  */
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -31,8 +34,9 @@ import {
   Youtube,
   type LucideIcon,
 } from "lucide-react";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { VidxirLogo } from "@/components/ui/VidxirLogo";
-import { color, font, radius } from "@/lib/design/tokens";
+import { color, font, layout, radius } from "@/lib/design/tokens";
 import { NAV_ITEMS, SECONDARY_NAV, type NavItem } from "@/lib/nav";
 import { api } from "@/services/api-client";
 
@@ -109,8 +113,8 @@ export function Sidebar({
   return (
     <aside
       style={{
-        width: 220,
-        borderRight: `1px solid ${color.borderFaint}`,
+        width: layout.sidebarWidth,
+        borderRight: `1px solid ${color.border}`,
         padding: "22px 14px",
         display: "flex",
         flexDirection: "column",
@@ -169,12 +173,18 @@ export function Sidebar({
             fontFamily: font.display,
             fontSize: 10.5,
             letterSpacing: 1.3,
+            fontWeight: 600,
             color: color.textFaint,
             padding: "0 12px 10px",
           }}
         >
           PLAN · {planName.toUpperCase()}
         </div>
+
+        <div style={{ padding: "0 4px 8px" }}>
+          <ThemeToggle />
+        </div>
+
         <button
           type="button"
           onClick={logout}
@@ -229,9 +239,14 @@ function NavLink({
         borderRadius: radius.md,
         textDecoration: "none",
         background: active ? color.accentBgSoft : "transparent",
-        color: active ? "#fff" : color.textDim,
+        /**
+         * The accent, not `onAccent`. `accentBgSoft` is a *tint* of the accent,
+         * not a fill of it — near-white on the light theme — so white label text
+         * would be invisible there. The accent reads against both tints.
+         */
+        color: active ? color.accent : color.textDim,
         fontSize: 13.5,
-        fontWeight: 500,
+        fontWeight: active ? 600 : 500,
         borderLeft: `2px solid ${active ? color.accent : "transparent"}`,
       }}
     >

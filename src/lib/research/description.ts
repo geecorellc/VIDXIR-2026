@@ -48,9 +48,17 @@ import { tokenize } from "@/lib/research/scoring";
 
 const log = logger.child({ component: "research-description" });
 
-/** Shortest and longest description accepted. Mirrored by the route's schema. */
-export const MIN_DESCRIPTION_CHARS = 12;
-export const MAX_DESCRIPTION_CHARS = 2_000;
+/**
+ * Shortest and longest description accepted. Mirrored by the route's schema.
+ *
+ * Defined in `description-limits.ts` and re-exported here: this module reaches
+ * `googleapis` through `signals.ts`, so a client component cannot import it,
+ * and the prompt box needs these two numbers to render its counter.
+ */
+export {
+  MAX_DESCRIPTION_CHARS,
+  MIN_DESCRIPTION_CHARS,
+} from "@/lib/research/description-limits";
 
 /**
  * Shortest and longest script target derived from a description.

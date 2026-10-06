@@ -14,6 +14,10 @@
  * `missing required error components`. The palette is inlined here for that
  * reason, not by oversight; the duplication buys the guarantee that this file
  * can always render.
+ *
+ * These literals are the light theme's token values. This boundary cannot read
+ * `--vx-*` either, since `GlobalStyle` is what would have defined them, so it
+ * renders light unconditionally rather than following the user's choice.
  */
 import { useEffect } from "react";
 
@@ -41,17 +45,17 @@ export default function GlobalError({
           alignItems: "center",
           justifyContent: "center",
           padding: 24,
-          background: "#0B0A0C",
-          color: "#F5F3F1",
-          fontFamily: "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",
+          background: "#FFFFFF",
+          color: "hsl(0, 0%, 12%)",
+          fontFamily: "Mulish, system-ui, -apple-system, 'Segoe UI', sans-serif",
         }}
       >
         <div
           style={{
             maxWidth: 520,
             width: "100%",
-            background: "#141216",
-            border: "1px solid #241F22",
+            background: "#FFFFFF",
+            border: "1px solid hsl(0, 0%, 91.76%)",
             borderRadius: 12,
             padding: 28,
           }}
@@ -62,7 +66,7 @@ export default function GlobalError({
               fontSize: 11,
               letterSpacing: 1.4,
               textTransform: "uppercase",
-              color: "#E8332B",
+              color: "hsl(295, 100%, 43%)",
               marginBottom: 14,
             }}
           >
@@ -86,7 +90,7 @@ export default function GlobalError({
               margin: "0 0 22px",
               fontSize: 14,
               lineHeight: 1.65,
-              color: "#948B8E",
+              color: "hsl(0, 0%, 45.1%)",
             }}
           >
             This is a failure in the application shell rather than in one page.
@@ -98,9 +102,9 @@ export default function GlobalError({
             onClick={reset}
             style={{
               padding: "11px 20px",
-              background: "#E8332B",
+              background: "hsl(295, 100%, 43%)",
               color: "#fff",
-              border: "1px solid #E8332B",
+              border: "1px solid hsl(295, 100%, 43%)",
               borderRadius: 8,
               fontSize: 14,
               fontWeight: 600,
@@ -116,7 +120,7 @@ export default function GlobalError({
                 margin: "20px 0 0",
                 fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
                 fontSize: 11.5,
-                color: "#6E666A",
+                color: "hsl(0, 0%, 56%)",
               }}
             >
               Reference: {error.digest}

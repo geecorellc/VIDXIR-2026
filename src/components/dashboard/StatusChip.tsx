@@ -17,10 +17,10 @@ const TONE: Record<
   { bg: string; border: string; fg: string }
 > = {
   neutral: { bg: color.subtle, border: color.border, fg: color.textDim },
-  working: { bg: "#13202E", border: "#24384F", fg: color.info },
-  action: { bg: "#221A10", border: "#4A3A20", fg: color.warning },
-  success: { bg: "#132218", border: "#23402C", fg: color.positive },
-  danger: { bg: "#2A1618", border: "#4A2A2A", fg: color.rose },
+  working: { bg: color.infoBg, border: color.infoBorder, fg: color.info },
+  action: { bg: color.warningBg, border: color.warningBorder, fg: color.warning },
+  success: { bg: color.positiveBg, border: color.positiveBorder, fg: color.positive },
+  danger: { bg: color.dangerBg, border: color.dangerBorder, fg: color.rose },
 };
 
 export function StatusChip({

@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { EyeOff, Volume, VolumeX } from "lucide-react";
-import { color, font, radius } from "@/lib/design/tokens";
+import { color, font, radius, trackFill } from "@/lib/design/tokens";
 import {
   isAudioTrack,
   isVisualTrack,
@@ -265,7 +265,8 @@ export function Timeline({
                   position: "relative",
                   height: laneHeight(track.kind),
                   borderBottom: `1px solid ${color.borderFaint}`,
-                  background: track.hidden || track.muted ? "#0C0B0D" : undefined,
+                  background:
+                    track.hidden || track.muted ? color.inputBg : undefined,
                 }}
               >
                 {orderedClips(track).map((clip) => (
@@ -448,15 +449,13 @@ function iconButtonStyle(active: boolean) {
 
 // ---------------------------------------------------------------------------
 
-/** Lane tints, so a glance tells picture from sound from text. */
-const KIND_TINT: Record<EditTrack["kind"], string> = {
-  video: "#2A1E22",
-  image: "#241E2A",
-  text: "#1E2429",
-  caption: "#1E2922",
-  voiceover: "#291E1E",
-  music: "#221E29",
-};
+/**
+ * Lane tints, so a glance tells picture from sound from text.
+ *
+ * The values live in the token layer because each theme needs its own set:
+ * the dark tints would read as mud on a light bed.
+ */
+const KIND_TINT: Record<EditTrack["kind"], string> = trackFill;
 
 function ClipBox({
   clip,

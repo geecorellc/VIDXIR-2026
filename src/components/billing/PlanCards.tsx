@@ -14,7 +14,7 @@
  */
 import { Check } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { color, font, radius } from "@/lib/design/tokens";
+import { accentRing, color, font, radius } from "@/lib/design/tokens";
 import { PLAN_CATALOG, formatPrice, type PlanTier } from "@/lib/plans";
 
 /** One-line positioning copy, kept verbatim from the prototype's `blurb`. */
@@ -56,7 +56,7 @@ export function PlanCards({ selected, onSelect, currentTier }: PlanCardsProps) {
               flexDirection: "column",
               borderColor: active ? color.accent : color.border,
               boxShadow: active
-                ? "0 0 0 1px #E8332B, 0 0 24px rgba(232,51,43,0.15)"
+                ? accentRing
                 : "none",
               padding: 0,
             }}
@@ -68,7 +68,7 @@ export function PlanCards({ selected, onSelect, currentTier }: PlanCardsProps) {
                   top: -10,
                   left: 20,
                   background: color.accent,
-                  color: "#FFFFFF",
+                  color: color.onAccent,
                   fontSize: 10.5,
                   fontWeight: 700,
                   padding: "3px 9px",
@@ -210,7 +210,7 @@ export function PlanCards({ selected, onSelect, currentTier }: PlanCardsProps) {
                     height: 18,
                     borderRadius: "50%",
                     flexShrink: 0,
-                    border: `2px solid ${active ? color.accent : "#3A3336"}`,
+                    border: `2px solid ${active ? color.accent : color.controlBorder}`,
                     background: active ? color.accent : "transparent",
                   }}
                 />

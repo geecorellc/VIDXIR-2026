@@ -13,7 +13,7 @@ import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/dashboard/Sidebar";
 import { VerifyEmailBanner } from "@/components/dashboard/VerifyEmailBanner";
 import { VidxirLogo } from "@/components/ui/VidxirLogo";
-import { color, font } from "@/lib/design/tokens";
+import { color, font, shadow } from "@/lib/design/tokens";
 
 export interface DashboardShellProps {
   planName: string;
@@ -76,7 +76,7 @@ export function DashboardShell({
             style={{
               position: "fixed",
               inset: 0,
-              background: "rgba(0,0,0,0.6)",
+              background: color.scrim,
               zIndex: 40,
             }}
             aria-hidden="true"
@@ -91,7 +91,7 @@ export function DashboardShell({
               left: 0,
               bottom: 0,
               zIndex: 41,
-              boxShadow: "0 18px 48px rgba(0,0,0,0.55)",
+              boxShadow: shadow.panel,
             }}
           >
             {sidebar}

@@ -1,7 +1,7 @@
 /**
  * Channel card — ported from the prototype's channel grid tile.
  *
- * Preserved: the 32px #221315 circle with the YouTube glyph, name, "{n}
+ * Preserved: the 32px accent-tinted circle with the YouTube glyph, name, "{n}
  * subscribers", the last video line, and the "Views" row.
  *
  * Changed: the prototype hard-coded six channels with invented subscriber counts.
@@ -43,7 +43,7 @@ export function ChannelCard({ channel }: { channel: ChannelCardData }) {
             width: 32,
             height: 32,
             borderRadius: "50%",
-            background: "#221315",
+            background: color.accentBgSoft,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -78,8 +78,8 @@ export function ChannelCard({ channel }: { channel: ChannelCardData }) {
             display: "flex",
             alignItems: "flex-start",
             gap: 8,
-            background: "#221A10",
-            border: `1px solid #4A3A20`,
+            background: color.warningBg,
+            border: `1px solid ${color.warningBorder}`,
             borderRadius: radius.md,
             padding: "9px 10px",
             fontSize: 12.5,

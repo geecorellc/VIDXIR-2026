@@ -188,7 +188,7 @@ export function ThumbnailStudio({
           <Card style={{ marginBottom: 16 }}>
             <div
               style={{
-                background: "linear-gradient(135deg, #241315, #0B0A0C)",
+                background: `linear-gradient(135deg, ${color.accentDark}, ${color.mediaBg})`,
                 borderRadius: radius.md,
                 aspectRatio: "16/9",
                 display: "flex",
@@ -250,7 +250,7 @@ export function ThumbnailStudio({
                 }}
                 aria-hidden="true"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill={color.onMedia}>
                   <path d="M8 5v14l11-7z" />
                 </svg>
               </div>

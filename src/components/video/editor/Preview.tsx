@@ -315,7 +315,7 @@ export function Preview({
   return (
     <div
       style={{
-        background: "#000",
+        background: color.mediaBg,
         borderRadius: radius.md,
         aspectRatio: previewAspect(doc.format),
         maxHeight: "52vh",
@@ -377,8 +377,8 @@ export function Preview({
             fontSize: "clamp(14px, 4.2cqw, 34px)",
             letterSpacing: 0.5,
             textTransform: "uppercase",
-            color: "#fff",
-            textShadow: "0 2px 12px rgba(0,0,0,0.85)",
+            color: color.onMedia,
+            textShadow: "0 2px 12px rgba(0,0,0,0.85)" /* over media */,
             pointerEvents: "none",
           }}
         >

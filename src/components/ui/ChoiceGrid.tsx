@@ -10,7 +10,7 @@
  */
 import { Check } from "lucide-react";
 import { useId } from "react";
-import { color, font, radius } from "@/lib/design/tokens";
+import { accentRing, color, font, radius } from "@/lib/design/tokens";
 
 export interface ChoiceOption {
   value: string;
@@ -89,7 +89,7 @@ export function ChoiceGrid({
                 background: selected ? color.accentBgSoft : color.card,
                 border: `1px solid ${selected ? color.accent : color.border}`,
                 boxShadow: selected
-                  ? "0 0 0 1px #E8332B, 0 0 22px rgba(232,51,43,0.14)"
+                  ? accentRing
                   : "none",
                 borderRadius: radius.md,
                 padding: "13px 14px",
@@ -109,7 +109,7 @@ export function ChoiceGrid({
                   flexShrink: 0,
                   marginTop: 1,
                   borderRadius: "50%",
-                  border: `2px solid ${selected ? color.accent : "#3A3336"}`,
+                  border: `2px solid ${selected ? color.accent : color.controlBorder}`,
                   background: selected ? color.accent : "transparent",
                   cursor: "pointer",
                 }}

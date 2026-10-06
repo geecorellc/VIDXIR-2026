@@ -36,7 +36,7 @@ const VARIANT_STYLE: Record<
 > = {
   primary: {
     background: color.accent,
-    color: "#FFFFFF",
+    color: color.onAccent,
     border: `1px solid ${color.accent}`,
   },
   ghost: {
@@ -52,7 +52,7 @@ const VARIANT_STYLE: Record<
   danger: {
     background: "transparent",
     color: color.rose,
-    border: `1px solid #4A2A2A`,
+    border: `1px solid ${color.dangerBorder}`,
   },
 };
 

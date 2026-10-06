@@ -158,7 +158,7 @@ export function VideoStudio({
       <Card style={{ marginBottom: 16 }}>
         <div
           style={{
-            background: "#000",
+            background: color.mediaBg,
             borderRadius: radius.md,
             aspectRatio: "16/9",
             display: "flex",
@@ -185,7 +185,7 @@ export function VideoStudio({
                 style={{
                   position: "absolute",
                   inset: 0,
-                  background: "linear-gradient(135deg, #1a0d0d, #000)",
+                  background: `linear-gradient(135deg, ${color.accentDark}, ${color.mediaBg})`,
                 }}
               />
               <div

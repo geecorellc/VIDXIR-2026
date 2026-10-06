@@ -98,9 +98,9 @@ export function AuthNotice({
 }) {
   const palette =
     tone === "error"
-      ? { bg: "#2A1618", border: "#4A2A2A", fg: color.rose }
+      ? { bg: color.dangerBg, border: color.dangerBorder, fg: color.rose }
       : tone === "success"
-        ? { bg: "#132218", border: "#23402C", fg: color.positive }
+        ? { bg: color.positiveBg, border: color.positiveBorder, fg: color.positive }
         : { bg: color.subtle, border: color.border, fg: color.textDim };
 
   return (

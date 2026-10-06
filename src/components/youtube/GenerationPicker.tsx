@@ -37,7 +37,7 @@ import { ConfigNotice } from "@/components/dashboard/ConfigNotice";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { ChoiceGrid } from "@/components/ui/ChoiceGrid";
-import { color, font, radius } from "@/lib/design/tokens";
+import { accentRing, color, font, radius } from "@/lib/design/tokens";
 import type { CapabilityStatus } from "@/lib/providers/config";
 import type { FormatSpec } from "@/lib/video/format";
 import type {
@@ -716,7 +716,7 @@ function OptionButton({
         border: `1px solid ${selected ? color.accent : color.border}`,
         borderRadius: radius.md,
         boxShadow: selected
-          ? "0 0 0 1px #E8332B, 0 0 22px rgba(232,51,43,0.14)"
+          ? accentRing
           : "none",
       }}
     >

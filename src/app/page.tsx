@@ -64,7 +64,7 @@ export default function LandingPage() {
             style={{
               fontSize: 13.5,
               fontWeight: 600,
-              color: "#fff",
+              color: color.onAccent,
               background: color.accent,
               textDecoration: "none",
               padding: "10px 16px",
@@ -148,7 +148,7 @@ export default function LandingPage() {
               gap: 9,
               padding: "13px 22px",
               background: color.accent,
-              color: "#fff",
+              color: color.onAccent,
               fontSize: 14.5,
               fontWeight: 600,
               borderRadius: radius.md,

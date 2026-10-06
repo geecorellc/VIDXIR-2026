@@ -365,7 +365,7 @@ export function PublishPanel({
             <div
               style={{
                 background: thumbnailUrl
-                  ? "#000"
+                  ? color.mediaBg
                   : color.inputBg,
                 border: `1px solid ${color.border}`,
                 borderRadius: radius.md,
@@ -386,7 +386,7 @@ export function PublishPanel({
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
               ) : (
-                <ImageIcon size={22} color="#3A3336" aria-hidden="true" />
+                <ImageIcon size={22} color={color.controlBorder} aria-hidden="true" />
               )}
             </div>
 

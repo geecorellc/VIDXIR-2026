@@ -1,5 +1,7 @@
 /**
- * Card — the prototype's panel surface (#141216, 1px #241F22, radius 12, pad 20).
+ * Card — the app's panel surface: `color.card`, a 1px `color.border` hairline,
+ * radius 12, pad 20. All four come from `tokens`, so a card themes with the rest
+ * of the app rather than pinning the dark palette it was first drawn in.
  * `pad` and `tone` are additions so callers stop re-declaring inline overrides.
  */
 import type { CSSProperties, ReactNode } from "react";
@@ -26,7 +28,7 @@ export function Card({
     tone === "accent"
       ? `1px solid ${color.accent}`
       : tone === "warning"
-        ? `1px solid #4A3A20`
+        ? `1px solid ${color.warningBorder}`
         : tone === "dashed"
           ? `1px dashed ${color.borderLight}`
           : `1px solid ${color.border}`;

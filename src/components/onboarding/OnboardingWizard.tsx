@@ -306,8 +306,8 @@ export function OnboardingWizard({
             <div
               role="alert"
               style={{
-                background: "#2A1618",
-                border: "1px solid #4A2A2A",
+                background: color.dangerBg,
+                border: `1px solid ${color.dangerBorder}`,
                 borderRadius: radius.md,
                 padding: "10px 12px",
                 fontSize: 12.5,
