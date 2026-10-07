@@ -1,101 +1,120 @@
 # Cloudflare deployment
 
-The Next.js web/API process targets Cloudflare Workers through OpenNext. The
-BullMQ worker and scheduler remain separate Node.js processes; local FFmpeg
-rendering needs a host with executable binaries, writable scratch space, and
-fonts. Postgres and Redis must be production services reachable by both the web
-process and these background processes. Object storage can be Cloudflare R2 via
-its S3-compatible endpoint.
-
-## Authentication
+The public app is live at **https://app.vidxir.com**. Its Next.js frontend and API
+run on Cloudflare Workers through OpenNext. The Custom Domain created the DNS
+record automatically. Wrangler is already authenticated on this machine.
 
 ```sh
-npm run cf:login
 npm run cf:whoami
+# For a new machine:
+npm run cf:login
 ```
 
-Sign in and allow access in the browser opened by the first command. Wrangler
-stores OAuth credentials outside this repository. Never commit credentials.
+## Cloudflare-only backend migration
 
-## Production configuration
+The selected backend uses Cloudflare services rather than Render, Neon,
+Upstash, or a separately hosted BullMQ server:
 
-The selected application URL is `https://app.vidxir.com`. The authenticated
-account contains the active zone `vidxir.com`. A Worker Custom Domain creates its
-DNS entry when deployed; an A record pointing to localhost is not needed.
-The R2 bucket `vidxir-media-production` has been created; its S3 endpoint, region,
-and bucket are configured in Wrangler. Create bucket-scoped R2 S3 credentials
-and set `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` as runtime secrets. The
-existing storage integration uses the S3 API, so it does not need an R2 binding.
+| Purpose | Cloudflare service | Current state |
+| --- | --- | --- |
+| Web frontend/API | Workers + OpenNext | Live |
+| Relational data | D1 | Created; schema and plan catalogue applied |
+| Media files | R2 | Private production bucket created |
+| Background job delivery | Queues | Five queues created; consumers not connected |
+| Locks and rate limiting | Durable Objects | Application adapter pending |
+| Scheduled work | Cron Triggers | Scheduler conversion pending |
+| FFmpeg/video processing | Containers | Requires Workers Paid; application adapter pending |
 
-Confirm the domain in `wrangler.jsonc` is an active zone in the authenticated
-Cloudflare account before deploying. `APP_URL` must match the HTTPS domain.
+**These provisioned services are not yet used by the live application's backend.**
+The current runtime still imports the PostgreSQL schema/client and BullMQ/Redis
+adapters. Switching a binding alone cannot migrate those implementations. The
+public frontend remains on its last tested deployment while this conversion is
+prepared on `feat/cloudflare-native`.
 
-Set runtime secrets using `npx wrangler secret put NAME`, including:
+Cloudflare rejected `wrangler containers list` with:
 
-- `DATABASE_URL`, `REDIS_URL`
-- `ENCRYPTION_KEY`, `SESSION_SECRET` (separate 32-byte hex values)
-- `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`
-- `RESEND_API_KEY`
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-- Provider API keys for the video capabilities you enable
-- Stripe secrets if you enable Stripe billing
+> You do not have access to Cloudflare Containers. Deploying containers requires the Workers Paid plan.
 
-Set the production storage endpoint, bucket, region, email sender, provider
-selection, and other non-secret settings from `.env.example` in Wrangler's
-`vars`. For R2 use its account-specific S3 endpoint and `S3_REGION=auto`.
-Use the same database, Redis namespace, storage, and encryption/session secrets
-on the worker and scheduler host. Preserve an existing encryption key when
-migrating existing data.
+Enable **Workers Paid** in the authenticated account at
+https://dash.cloudflare.com/?to=/:account/workers/plans. It starts at $5/month,
+with additional usage charges. No billing plan was changed by this setup.
+See [Containers pricing](https://developers.cloudflare.com/containers/platform/pricing/).
 
-Development `.env.local` values must not be used in production builds. Configure
-Cloudflare Build variables separately when using Cloudflare's Git integration;
-build variables and runtime secrets are separate. For local build validation,
-use an isolated checkout with build-only values, never production credentials
-that could be inlined into the output. Runtime dependency checks must be done
-with the actual production configuration.
+## Provisioned resources
 
-## Release order
+`wrangler.native.jsonc` records the backend resource bindings. It is a resource
+configuration for migration commands; it does not yet have a deployable Worker
+entry point and must not replace `wrangler.jsonc` during a web release.
 
-1. Provision Postgres, Redis, storage, and the Node.js worker/scheduler host.
-2. Apply migrations against production with `npm run db:migrate`.
-3. Start `npm run worker` and `npm run scheduler` on the Node.js host.
-4. Run `npm run cf:build`, then `npm run cf:preview` to validate Workers runtime
-   compatibility. Compilation alone does not prove login, queues, or provider
-   calls work; validate those against staging infrastructure before launch.
-5. Run `npm run cf:deploy` after the build and runtime validation pass.
-6. Verify `/api/health`, `/api/ready?mode=full`, signup/login, and a complete video
-   workflow on the live domain.
+- D1: `vidxir-production`, ID `90189a29-b52e-4723-b83e-1d0d7be77359`.
+- R2: `vidxir-media-production`.
+- Queues: `vidxir-research`, `vidxir-pipeline`, `vidxir-publish`,
+  `vidxir-analytics`, and `vidxir-maintenance`.
 
-Set the Google OAuth redirect to `https://YOUR_DOMAIN/api/channels/callback`
-and the Stripe webhook to `https://YOUR_DOMAIN/api/billing/webhook`.
-
-## Background process image
-
-`Dockerfile.worker` installs system FFmpeg and fonts, runs as a non-root user,
-and excludes local secret files from the build. Build it with:
+The D1 schema is in `src/lib/db/schema.d1.ts`; existing PostgreSQL migrations
+and the active application schema are preserved separately. The D1 migration
+creates all 42 tables and seeds Starter, Studio, and Scale from the plan
+catalogue. It includes partial unique indexes, credit ledger sign checks, and
+balance constraints. Timestamps use UTC epoch milliseconds, JSON uses SQLite
+text, and fractional metrics use REAL storage.
 
 ```sh
-docker build -f Dockerfile.worker -t vidxir-worker .
+# Validate on a fresh local D1 database:
+npm run db:migrate:d1
+npm run test:cloudflare
+
+# Apply new migrations to the provisioned production D1 database:
+npm run db:migrate:d1:remote
+
+# Generate subsequent schema changes; inspect the SQL before applying:
+npm run db:generate:d1
 ```
 
-Run two services from that image with production environment variables supplied
-by your host: the default command runs the worker; override the command with
-`npm run scheduler` for the scheduler. A one-off instance with
-`npm run db:migrate` applies migrations. Give the worker at least 60 seconds of
-shutdown grace, sufficient CPU/memory, and writable temporary disk for rendering.
-This image has not yet been built or deployed; validate it on the selected host.
+The initial migration includes hand-authored plan inserts after generated DDL.
+Keep applied migrations immutable; catalogue changes require a new migration.
 
-## Validation performed
+## Remaining implementation and activation
 
-An isolated build with build-only values passed the OpenNext Cloudflare build
-and Wrangler deployment dry run. The homepage and `/api/health` returned 200
-under local `workerd`. TypeScript and Dockerfile configuration checks passed.
-The web Worker was published on October 7, 2026 at
-`https://app.vidxir.com`, with version
-`462ea6bd-6dff-4c3d-871c-73c1b7669786`. The live homepage and login page returned
-200 over HTTPS. The custom domain is attached. No production secrets have been
-configured; the public pages are available while backend setup is deferred.
-Production signup/login actions, database/Redis connections, storage access,
-email, provider calls, and a complete video workflow remain unverified.
+1. Replace the PostgreSQL client and SQL expressions with D1, and convert the
+   interactive transaction callbacks to atomic D1 batches. D1 does not support
+   PostgreSQL-style interactive transactions. Credit charging, refunds, quota
+   claims, and state changes must retain rollback and idempotency guarantees.
+2. Replace BullMQ producers/consumers with Queues, preserving the durable jobs
+   table, retries, job progress, duplicate-delivery handling, and publish locks.
+3. Add native R2 access and Durable Object locking/rate limiting. Connect the
+   existing scheduler tasks to Cron Triggers.
+4. After Workers Paid is enabled, adapt the FFmpeg image to a Cloudflare
+   Container. Use D1/R2-backed state, since a container filesystem is ephemeral.
+   Do not put a production PostgreSQL or Redis database on that disk.
+5. Configure encryption/session secrets and required email/AI/Google credentials.
+   External APIs still require their own credentials even when hosting is entirely
+   Cloudflare. Never enable mock providers in production.
+6. Validate signup, login, tenant isolation, concurrent credit charges, queue
+   retries, and a full render/publish workflow in staging. Only then attach the
+   completed backend to the live app.
 
-Authentication or a successful build alone does not publish the app.
+Google OAuth callback: `https://app.vidxir.com/api/channels/callback`.
+Stripe webhook, if billing is enabled: `https://app.vidxir.com/api/billing/webhook`.
+
+## Web release commands
+
+```sh
+npm run cf:build
+npm run cf:preview
+npm run cf:deploy
+```
+
+Use isolated, build-only environment values for local production builds. Keep
+`.env.local`, `.dev.vars`, OAuth credentials, and runtime secrets out of Git and
+deployment assets. Production provider keys have not been configured.
+
+## Validation
+
+The D1 migration was validated in the local Workers runtime. The Cloudflare tests
+check schema creation, the plan catalogue, Date/JSON mapping, invalid credit
+movements, whole-batch rollback on overdraft, and duplicate charge constraints.
+These tests validate the new database foundation; they do not assert that the
+existing application services have been migrated.
+
+The last live web release includes the dark-mode default and returned HTTPS 200
+for the homepage and login page. The full backend is not yet operational.

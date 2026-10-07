@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vidxir-native",
+  "compatibility_date": "2026-10-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vidxir-production",
+      "database_id": "90189a29-b52e-4723-b83e-1d0d7be77359",
+      "migrations_dir": "drizzle-d1"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "vidxir-media-production" }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "RESEARCH_QUEUE", "queue": "vidxir-research" },
+      { "binding": "PIPELINE_QUEUE", "queue": "vidxir-pipeline" },
+      { "binding": "PUBLISH_QUEUE", "queue": "vidxir-publish" },
+      { "binding": "ANALYTICS_QUEUE", "queue": "vidxir-analytics" },
+      { "binding": "MAINTENANCE_QUEUE", "queue": "vidxir-maintenance" }
+    ]
+  }
+}

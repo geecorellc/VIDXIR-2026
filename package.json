@@ -37,7 +37,11 @@
     "cf:whoami": "wrangler whoami",
     "cf:build": "opennextjs-cloudflare build",
     "cf:preview": "opennextjs-cloudflare preview",
-    "cf:deploy": "opennextjs-cloudflare deploy"
+    "cf:deploy": "opennextjs-cloudflare deploy",
+    "db:generate:d1": "drizzle-kit generate --config drizzle.d1.config.ts",
+    "db:migrate:d1": "wrangler d1 migrations apply vidxir-production --local --config wrangler.native.jsonc",
+    "db:migrate:d1:remote": "wrangler d1 migrations apply vidxir-production --remote --config wrangler.native.jsonc",
+    "test:cloudflare": "vitest run tests/cloudflare"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.33.1",
@@ -68,6 +72,7 @@
     "drizzle-kit": "^0.30.0",
     "eslint": "^9.17.0",
     "eslint-config-next": "^15.1.0",
+    "miniflare": "5.20261006.0-alpha",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0",
     "vitest": "^2.1.8",
