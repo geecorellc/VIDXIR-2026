@@ -6,8 +6,8 @@
  * would see a white flash on every navigation. Reading localStorage here is
  * synchronous and happens before the first paint, so there is none.
  *
- * Light is the default, so the script only ever *adds* a class: no stored
- * preference and no OS preference means the `:root` light tokens apply as-is.
+ * Dark is the first-visit default. A saved light preference overrides it;
+ * the operating system's theme does not affect the choice.
  *
  * Kept deliberately tiny and dependency-free, and wrapped in try/catch because
  * localStorage throws in Safari's private mode rather than returning null.
@@ -22,14 +22,14 @@ export const DARK_CLASS = "vx-dark";
 export function ThemeScript() {
   const script = `
 (function () {
+  var dark = true;
   try {
     var stored = localStorage.getItem('${THEME_STORAGE_KEY}');
-    var dark = stored === 'dark' ||
-      (stored === null && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    if (dark) document.documentElement.classList.add('${DARK_CLASS}');
+    dark = stored !== 'light';
   } catch (e) {
-    /* Storage unavailable — the light default is already correct. */
+    /* Storage unavailable — keep the dark default. */
   }
+  document.documentElement.classList.toggle('${DARK_CLASS}', dark);
 })();
 `;
 
