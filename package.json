@@ -32,7 +32,12 @@
     "worker": "tsx src/worker/index.ts",
     "scheduler": "tsx src/scheduler/index.ts",
     "infra:up": "docker compose up -d",
-    "infra:down": "docker compose down"
+    "infra:down": "docker compose down",
+    "cf:login": "wrangler login",
+    "cf:whoami": "wrangler whoami",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare preview",
+    "cf:deploy": "opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.33.1",
@@ -56,6 +61,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
+    "@opennextjs/cloudflare": "^1.20.9",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -64,6 +70,7 @@
     "eslint-config-next": "^15.1.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "wrangler": "^4.148.0"
   }
 }

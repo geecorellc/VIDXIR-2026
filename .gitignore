@@ -5,6 +5,10 @@ node_modules/
 
 # next
 .next/
+.open-next/
+.wrangler/
+.dev.vars
+.dev.vars.*
 out/
 # Anchored with a leading slash: an unanchored `build/` matches at *any* depth, and
 # it was silently excluding `src/app/api/video/build/route.ts` — a real route that

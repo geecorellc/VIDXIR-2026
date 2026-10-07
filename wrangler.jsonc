@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vidxir",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    { "binding": "WORKER_SELF_REFERENCE", "service": "vidxir" }
+  ],
+  "vars": {
+    "APP_URL": "https://app.vidxir.com",
+    "VIDXIR_USE_MOCK_PROVIDERS": "false",
+    "VIDXIR_BLOCK_REAL_PUBLISH": "false",
+    "EMAIL_PROVIDER": "resend",
+    "S3_ENDPOINT": "https://5fbb551221749b66e8990439874529e7.r2.cloudflarestorage.com",
+    "S3_REGION": "auto",
+    "S3_BUCKET": "vidxir-media-production"
+  },
+  "routes": [
+    { "pattern": "app.vidxir.com", "custom_domain": true }
+  ],
+  "observability": { "enabled": true }
+}
