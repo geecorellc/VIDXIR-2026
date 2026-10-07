@@ -56,7 +56,8 @@ const schema = z.object({
    */
   VIDXIR_CONTINUITY_ENGINE_ENABLED: bool.default("false"),
 
-  DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+  DATABASE_URL: z.string().default(""),
+  RENDER_EXECUTION: z.enum(["cloudflare", "local"]).default("cloudflare"),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(10),
   /** Server-side per-statement ceiling, in milliseconds. See `lib/db`. */
   DATABASE_STATEMENT_TIMEOUT_MS: z.coerce
@@ -71,7 +72,7 @@ const schema = z.object({
     .positive()
     .default(30_000),
 
-  REDIS_URL: z.string().min(1, "REDIS_URL is required"),
+  REDIS_URL: z.string().default(""),
   QUEUE_PREFIX: z.string().default("vidxir"),
 
   ENCRYPTION_KEY: hex32,
@@ -313,9 +314,9 @@ const schema = z.object({
 
   S3_ENDPOINT: z.string().optional(),
   S3_REGION: z.string().default("us-east-1"),
-  S3_BUCKET: z.string().min(1, "S3_BUCKET is required"),
-  S3_ACCESS_KEY_ID: z.string().min(1, "S3_ACCESS_KEY_ID is required"),
-  S3_SECRET_ACCESS_KEY: z.string().min(1, "S3_SECRET_ACCESS_KEY is required"),
+  S3_BUCKET: z.string().default("vidxir-media-production"),
+  S3_ACCESS_KEY_ID: z.string().default(""),
+  S3_SECRET_ACCESS_KEY: z.string().default(""),
   S3_FORCE_PATH_STYLE: bool.default("false"),
   S3_SIGNED_URL_TTL: z.coerce.number().int().positive().default(3600),
 

@@ -83,7 +83,7 @@ interface Spec {
   available?: (provider: string) => boolean;
   /** Shown when `available` returns false. */
   unavailableHint?: string;
-  hint?: string;
+  hint?: string | (() => string);
 }
 
 const SPECS: Spec[] = [
@@ -111,7 +111,7 @@ const SPECS: Spec[] = [
     unavailableHint:
       "Set BEDROCK_REGION (or AWS_REGION) to a region where your account has " +
       "access to the Claude model in BEDROCK_MODEL.",
-    hint:
+    hint: () =>
       env().AI_PROVIDER === "bedrock"
         ? "Bedrock uses the standard AWS credential chain — no key is stored in " +
           "Vidxir AI's configuration. Enable Claude model access in the AWS console."
@@ -236,7 +236,7 @@ const SPECS: Spec[] = [
     },
     // The bundled binary is the default, so the usual reason this is unavailable
     // is an install that skipped postinstall scripts.
-    available: (p) => (p === "ffmpeg" ? hasFfmpeg() : true),
+    available: (p) => (p === "ffmpeg" ? (env().RENDER_EXECUTION === "cloudflare" || hasFfmpeg()) : true),
     unavailableHint:
       "ffmpeg was not found. Run `npm install ffmpeg-static`, set FFMPEG_PATH " +
       "to a system ffmpeg, or set RENDER_PROVIDER=shotstack.",
@@ -255,7 +255,7 @@ const SPECS: Spec[] = [
     // The requirement is a file on disk, not a credential — the env var is how an
     // operator points at one, but a system font satisfies it without any var set.
     required: () => [],
-    available: () => hasFfmpeg() && hasThumbnailFont(),
+    available: () => env().RENDER_EXECUTION === "cloudflare" || (hasFfmpeg() && hasThumbnailFont()),
     unavailableHint:
       "Thumbnail headlines are drawn by ffmpeg and need a font file. " + FONT_HINT,
     hint:
@@ -266,9 +266,9 @@ const SPECS: Spec[] = [
     capability: "storage",
     label: "Object storage",
     optional: false,
-    provider: () => "s3",
-    required: () => ["S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"],
-    hint: "`npm run infra:up` starts MinIO with the .env.example defaults.",
+    provider: () => "r2",
+    required: () => [],
+    hint: "Private media is stored in the Cloudflare R2 MEDIA binding.",
   },
   {
     capability: "billing",
@@ -315,7 +315,7 @@ function evaluate(spec: Spec): CapabilityStatus {
     // The unavailability hint is the actionable one when it applies: telling an
     // operator where to get a Shotstack key does not help when the problem is a
     // missing binary.
-    hint: !available && spec.unavailableHint ? spec.unavailableHint : spec.hint,
+    hint: !available && spec.unavailableHint ? spec.unavailableHint : typeof spec.hint === "function" ? spec.hint() : spec.hint,
     optional: spec.optional,
   };
 }

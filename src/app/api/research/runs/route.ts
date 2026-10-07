@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
         // Counted in SQL rather than by loading the rows: the screen shows "182
         // signals", never the signals themselves.
         resultCount: sql<number>`(
-          SELECT COUNT(*)::int FROM ${researchResults}
+          SELECT COUNT(*) FROM ${researchResults}
           WHERE ${researchResults.runId} = ${researchRuns.id}
         )`,
       })

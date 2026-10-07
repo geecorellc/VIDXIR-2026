@@ -1,120 +1,164 @@
 # Cloudflare deployment
 
-The public app is live at **https://app.vidxir.com**. Its Next.js frontend and API
-run on Cloudflare Workers through OpenNext. The Custom Domain created the DNS
-record automatically. Wrangler is already authenticated on this machine.
+The public app uses **https://app.vidxir.com**. Cloudflare Custom Domains manage
+its DNS and TLS. Wrangler is authenticated on this machine; on another machine,
+run `npm run cf:login`, then `npm run cf:whoami`.
 
-```sh
-npm run cf:whoami
-# For a new machine:
-npm run cf:login
-```
+## Cloudflare services
 
-## Cloudflare-only backend migration
-
-The selected backend uses Cloudflare services rather than Render, Neon,
-Upstash, or a separately hosted BullMQ server:
-
-| Purpose | Cloudflare service | Current state |
+| Purpose | Service | Configuration |
 | --- | --- | --- |
-| Web frontend/API | Workers + OpenNext | Live |
-| Relational data | D1 | Created; schema and plan catalogue applied |
-| Media files | R2 | Private production bucket created |
-| Background job delivery | Queues | Five queues created; consumers not connected |
-| Locks and rate limiting | Durable Objects | Application adapter pending |
-| Scheduled work | Cron Triggers | Scheduler conversion pending |
-| FFmpeg/video processing | Containers | Requires Workers Paid; application adapter pending |
+| Next.js frontend/API | Workers + OpenNext | `wrangler.jsonc`, Worker `vidxir` |
+| Database | D1 | `vidxir-production` |
+| Private media | R2 | `vidxir-media-production` |
+| Background delivery | Queues | Research, pipeline, publish, analytics, maintenance |
+| Locks and rate limits | SQLite Durable Objects | `Coordination` in `vidxir-backend` |
+| Durable job ownership/retries | SQLite Durable Objects | `JobRunner` in `vidxir-backend` |
+| Video and thumbnail processing | Containers | Node 22, FFmpeg, DejaVu fonts |
+| Scheduled work | Cron Triggers | Every five minutes; tasks keep their own intervals |
 
-**These provisioned services are not yet used by the live application's backend.**
-The current runtime still imports the PostgreSQL schema/client and BullMQ/Redis
-adapters. Switching a binding alone cannot migrate those implementations. The
-public frontend remains on its last tested deployment while this conversion is
-prepared on `feat/cloudflare-native`.
+The runtime uses these native bindings. No production Postgres, Redis, S3 access
+keys, Render, Neon or Upstash account is needed. The old PostgreSQL schema and
+verification tooling are retained for reference; they are not the active runtime.
 
-Cloudflare rejected `wrangler containers list` with:
+A job is written to D1 before sending its queue message. The consumer acknowledges
+a message after its Durable Object has persisted delivery ownership. Alarms manage
+delays, retries, crash recovery and status polling. Duplicate deliveries reuse the
+same durable owner. Shared execution leases cap active job containers at five;
+queued jobs are admitted in plan-priority order. Individual jobs have a one-hour
+execution limit. Containers sleep after inactivity; their local files are temporary.
 
-> You do not have access to Cloudflare Containers. Deploying containers requires the Workers Paid plan.
+Containers access D1, R2, queues and coordination through a private outbound HTTP
+intercept to the backend Worker. The backend has no public route or workers.dev
+URL. Private media stays in R2 and is served through expiring signed `/api/media`
+URLs on the app origin, including byte-range reads for video playback.
 
-Enable **Workers Paid** in the authenticated account at
-https://dash.cloudflare.com/?to=/:account/workers/plans. It starts at $5/month,
-with additional usage charges. No billing plan was changed by this setup.
-See [Containers pricing](https://developers.cloudflare.com/containers/platform/pricing/).
+## Operator secrets
 
-## Provisioned resources
+The operator chose to configure secrets manually. No production secrets have been
+uploaded by this migration. Add the following as **Secret** variables in Cloudflare
+Dashboard → Workers & Pages → each Worker → Settings → Variables and Secrets:
 
-`wrangler.native.jsonc` records the backend resource bindings. It is a resource
-configuration for migration commands; it does not yet have a deployable Worker
-entry point and must not replace `wrangler.jsonc` during a web release.
+| Secret | `vidxir` | `vidxir-backend` |
+| --- | --- | --- |
+| `ENCRYPTION_KEY` | Required | Required; use the identical value |
+| `SESSION_SECRET` | Required | Required; use the identical value |
+| `RESEND_API_KEY` | Required for signup/verification/reset emails | Set when email is needed by background work |
+| AI/provider credentials | Required for enabled features | Same credentials for background generation |
+| Google OAuth credentials | Required for channel linking | Same credentials for channel jobs |
+| Stripe credentials | Required only when billing is enabled | Set for any background billing use |
 
-- D1: `vidxir-production`, ID `90189a29-b52e-4723-b83e-1d0d7be77359`.
-- R2: `vidxir-media-production`.
-- Queues: `vidxir-research`, `vidxir-pipeline`, `vidxir-publish`,
-  `vidxir-analytics`, and `vidxir-maintenance`.
+Generate two distinct random 32-byte keys (64 hexadecimal characters). Keep the
+same encryption key and session secret on both Workers. Changing the encryption
+key after credentials have been stored requires a data/key migration; changing
+the session secret invalidates existing sessions and media links.
 
-The D1 schema is in `src/lib/db/schema.d1.ts`; existing PostgreSQL migrations
-and the active application schema are preserved separately. The D1 migration
-creates all 42 tables and seeds Starter, Studio, and Scale from the plan
-catalogue. It includes partial unique indexes, credit ledger sign checks, and
-balance constraints. Timestamps use UTC epoch milliseconds, JSON uses SQLite
-text, and fractional metrics use REAL storage.
+Two generated keys are already prepared on this machine in a private local file,
+`/private/tmp/vidxir-cloudflare-core-secrets.json` (permissions 0600). To upload them
+yourself from this checkout, run:
 
 ```sh
-# Validate on a fresh local D1 database:
-npm run db:migrate:d1
-npm run test:cloudflare
-
-# Apply new migrations to the provisioned production D1 database:
-npm run db:migrate:d1:remote
-
-# Generate subsequent schema changes; inspect the SQL before applying:
-npm run db:generate:d1
+npx wrangler secret bulk /private/tmp/vidxir-cloudflare-core-secrets.json --config wrangler.native.jsonc
+npx wrangler secret bulk /private/tmp/vidxir-cloudflare-core-secrets.json --config wrangler.jsonc
 ```
 
-The initial migration includes hand-authored plan inserts after generated DDL.
-Keep applied migrations immutable; catalogue changes require a new migration.
+Alternatively, use interactive `wrangler secret put NAME --config CONFIG` or the
+dashboard. The generated file has not been committed or included in deployment
+assets. Store a secure backup and remove the temporary file after configuration.
 
-## Remaining implementation and activation
+Scheduled work stays paused while either core secret is missing, avoiding failed
+paid-container starts. Pending queue deliveries retry instead of starting work.
+Adding the secrets activates scheduled work automatically. Signup/login and
+credential encryption also require the web Worker's core secrets.
 
-1. Replace the PostgreSQL client and SQL expressions with D1, and convert the
-   interactive transaction callbacks to atomic D1 batches. D1 does not support
-   PostgreSQL-style interactive transactions. Credit charging, refunds, quota
-   claims, and state changes must retain rollback and idempotency guarantees.
-2. Replace BullMQ producers/consumers with Queues, preserving the durable jobs
-   table, retries, job progress, duplicate-delivery handling, and publish locks.
-3. Add native R2 access and Durable Object locking/rate limiting. Connect the
-   existing scheduler tasks to Cron Triggers.
-4. After Workers Paid is enabled, adapt the FFmpeg image to a Cloudflare
-   Container. Use D1/R2-backed state, since a container filesystem is ephemeral.
-   Do not put a production PostgreSQL or Redis database on that disk.
-5. Configure encryption/session secrets and required email/AI/Google credentials.
-   External APIs still require their own credentials even when hosting is entirely
-   Cloudflare. Never enable mock providers in production.
-6. Validate signup, login, tenant isolation, concurrent credit charges, queue
-   retries, and a full render/publish workflow in staging. Only then attach the
-   completed backend to the live app.
+Provider selectors and non-secret settings belong in both configurations' `vars`
+(or managed dashboard variables kept in sync with them). Production mocks remain
+**disabled**. Select real providers for features you enable; missing credentials
+must surface as configuration states. Hosting on Cloudflare does not supply third
+party email, YouTube, AI-generation or payment credentials.
 
-Google OAuth callback: `https://app.vidxir.com/api/channels/callback`.
-Stripe webhook, if billing is enabled: `https://app.vidxir.com/api/billing/webhook`.
+Google callback: `https://app.vidxir.com/api/channels/callback`.
+Stripe webhook: `https://app.vidxir.com/api/billing/webhook`.
+Verify the email sender domain in Resend before enabling signup emails.
 
-## Web release commands
+## Release
+
+Workers Paid is enabled. Docker Desktop must be running and unpaused to build
+and upload the FFmpeg image. Deploy the backend before the web Worker, because
+the web configuration references the backend's coordination namespace.
 
 ```sh
+npm ci
+npm run db:migrate:d1:remote
+npm run test:cloudflare
+npm run typecheck
+npm run lint
+npm run cf:backend:deploy
 npm run cf:build
-npm run cf:preview
 npm run cf:deploy
 ```
 
-Use isolated, build-only environment values for local production builds. Keep
-`.env.local`, `.dev.vars`, OAuth credentials, and runtime secrets out of Git and
-deployment assets. Production provider keys have not been configured.
+For a production build before runtime secrets are configured, supply disposable
+build-only `ENCRYPTION_KEY` and `SESSION_SECRET` placeholders, `EMAIL_PROVIDER=resend`
+and `APP_URL=https://app.vidxir.com`. Do not save these placeholders as production
+secrets. Keep `.env.local`, `.dev.vars` and credential files out of deployment assets.
 
-## Validation
+`wrangler.jsonc` sets `RENDER_EXECUTION=cloudflare`; the backend Container sets
+`RENDER_EXECUTION=local` and uses `/usr/bin/ffmpeg`. The web Worker never spawns
+FFmpeg. The initial D1 migration creates 42 application tables and seeds the
+Starter, Studio and Scale plan catalogue. A later migration adds the atomic batch
+guard. Timestamps use epoch milliseconds and JSON is stored as SQLite text.
+Keep applied migrations immutable. Generate subsequent changes with
+`npm run db:generate:d1` and inspect the SQL before applying them.
 
-The D1 migration was validated in the local Workers runtime. The Cloudflare tests
-check schema creation, the plan catalogue, Date/JSON mapping, invalid credit
-movements, whole-batch rollback on overdraft, and duplicate charge constraints.
-These tests validate the new database foundation; they do not assert that the
-existing application services have been migrated.
+## Local development and validation
 
-The last live web release includes the dark-mode default and returned HTTPS 200
-for the homepage and login page. The full backend is not yet operational.
+```sh
+npm run db:migrate:d1
+npm run dev -- --port 3002
+# Preview the actual production Workers build:
+npm run cf:build
+npx wrangler dev --config wrangler.jsonc --port 3004
+```
+
+Next.js development initializes OpenNext's local bindings. Set development-only
+core keys in `.env.local`/`.dev.vars`. Backend-dependent locks and background work
+also need a local backend session (`npx wrangler dev --config wrangler.native.jsonc`)
+with Docker running. Local D1 and R2 use local storage; migration commands do not
+copy local users or assets to production.
+
+`npm run test:cloudflare` runs against real local Workers/D1/Durable Object runtimes.
+It covers schema mapping, atomic rollback, grants, concurrent idempotent charges,
+refunds, purchases, quota races, state transitions, tenant isolation, script
+version allocation, token consumption, rate limits, lock ownership, duplicate
+queue deliveries, completed-job recovery and signed media grants.
+
+The full regression suite passed 1,480 tests; 605 legacy tests were skipped.
+Type checking, lint, OpenNext production build and container image build passed.
+A local production Worker preview passed login and session retrieval using D1.
+The actual Linux image passed its D1 health check, encoded a real MP4 and rendered
+thumbnail text. Its rendered MP4 uploaded to local R2 and read back byte-exactly.
+The standalone entry point also pruned an expired session through the private bridge.
+A complete live AI generation/render/YouTube publication run still requires
+operator credentials and explicit choice of real providers.
+
+## Deployment status
+
+The native backend Worker, FFmpeg Container, five queue consumers, Durable
+Objects and Cron Trigger are deployed. The web Worker uses their bindings at
+`https://app.vidxir.com`. Live read-only checks confirmed the D1 plan catalogue,
+R2 reachability, Durable Object coordination and the backend's missing-secret
+guard. The core secrets and provider credentials are intentionally left for the
+operator to configure. Scheduled work stays paused until the core secrets exist.
+
+Changes are on `feat/cloudflare-native`; the previous working branch is preserved.
+
+Final live verification returned HTTPS 200 for `/`, `/login` and `/api/health`.
+`/api/ready` correctly returns 503 (`configuration_invalid`) while core secrets
+are absent. Authentication and provider workflows are not claimed operational
+until the operator configures their required credentials.
+
+Released versions on 2026-10-07:
+
+- Web: `4e720240-5f13-428f-990d-7c94e2fc08d9`.
+- Backend: `eaf0578c-6a2b-4f7d-a0aa-9f5fffcdeee4`.

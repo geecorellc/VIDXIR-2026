@@ -10,8 +10,9 @@
  *    the "no such user" path, so timing does not disclose registration status.
  *  - Password changes revoke all sessions via the epoch bump.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { atomic, requireChange } from "@/lib/db/atomic";
 import { emailTokens, subscriptions, users } from "@/lib/db/schema";
 import {
   generateToken,
@@ -107,34 +108,18 @@ export async function signup(input: SignupInput): Promise<{ userId: string }> {
    * gets a row back, and an empty `returning` is the conflict. The database
    * already had the constraint; this just stops racing it.
    */
-  const userId = await db.transaction(async (tx) => {
-    const inserted = await tx
-      .insert(users)
-      .values({
-        email: input.email.trim(),
-        emailNormalized: email,
-        passwordHash,
-        name,
-      })
-      .onConflictDoNothing({ target: users.emailNormalized })
-      .returning({ id: users.id });
-
-    const created = inserted[0];
-    if (!created) {
-      // Deliberately generic — does not confirm the address is registered beyond
-      // what the signup form already implies.
-      throw new ConflictError("That email cannot be used to sign up.");
-    }
-
-    await tx.insert(subscriptions).values({
-      userId: created.id,
-      tier: "starter",
-      status: "active",
-      provider: "none",
-    });
-
-    return created.id;
-  });
+  const userId = crypto.randomUUID();
+  try {
+    await atomic([
+      db.insert(users).values({ id: userId, email: input.email.trim(), emailNormalized: email, passwordHash, name })
+        .onConflictDoNothing({ target: users.emailNormalized }),
+      ...requireChange(),
+      db.insert(subscriptions).values({ userId, tier: "starter", status: "active", provider: "none" }),
+    ]);
+  } catch (error) {
+    if (String(error).includes("CHECK constraint failed")) throw new ConflictError("That email cannot be used to sign up.");
+    throw error;
+  }
 
   logger.info("user signed up", { userId, component: "auth" });
   await issueVerificationEmail(userId, input.email.trim(), name);
@@ -308,16 +293,20 @@ export async function verifyEmail(token: string): Promise<string> {
     throw new ValidationError("This verification link is invalid or expired.");
   }
 
-  await db.transaction(async (tx) => {
-    await tx
+  try { await atomic([
+    db
       .update(emailTokens)
       .set({ consumedAt: new Date() })
-      .where(eq(emailTokens.id, record.id));
-    await tx
+      .where(and(eq(emailTokens.id, record.id), isNull(emailTokens.consumedAt), gt(emailTokens.expiresAt, new Date()))),
+    ...requireChange(),
+    db
       .update(users)
       .set({ emailVerifiedAt: new Date(), updatedAt: new Date() })
-      .where(eq(users.id, record.userId));
-  });
+      .where(eq(users.id, record.userId)),
+  ]); } catch (error) {
+    if (String(error).includes("CHECK constraint failed")) throw new ValidationError("This verification link is invalid or expired.");
+    throw error;
+  }
 
   logger.info("email verified", { userId: record.userId, component: "auth" });
   return record.userId;
@@ -389,12 +378,13 @@ export async function resetPassword(
 
   const passwordHash = await hashPassword(newPassword);
 
-  await db.transaction(async (tx) => {
-    await tx
+  try { await atomic([
+    db
       .update(emailTokens)
       .set({ consumedAt: new Date() })
-      .where(eq(emailTokens.id, record.id));
-    await tx
+      .where(and(eq(emailTokens.id, record.id), isNull(emailTokens.consumedAt), gt(emailTokens.expiresAt, new Date()))),
+    ...requireChange(),
+    db
       .update(users)
       .set({
         passwordHash,
@@ -404,8 +394,11 @@ export async function resetPassword(
         emailVerifiedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(users.id, record.userId));
-  });
+      .where(eq(users.id, record.userId)),
+  ]); } catch (error) {
+    if (String(error).includes("CHECK constraint failed")) throw new ValidationError("This reset link is invalid or expired.");
+    throw error;
+  }
 
   await revokeAllSessions(record.userId);
   logger.info("password reset completed", {

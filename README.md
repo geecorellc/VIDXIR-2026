@@ -12,16 +12,18 @@ Vidxir AI red `#E8332B`, Oswald display / Inter body, compact creator-studio lay
 
 ## Architecture
 
-Six processes, so a long render never blocks a request:
+The app runs on Cloudflare. See [CLOUDFLARE.md](CLOUDFLARE.md) for release commands,
+resource bindings, operator secrets and validation. Long renders run in Containers
+so they never block a web request:
 
-| Process | Entry point | Responsibility |
+| Service | Configuration | Responsibility |
 |---|---|---|
-| **Web / API** | `next start` | Pages, REST API, auth, OAuth callbacks |
-| **Workers** | `npm run worker` | Every pipeline stage: script, voiceover, visuals, music, captions, timeline, render, quality check, thumbnail, metadata, publish |
-| **Scheduler** | `npm run scheduler` | CRON: automation runs, analytics refresh, token refresh, session pruning |
-| **Postgres** | container | All persistent state |
-| **Redis** | container | BullMQ queues, rate limiting |
-| **Object storage** | container (MinIO) / S3 | Audio, video, images. Never in Postgres. |
+| **Web / API Worker** | `wrangler.jsonc` | Next.js pages, REST API, auth, OAuth callbacks |
+| **Backend Worker + Containers** | `wrangler.native.jsonc` | Pipeline execution, FFmpeg rendering, thumbnails and publishing |
+| **Cron Triggers** | Backend Worker | Automation, analytics refresh, session pruning |
+| **D1** | `DB` binding | Persistent relational state and durable job records |
+| **Queues + Durable Objects** | Native bindings | Delivery, retries, ownership, locks and rate limiting |
+| **R2** | `MEDIA` binding | Private audio, video and image artifacts |
 
 Nothing that must survive a browser close lives in React state. A job that is
 running keeps running whether or not anyone is watching it.
@@ -41,7 +43,8 @@ src/
     plans/        Plan catalogue and server-side enforcement
   worker/         Queue consumers
   scheduler/      CRON entry point
-drizzle/          Generated SQL migrations
+drizzle-d1/       Active D1 migrations
+drizzle/          Legacy PostgreSQL migrations
 tests/            Integration tests + harness
 ```
 
@@ -49,14 +52,13 @@ tests/            Integration tests + harness
 
 ## Running it locally
 
-Requires Node 20.11+ and Docker.
+Requires Node 20.11+. Docker is needed for the background FFmpeg Container.
 
 ```bash
 cp .env.example .env.local          # then fill in what you have
 npm install
-npm run infra:up                    # Postgres, Redis, MinIO
-npm run db:migrate                  # applies migrations, seeds the plan catalogue
-npm run dev                         # http://localhost:3000
+npm run db:migrate:d1               # local D1 schema and plan catalogue
+npm run dev -- --port 3002           # http://localhost:3002
 ```
 
 Generate the two required secrets with:
@@ -69,12 +71,11 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 Rotating `ENCRYPTION_KEY` invalidates every stored token and forces channels to
 be reconnected.
 
-Workers and the scheduler are separate processes:
-
-```bash
-npm run worker
-npm run scheduler
-```
+Background work uses the backend Worker, Queues and its Container. For a local
+backend session, run `npx wrangler dev --config wrangler.native.jsonc` with Docker
+running. Deployment and current operational instructions are in [CLOUDFLARE.md](CLOUDFLARE.md).
+The PostgreSQL/BullMQ verification and operations notes later in this document
+describe the previous deployment; they are retained as historical references.
 
 ### Development mode (§40)
 

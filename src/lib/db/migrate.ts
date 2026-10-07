@@ -9,7 +9,7 @@ import "@/lib/load-env";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import * as schema from "./schema";
+import * as schema from "./schema.postgres";
 import { PLAN_CATALOG } from "@/lib/plans";
 
 async function main() {

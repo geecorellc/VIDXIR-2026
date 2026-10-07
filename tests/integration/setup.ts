@@ -117,7 +117,7 @@ export async function prepareDatabase(): Promise<void> {
   const { migrate } = await import("drizzle-orm/postgres-js/migrator");
   const { drizzle } = await import("drizzle-orm/postgres-js");
   const postgres = (await import("postgres")).default;
-  const schema = await import("@/lib/db/schema");
+  const schema = await import("@/lib/db/schema.postgres");
   const { PLAN_CATALOG } = await import("@/lib/plans");
 
   const sql = postgres(TEST_DATABASE_URL as string, {

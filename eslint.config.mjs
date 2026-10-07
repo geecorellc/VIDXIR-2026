@@ -31,8 +31,11 @@ const config = [
   {
     ignores: [
       ".next/**",
+      ".open-next/**",
+      ".wrangler/**",
       "node_modules/**",
       "drizzle/**",
+      "drizzle-d1/**",
       "next-env.d.ts",
       "coverage/**",
     ],

@@ -28,6 +28,7 @@
  */
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { atomic } from "@/lib/db/atomic";
 import {
   assets,
   brandKits,
@@ -553,17 +554,17 @@ export async function executeScenePlan(input: StageInput): Promise<{
 
     await reportProgress(input.jobId, 80, "Saving the storyboard");
 
-    await db.transaction(async (tx) => {
-      await tx
+    await atomic([
+      db
         .delete(scenesTable)
         .where(
           and(
             eq(scenesTable.projectId, input.projectId),
             eq(scenesTable.userId, input.userId),
           ),
-        );
+        ),
 
-      await tx.insert(scenesTable).values(
+      db.insert(scenesTable).values(
         directed.scenes.map((scene) => ({
           projectId: input.projectId,
           userId: input.userId,
@@ -581,8 +582,8 @@ export async function executeScenePlan(input: StageInput): Promise<{
           startMs: null,
           durationMs: null,
         })),
-      );
-    });
+      ),
+    ]);
 
     // After the scene rows exist, not before: the states are keyed by scene index
     // and are written onto those rows, so writing them earlier would update nothing.
@@ -758,17 +759,17 @@ export async function executeVoiceover(input: StageInput): Promise<{
       return entry;
     });
 
-    await db.transaction(async (tx) => {
-      await tx
+    await atomic([
+      db
         .delete(voiceovers)
         .where(
           and(
             eq(voiceovers.projectId, input.projectId),
             eq(voiceovers.userId, input.userId),
           ),
-        );
+        ),
 
-      await tx.insert(voiceovers).values({
+      db.insert(voiceovers).values({
         projectId: input.projectId,
         userId: input.userId,
         // The first segment's asset stands as the row's asset; per-scene files are
@@ -783,8 +784,8 @@ export async function executeVoiceover(input: StageInput): Promise<{
         durationMs: result.totalDurationMs,
         segments,
         charactersBilled: result.charactersBilled,
-      });
-    });
+      }),
+    ]);
 
     await chain(input, VISUALS_JOB, "VISUALS", VOICEOVER_JOB);
 
@@ -1619,17 +1620,17 @@ export async function executeCaptions(input: StageInput): Promise<{
         }),
       ]);
 
-      await db.transaction(async (tx) => {
-        await tx
+      await atomic([
+        db
           .delete(captions)
           .where(
             and(
               eq(captions.projectId, input.projectId),
               eq(captions.userId, input.userId),
             ),
-          );
+          ),
 
-        await tx.insert(captions).values({
+        db.insert(captions).values({
           projectId: input.projectId,
           userId: input.userId,
           language: settings.language ?? "en",
@@ -1637,8 +1638,8 @@ export async function executeCaptions(input: StageInput): Promise<{
           cues,
           srtAssetId: srtAsset.id,
           vttAssetId: vttAsset.id,
-        });
-      });
+        }),
+      ]);
     }
 
     if (failures > 0) {
@@ -1680,9 +1681,9 @@ export async function executeTimeline(input: StageInput): Promise<{
 
     // Offsets onto the scene rows, in one transaction: a half-written set would
     // put the scene rail and the render out of agreement.
-    await db.transaction(async (tx) => {
-      for (const scene of timeline.scenes) {
-        await tx
+    await atomic([
+      ...timeline.scenes.map((scene) =>
+        db
           .update(scenesTable)
           .set({
             startMs: scene.startMs,
@@ -1695,9 +1696,9 @@ export async function executeTimeline(input: StageInput): Promise<{
               eq(scenesTable.userId, input.userId),
               eq(scenesTable.index, scene.index),
             ),
-          );
-      }
-    });
+          )
+      ),
+    ]);
 
     // Assets are complete and aligned. ASSETS_READY exists for exactly this
     // moment, and the state machine has no ASSETS_GENERATING → RENDERING edge, so

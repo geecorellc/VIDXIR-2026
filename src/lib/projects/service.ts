@@ -9,6 +9,7 @@
  */
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { atomic, requireChange, type AtomicQuery } from "@/lib/db/atomic";
 import {
   ideas,
   projectEvents,
@@ -252,106 +253,37 @@ export async function createProject(
   const traceId = newTraceId();
   const period = currentPeriod();
 
-  const created = await db.transaction(async (tx) => {
-    /**
-     * Claim the month's quota slot first, conditionally (§13).
-     *
-     * Ordered before the project insert so a refusal costs nothing: the
-     * transaction rolls back having written no row and no event.
-     *
-     * `setWhere` makes the UPDATE branch of the upsert conditional on the stored
-     * count still being below the allowance. Under two concurrent starts at the
-     * boundary, both transactions contend on the same `(userId, period)` row — the
-     * second blocks on the first's lock, re-evaluates the predicate against the
-     * *committed* value, and its update matches nothing. `returning` is then
-     * empty, which is how the loser learns it lost.
-     *
-     * This is the same shape as the automation slot claim: a compare-and-swap
-     * predicate inside the write, rather than a check before it.
-     */
-    if (input.maxVideosPerMonth !== null) {
-      const claimed = await tx
-        .insert(usageCounters)
-        .values({ userId: input.userId, period, videosStarted: 1 })
-        .onConflictDoUpdate({
-          target: [usageCounters.userId, usageCounters.period],
-          set: {
-            videosStarted: sql`${usageCounters.videosStarted} + 1`,
-            updatedAt: new Date(),
-          },
-          setWhere: sql`${usageCounters.videosStarted} < ${input.maxVideosPerMonth}`,
-        })
-        .returning({ videosStarted: usageCounters.videosStarted });
-
-      if (!claimed[0]) {
-        throw new PlanLimitError(
-          `Your plan includes ${input.maxVideosPerMonth} videos a month and you have used all of them. Upgrade for unlimited videos.`,
-          {
-            limit: input.maxVideosPerMonth,
-            used: input.maxVideosPerMonth,
-            tier: "unknown",
-            resource: "videos",
-          },
-        );
-      }
-    }
-
-    const [row] = await tx
-      .insert(projects)
-      .values({
-        userId: input.userId,
-        channelId: input.channelId,
-        ideaId: input.ideaId ?? null,
-        title: input.title,
-        status: "IDEA",
-        origin: input.origin ?? "manual",
-        traceId,
-        targetDurationSeconds: input.targetDurationSeconds ?? null,
-        generationMode: input.generationMode ?? null,
-        generationModel: input.generationModel ?? null,
-        videoFormat: input.videoFormat ?? null,
-        videoQuality: input.videoQuality ?? null,
-        sourceVideoId: input.sourceVideoId ?? null,
-      })
-      .returning(COLUMNS);
-
-    if (!row) throw new Error("Failed to create project");
-
-    await tx.insert(projectEvents).values({
-      projectId: row.id,
-      userId: input.userId,
-      fromStatus: null,
-      toStatus: "IDEA",
-      message: `Project created from ${input.origin ?? "manual"} trigger`,
-    });
-
-    // Unlimited plans still need the counter maintained — the dashboard reports
-    // it, and a tier change must not start the month over — but with no predicate.
-    if (input.maxVideosPerMonth === null) {
-      await tx
-        .insert(usageCounters)
-        .values({ userId: input.userId, period, videosStarted: 1 })
-        .onConflictDoUpdate({
-          target: [usageCounters.userId, usageCounters.period],
-          set: {
-            videosStarted: sql`${usageCounters.videosStarted} + 1`,
-            updatedAt: new Date(),
-          },
-        });
-    }
-
-    // Mark the source idea as used so research does not re-offer it.
-    if (input.ideaId) {
-      await tx
-        .update(ideas)
-        .set({ state: "used", updatedAt: new Date() })
-        .where(
-          and(eq(ideas.id, input.ideaId), eq(ideas.userId, input.userId)),
-        );
-    }
-
-    return row;
-  });
+  const projectId = crypto.randomUUID();
+  const now = new Date();
+  const queries: AtomicQuery[] = [
+    db.insert(usageCounters).values({ userId: input.userId, period, videosStarted: 1 })
+      .onConflictDoUpdate({
+        target: [usageCounters.userId, usageCounters.period],
+        set: { videosStarted: sql`${usageCounters.videosStarted} + 1`, updatedAt: now },
+        ...(input.maxVideosPerMonth === null ? {} : { setWhere: sql`${usageCounters.videosStarted} < ${input.maxVideosPerMonth}` }),
+      }),
+    ...requireChange(),
+    db.insert(projects).values({
+      id: projectId, userId: input.userId, channelId: input.channelId, ideaId: input.ideaId ?? null,
+      title: input.title, status: "IDEA", origin: input.origin ?? "manual", traceId,
+      targetDurationSeconds: input.targetDurationSeconds ?? null,
+      generationMode: input.generationMode ?? null, generationModel: input.generationModel ?? null,
+      videoFormat: input.videoFormat ?? null, videoQuality: input.videoQuality ?? null,
+      sourceVideoId: input.sourceVideoId ?? null,
+    }),
+    db.insert(projectEvents).values({ projectId, userId: input.userId, fromStatus: null, toStatus: "IDEA", message: `Project created from ${input.origin ?? "manual"} trigger` }),
+  ];
+  if (input.ideaId) queries.push(db.update(ideas).set({ state: "used", updatedAt: now })
+    .where(and(eq(ideas.id, input.ideaId), eq(ideas.userId, input.userId))));
+  try { await atomic(queries); }
+  catch (error) {
+    if (String(error).includes("CHECK constraint failed")) throw new PlanLimitError(
+      `Your plan includes ${input.maxVideosPerMonth} videos a month and you have used all of them. Upgrade for unlimited videos.`,
+      { limit: input.maxVideosPerMonth ?? 0, used: input.maxVideosPerMonth ?? 0, tier: "unknown", resource: "videos" },
+    );
+    throw error;
+  }
+  const created = await getProject(input.userId, projectId);
 
   log.info("project created", {
     projectId: created.id,
@@ -431,11 +363,12 @@ export async function configureProject(
     );
   }
 
-  return db.transaction(async (tx) => {
+  const queries: AtomicQuery[] = [];
+  {
     let ideaId = project.ideaId;
 
     if (input.ideaId && input.ideaId !== project.ideaId) {
-      const rows = await tx
+      const rows = await db
         .select({
           id: ideas.id,
           title: ideas.title,
@@ -462,21 +395,21 @@ export async function configureProject(
 
       ideaId = idea.id;
 
-      await tx
+      queries.push(db
         .update(ideas)
         .set({ state: "used", updatedAt: new Date() })
-        .where(and(eq(ideas.id, idea.id), eq(ideas.userId, input.userId)));
+        .where(and(eq(ideas.id, idea.id), eq(ideas.userId, input.userId))));
 
       // The title follows the chosen angle. The project was created with a
       // placeholder derived from the source link, and leaving it would mean every
       // screen downstream naming somebody else's video.
-      await tx
+      queries.push(db
         .update(projects)
         .set({ title: idea.title })
-        .where(eq(projects.id, project.id));
+        .where(eq(projects.id, project.id)));
     }
 
-    const [row] = await tx
+    queries.push(db
       .update(projects)
       .set({
         ideaId,
@@ -495,14 +428,12 @@ export async function configureProject(
         updatedAt: new Date(),
       })
       .where(
-        and(eq(projects.id, project.id), eq(projects.userId, input.userId)),
+        and(eq(projects.id, project.id), eq(projects.userId, input.userId), eq(projects.status, project.status)),
       )
-      .returning(COLUMNS);
-
-    if (!row) throw new ForbiddenError("Project not found or not accessible.");
-
-    await tx.insert(projectEvents).values({
-      projectId: row.id,
+      );
+    queries.push(...requireChange());
+    queries.push(db.insert(projectEvents).values({
+      projectId: project.id,
       userId: input.userId,
       fromStatus: project.status,
       toStatus: project.status,
@@ -510,15 +441,15 @@ export async function configureProject(
         ? "Angle and generation method selected"
         : "Generation method selected",
       meta: {
-        generationMode: row.generationMode,
-        generationModel: row.generationModel,
-        videoFormat: row.videoFormat,
-        videoQuality: row.videoQuality,
+        generationMode: input.generationMode ?? project.generationMode,
+        generationModel: input.generationModel ?? project.generationModel,
+        videoFormat: input.videoFormat ?? project.videoFormat,
+        videoQuality: input.videoQuality ?? project.videoQuality,
       },
-    });
-
-    return row;
-  });
+    }));
+    await atomic(queries);
+    return getProject(input.userId, project.id);
+  }
 }
 
 /** `YYYY-MM` in UTC — the key `usage_counters` is bucketed by. */
@@ -564,8 +495,9 @@ export async function transition(
 
   const now = new Date();
 
-  const updated = await db.transaction(async (tx) => {
-    const [row] = await tx
+  try {
+    await atomic([
+      db
       .update(projects)
       .set({
         status: to,
@@ -602,14 +534,10 @@ export async function transition(
           eq(projects.status, current.status),
         ),
       )
-      .returning(COLUMNS);
+      ,
 
-    if (!row) {
-      // Someone else moved it between our read and our write.
-      throw new InvalidStateTransitionError(current.status, to);
-    }
-
-    await tx.insert(projectEvents).values({
+      ...requireChange(),
+      db.insert(projectEvents).values({
       projectId,
       userId,
       fromStatus: current.status,
@@ -617,10 +545,14 @@ export async function transition(
       stage: options.stage ?? current.currentStage,
       message: options.message ?? options.error?.message ?? null,
       meta: options.meta ?? null,
-    });
+      }),
 
-    return row;
-  });
+    ]);
+  } catch (error) {
+    if (String(error).includes("CHECK constraint failed")) throw new InvalidStateTransitionError(current.status, to);
+    throw error;
+  }
+  const updated = await getProject(userId, projectId);
 
   log.info("project transition", {
     projectId,

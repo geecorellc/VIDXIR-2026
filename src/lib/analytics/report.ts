@@ -139,7 +139,7 @@ export async function channelPerformance(
         end)
       `,
       /** Any non-null `ctr_source` in range, so the reason can be reported. */
-      ctrSource: sql<MetricSource | null>`max(${analyticsSnapshots.ctrSource}::text)`,
+      ctrSource: sql<MetricSource | null>`max(${analyticsSnapshots.ctrSource})`,
     })
     .from(analyticsSnapshots)
     .where(channelScope(userId, channelId, range));
@@ -484,11 +484,11 @@ export async function videoRevenueAttribution(
           else 0
         end)
       `,
-      ctrSource: sql<MetricSource | null>`max(${analyticsSnapshots.ctrSource}::text)`,
+      ctrSource: sql<MetricSource | null>`max(${analyticsSnapshots.ctrSource})`,
       revenue: sql<string | null>`sum(${analyticsSnapshots.estimatedRevenue})`,
       revenueDays: sql<string>`count(${analyticsSnapshots.estimatedRevenue})`,
       revenueCurrency: sql<string | null>`max(${analyticsSnapshots.revenueCurrency})`,
-      revenueState: sql<RevenueState | null>`max(${analyticsSnapshots.revenueState}::text)`,
+      revenueState: sql<RevenueState | null>`max(${analyticsSnapshots.revenueState})`,
       revenueFinal: sql<boolean>`bool_and(coalesce(${analyticsSnapshots.revenueFinal}, false))`,
     })
     .from(publishedVideos)

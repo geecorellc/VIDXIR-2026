@@ -1,4 +1,7 @@
 import type { NextConfig } from "next";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+
+if (process.env.NODE_ENV === "development") void initOpenNextCloudflareForDev();
 
 /**
  * Origins the browser is allowed to load images from.

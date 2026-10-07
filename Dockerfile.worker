@@ -16,9 +16,10 @@ RUN npm ci --include=dev --no-audit --no-fund
 
 COPY tsconfig.json ./
 COPY src ./src
-COPY drizzle ./drizzle
+COPY drizzle-d1 ./drizzle-d1
 
 ENV NODE_ENV=production
 USER node
 STOPSIGNAL SIGTERM
-CMD ["npm", "run", "worker"]
+EXPOSE 8080
+CMD ["node", "--import", "tsx", "src/worker/container.ts"]

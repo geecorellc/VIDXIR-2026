@@ -653,7 +653,7 @@ async function applySubscription(input: {
         // NULL is NULL, so a first event would not match without it.
         or(
           isNull(subscriptions.lastEventAt),
-          sql`${subscriptions.lastEventAt} < ${input.eventCreatedAt.toISOString()}::timestamptz`,
+          sql`${subscriptions.lastEventAt} < ${input.eventCreatedAt.getTime()}`,
         ),
       ),
     )

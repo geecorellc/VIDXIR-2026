@@ -50,7 +50,7 @@
  * "paid" and "credited" cannot disagree: there is no window in which the money is
  * recorded as taken and the credits are missing, or the reverse.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { creditPurchases } from "@/lib/db/schema";
 import { canUpgrade, getBillingProvider } from "@/lib/billing";
@@ -308,59 +308,18 @@ export async function completeCreditPurchase(input: {
    * there is no state in which the purchase reads `completed` with no credits, or
    * credits exist with the purchase still `pending`.
    */
-  const outcome = await db.transaction(async (tx) => {
-    const added = await addPurchasedCredits({
-      userId: input.userId,
-      credits,
-      /**
-       * Keyed on the *session*, not the event.
-       *
-       * The session is the thing being paid for; an event is one report of it. Keying
-       * on the event id would credit twice if Stripe ever described one payment with
-       * two events — `checkout.session.completed` and a later
-       * `checkout.session.async_payment_succeeded`, say — because each carries its own
-       * id and neither is a redelivery of the other.
-       */
-      idempotencyKey: `purchase:${input.providerSessionId}`,
-      // Names the pack. §3: no vendor ever reaches a customer-facing line.
-      description: `${credits.toLocaleString("en-US")} credit top-up`,
-      meta: {
-        pack: packId,
-        providerSessionId: input.providerSessionId,
-        ...(input.providerPaymentIntentId
-          ? { providerPaymentIntentId: input.providerPaymentIntentId }
-          : {}),
-      },
-      executor: tx,
-    });
-
-    if (existing) {
-      /**
-       * `status` is in the predicate, not just the SET: two concurrent deliveries
-       * would otherwise both write `completed` and the second would overwrite the
-       * first's `ledgerId` with its own null. The ledger insert already decides which
-       * one credited; this makes the receipt agree with that decision.
-       */
-      await tx
-        .update(creditPurchases)
-        .set({
-          status: "completed",
-          ...(added.ledgerId ? { ledgerId: added.ledgerId } : {}),
-          ...(input.providerPaymentIntentId
-            ? { providerPaymentIntentId: input.providerPaymentIntentId }
-            : {}),
-          completedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(creditPurchases.id, existing.id),
-            eq(creditPurchases.status, "pending"),
-          ),
-        );
-    }
-
-    return added;
+  const outcome = await addPurchasedCredits({
+    userId: input.userId, credits, idempotencyKey: `purchase:${input.providerSessionId}`,
+    description: `${credits.toLocaleString("en-US")} credit top-up`,
+    meta: { pack: packId, providerSessionId: input.providerSessionId,
+      ...(input.providerPaymentIntentId ? { providerPaymentIntentId: input.providerPaymentIntentId } : {}),
+    },
+    receiptQueries: existing ? [db.update(creditPurchases).set({
+      status: "completed",
+      ledgerId: sql`(SELECT id FROM credit_ledger WHERE idempotency_key=${`purchase:${input.providerSessionId}`} AND user_id=${input.userId})`,
+      ...(input.providerPaymentIntentId ? { providerPaymentIntentId: input.providerPaymentIntentId } : {}),
+      completedAt: new Date(), updatedAt: new Date(),
+    }).where(and(eq(creditPurchases.id, existing.id), eq(creditPurchases.status, "pending")))] : [],
   });
 
   if (outcome.alreadyCredited) {

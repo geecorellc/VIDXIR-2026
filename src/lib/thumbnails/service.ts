@@ -29,6 +29,7 @@
  */
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { atomic } from "@/lib/db/atomic";
 import {
   assets,
   brandKits,
@@ -517,41 +518,16 @@ async function replaceVariants(
   input: ThumbnailStageInput,
   concepts: ThumbnailConcept[],
 ): Promise<string> {
-  return db.transaction(async (tx) => {
-    await tx
-      .delete(thumbnails)
-      .where(
-        and(
-          eq(thumbnails.projectId, input.projectId),
-          eq(thumbnails.userId, input.userId),
-        ),
-      );
-
-    const [row] = await tx
-      .insert(thumbnails)
-      .values({
-        projectId: input.projectId,
-        userId: input.userId,
-        status: "running",
-      })
-      .returning({ id: thumbnails.id });
-
-    if (!row) throw new AssetMissingError("a thumbnail record");
-
-    await tx.insert(thumbnailVariants).values(
-      concepts.map((concept, index) => ({
-        thumbnailId: row.id,
-        userId: input.userId,
-        index,
-        headline: concept.headline.slice(0, 80),
-        subline: concept.subline?.slice(0, 120) ?? null,
-        concept: concept.concept,
-        emotion: concept.emotion,
-      })),
-    );
-
-    return row.id;
-  });
+  const thumbnailId = crypto.randomUUID();
+  await atomic([
+    db.delete(thumbnails).where(and(eq(thumbnails.projectId, input.projectId), eq(thumbnails.userId, input.userId))),
+    db.insert(thumbnails).values({ id: thumbnailId, projectId: input.projectId, userId: input.userId, status: "running" }),
+    db.insert(thumbnailVariants).values(concepts.map((concept, index) => ({
+      thumbnailId, userId: input.userId, index, headline: concept.headline.slice(0, 80),
+      subline: concept.subline?.slice(0, 120) ?? null, concept: concept.concept, emotion: concept.emotion,
+    }))),
+  ]);
+  return thumbnailId;
 }
 
 /**

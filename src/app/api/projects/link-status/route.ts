@@ -117,11 +117,11 @@ export async function GET(request: NextRequest) {
           errorCode: researchRuns.errorCode,
           completedAt: researchRuns.completedAt,
           resultCount: sql<number>`(
-            SELECT COUNT(*)::int FROM ${researchResults}
+            SELECT COUNT(*) FROM ${researchResults}
             WHERE ${researchResults.runId} = ${researchRuns.id}
           )`,
           angleCount: sql<number>`(
-            SELECT COUNT(*)::int FROM ${ideas}
+            SELECT COUNT(*) FROM ${ideas}
             WHERE ${ideas.runId} = ${researchRuns.id}
               AND ${ideas.state} <> 'rejected'
           )`,

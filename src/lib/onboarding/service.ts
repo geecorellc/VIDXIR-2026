@@ -7,6 +7,7 @@
  */
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { atomic } from "@/lib/db/atomic";
 import { onboardingProfiles, users } from "@/lib/db/schema";
 import { ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
@@ -142,16 +143,16 @@ export async function complete(userId: string): Promise<void> {
   }
 
   const now = new Date();
-  await db.transaction(async (tx) => {
-    await tx
+  await atomic([
+    db
       .update(onboardingProfiles)
       .set({ completedAt: now, updatedAt: now })
-      .where(eq(onboardingProfiles.userId, userId));
-    await tx
+      .where(eq(onboardingProfiles.userId, userId)),
+    db
       .update(users)
       .set({ onboardedAt: now, updatedAt: now })
-      .where(eq(users.id, userId));
-  });
+      .where(eq(users.id, userId)),
+  ]);
 
   log.info("onboarding completed", { userId });
 }

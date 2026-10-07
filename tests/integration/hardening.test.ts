@@ -762,7 +762,7 @@ suite("health and readiness (integration)", () => {
     // Genuinely probed, not assumed: a real `select 1` and a real PING, both of
     // which pass here because docker-compose is up.
     expect(byName.get("database")?.status).toBe("ok");
-    expect(byName.get("redis")?.status).toBe("ok");
+    expect(byName.get("coordination")?.status).toBe("ok");
 
     /**
      * The overall verdict is deliberately *not* asserted as ready.
@@ -890,7 +890,7 @@ suite("health and readiness (integration)", () => {
  * `tsx` processes, with no alias, and assert on what the process actually does. That
  * is the only configuration in which the question means anything.
  */
-describe("background entrypoints boot as real processes", () => {
+suite("legacy PostgreSQL/BullMQ background entrypoints", () => {
   /**
    * Start an entrypoint, capture output until it logs `ready`, then SIGTERM it.
    *
@@ -1036,7 +1036,7 @@ describe("background entrypoints boot as real processes", () => {
 
     // And the scheduler reaches it directly, not through the marked module.
     const scheduler = readFileSync(
-      join(process.cwd(), "src", "scheduler", "index.ts"),
+      join(process.cwd(), "src", "scheduler", "tasks.ts"),
       "utf8",
     );
     expect(scheduler).toContain("@/lib/auth/session-maintenance");

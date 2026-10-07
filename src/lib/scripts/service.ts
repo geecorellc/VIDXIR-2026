@@ -18,8 +18,9 @@
  *    voiceover or a render until a human (or an explicit autopilot policy) has
  *    said yes, which is what §37's honesty about state costs in practice.
  */
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { atomic } from "@/lib/db/atomic";
 import {
   brandKits,
   channelSettings,
@@ -542,36 +543,15 @@ export async function persistScriptVersion(
   const wordCount = countSpokenWords(input.draft);
   const estimated = estimateDuration(wordCount);
 
-  return db.transaction(async (tx) => {
-    // Upsert the script row. `onConflictDoUpdate` rather than a read-then-insert
-    // so a regeneration racing a first generation cannot create two script rows
-    // for one project — the unique index on project_id decides.
-    const [script] = await tx
-      .insert(scripts)
-      .values({ projectId: input.projectId, userId: input.userId })
-      .onConflictDoUpdate({
-        target: scripts.projectId,
-        set: { updatedAt: new Date() },
-      })
-      .returning({ id: scripts.id });
-
-    if (!script) throw new Error("Failed to create script row.");
-
-    const [latest] = await tx
-      .select({ version: scriptVersions.version })
-      .from(scriptVersions)
-      .where(eq(scriptVersions.scriptId, script.id))
-      .orderBy(desc(scriptVersions.version))
-      .limit(1);
-
-    const version = (latest?.version ?? 0) + 1;
-
-    const [inserted] = await tx
-      .insert(scriptVersions)
-      .values({
-        scriptId: script.id,
+  const versionId = crypto.randomUUID();
+  await atomic([
+    db.insert(scripts).values({ projectId: input.projectId, userId: input.userId })
+      .onConflictDoUpdate({ target: scripts.projectId, set: { updatedAt: new Date() } }),
+    db.insert(scriptVersions).values({
+        id: versionId,
+        scriptId: sql`(SELECT id FROM scripts WHERE project_id=${input.projectId} AND user_id=${input.userId})`,
         userId: input.userId,
-        version,
+        version: sql`(SELECT coalesce(max(version),0)+1 FROM script_versions WHERE script_id=(SELECT id FROM scripts WHERE project_id=${input.projectId}))`,
         title: input.draft.title,
         titleIdeas: input.draft.titleIdeas,
         hook: input.draft.hook,
@@ -589,31 +569,13 @@ export async function persistScriptVersion(
         // configuration (§29).
         provider: input.source === "ai" ? aiProviderName() : null,
         model: input.source === "ai" ? aiModelName() : null,
-      })
-      .returning({ id: scriptVersions.id });
-
-    if (!inserted) throw new Error("Failed to store script version.");
-
-    await tx
-      .update(scripts)
-      .set({
-        activeVersionId: inserted.id,
-        // A new version supersedes the approval: approving v1 does not approve
-        // the v2 that replaced it, and letting it carry over would let a
-        // regenerated script reach the video builder unreviewed (§42).
-        approvedAt: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(scripts.id, script.id));
-
-    return {
-      scriptId: script.id,
-      versionId: inserted.id,
-      version,
-      wordCount,
-      estimatedDurationSeconds: estimated,
-    };
-  });
+    }),
+    db.update(scripts).set({ activeVersionId: versionId, approvedAt: null, updatedAt: new Date() })
+      .where(and(eq(scripts.projectId, input.projectId), eq(scripts.userId, input.userId))),
+  ]);
+  const [version] = await db.select().from(scriptVersions).where(eq(scriptVersions.id, versionId)).limit(1);
+  if (!version) throw new Error("Failed to store script version.");
+  return { scriptId: version.scriptId, versionId, version: version.version, wordCount, estimatedDurationSeconds: estimated };
 }
 
 /**

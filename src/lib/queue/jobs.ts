@@ -252,7 +252,7 @@ export async function markJobSucceeded(
         finishedAt,
         // Computed in SQL so the duration reflects the stored start time rather
         // than a timestamp this process happens to hold.
-        durationMs: sql`GREATEST(0, (EXTRACT(EPOCH FROM (${finishedAt.toISOString()}::timestamptz - COALESCE(${jobs.startedAt}, ${jobs.createdAt}))) * 1000)::int)`,
+        durationMs: sql`max(0, ${finishedAt.getTime()} - COALESCE(${jobs.startedAt}, ${jobs.createdAt}))`,
         error: null,
         errorCode: null,
         ...(statusMessage === undefined ? {} : { statusMessage }),
@@ -307,7 +307,7 @@ export async function markJobFailed(
       ...(terminal
         ? {
             finishedAt,
-            durationMs: sql`GREATEST(0, (EXTRACT(EPOCH FROM (${finishedAt.toISOString()}::timestamptz - COALESCE(${jobs.startedAt}, ${jobs.createdAt}))) * 1000)::int)`,
+            durationMs: sql`max(0, ${finishedAt.getTime()} - COALESCE(${jobs.startedAt}, ${jobs.createdAt}))`,
           }
         : {}),
       updatedAt: finishedAt,
@@ -493,7 +493,7 @@ export async function hasActiveSceneJob(
         // `->>` yields text, so the comparison is against the rendered number. A
         // payload with no `sceneIndex` yields NULL and never matches, which is the
         // correct outcome: it is not a job for this scene.
-        sql`${jobs.payload}->>'sceneIndex' = ${String(sceneIndex)}`,
+        sql`json_extract(${jobs.payload}, '$.sceneIndex') = ${sceneIndex}`,
       ),
     )
     .limit(1);

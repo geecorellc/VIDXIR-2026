@@ -1,8 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "vidxir-native",
+  "name": "vidxir-backend",
+  "keep_vars": true,
   "compatibility_date": "2026-10-07",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "d1_databases": [
     {
       "binding": "DB",
@@ -12,15 +15,122 @@
     }
   ],
   "r2_buckets": [
-    { "binding": "MEDIA", "bucket_name": "vidxir-media-production" }
+    {
+      "binding": "MEDIA",
+      "bucket_name": "vidxir-media-production"
+    }
   ],
   "queues": {
     "producers": [
-      { "binding": "RESEARCH_QUEUE", "queue": "vidxir-research" },
-      { "binding": "PIPELINE_QUEUE", "queue": "vidxir-pipeline" },
-      { "binding": "PUBLISH_QUEUE", "queue": "vidxir-publish" },
-      { "binding": "ANALYTICS_QUEUE", "queue": "vidxir-analytics" },
-      { "binding": "MAINTENANCE_QUEUE", "queue": "vidxir-maintenance" }
+      {
+        "binding": "RESEARCH_QUEUE",
+        "queue": "vidxir-research"
+      },
+      {
+        "binding": "PIPELINE_QUEUE",
+        "queue": "vidxir-pipeline"
+      },
+      {
+        "binding": "PUBLISH_QUEUE",
+        "queue": "vidxir-publish"
+      },
+      {
+        "binding": "ANALYTICS_QUEUE",
+        "queue": "vidxir-analytics"
+      },
+      {
+        "binding": "MAINTENANCE_QUEUE",
+        "queue": "vidxir-maintenance"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "vidxir-research",
+        "max_batch_size": 1,
+        "max_retries": 10,
+        "retry_delay": 30
+      },
+      {
+        "queue": "vidxir-pipeline",
+        "max_batch_size": 1,
+        "max_retries": 10,
+        "retry_delay": 30
+      },
+      {
+        "queue": "vidxir-publish",
+        "max_batch_size": 1,
+        "max_retries": 10,
+        "retry_delay": 30
+      },
+      {
+        "queue": "vidxir-analytics",
+        "max_batch_size": 1,
+        "max_retries": 10,
+        "retry_delay": 30
+      },
+      {
+        "queue": "vidxir-maintenance",
+        "max_batch_size": 1,
+        "max_retries": 10,
+        "retry_delay": 30
+      }
     ]
+  },
+  "main": "cloudflare/backend.ts",
+  "workers_dev": false,
+  "preview_urls": false,
+  "services": [
+    {
+      "binding": "SELF",
+      "service": "vidxir-backend"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COORDINATION",
+        "class_name": "Coordination"
+      },
+      {
+        "name": "RUNNERS",
+        "class_name": "JobRunner"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "Coordination",
+        "JobRunner"
+      ]
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "JobRunner",
+      "scheduling_policy": "durable_object",
+      "images": {
+        "base": {
+          "dockerfile": "./Dockerfile.worker"
+        }
+      }
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "APP_URL": "https://app.vidxir.com",
+    "VIDXIR_USE_MOCK_PROVIDERS": "false",
+    "VIDXIR_BLOCK_REAL_PUBLISH": "false",
+    "EMAIL_PROVIDER": "resend",
+    "RENDER_EXECUTION": "local",
+    "LOG_LEVEL": "info"
   }
 }

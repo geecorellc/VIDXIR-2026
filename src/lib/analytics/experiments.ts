@@ -30,6 +30,7 @@
  */
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { atomic } from "@/lib/db/atomic";
 import {
   publishedVideos,
   thumbnailExperimentArms,
@@ -230,45 +231,18 @@ export async function createExperiment(
   const now = new Date();
 
   try {
-    return await db.transaction(async (tx) => {
-      const [experiment] = await tx
-        .insert(thumbnailExperiments)
-        .values({
-          userId,
-          channelId: video.channelId,
-          publishedVideoId: video.id,
-          status: "draft",
-          decisionPolicy: policy,
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning({ id: thumbnailExperiments.id });
-
-      if (!experiment) throw new ConflictError("Could not create the test.");
-
-      await tx.insert(thumbnailExperimentArms).values(
-        unique.map((variantId, position) => ({
-          experimentId: experiment.id,
-          userId,
-          thumbnailVariantId: variantId,
-          position,
-          isControl: variantId === input.controlVariantId,
-          createdAt: now,
-          updatedAt: now,
-        })),
-      );
-
-      log.info("thumbnail experiment created", {
-        userId,
-        experimentId: experiment.id,
-        publishedVideoId: video.id,
-        arms: unique.length,
-      });
-
-      const record = await loadExperiment(tx, userId, experiment.id);
-      if (!record) throw new ConflictError("Could not create the test.");
-      return record;
-    });
+    const experimentId = crypto.randomUUID();
+    await atomic([
+      db.insert(thumbnailExperiments).values({ id: experimentId, userId, channelId: video.channelId,
+        publishedVideoId: video.id, status: "draft", decisionPolicy: policy, createdAt: now, updatedAt: now }),
+      db.insert(thumbnailExperimentArms).values(unique.map((variantId, position) => ({
+        experimentId, userId, thumbnailVariantId: variantId, position, isControl: variantId === input.controlVariantId,
+        createdAt: now, updatedAt: now,
+      }))),
+    ]);
+    const record = await loadExperiment(db, userId, experimentId);
+    if (!record) throw new ConflictError("Could not create the test.");
+    return record;
   } catch (error) {
     /**
      * The partial unique index on `(published_video_id) where status in
@@ -529,7 +503,7 @@ export async function recordObservations(
  * null when impressions are zero or absent — a 0/0 rendered as 0.0% would read
  * as "nobody clicked" rather than "nothing was shown" (§6).
  *
- * `now` is bound as an ISO string with an explicit `::timestamptz` cast, not as a
+ * `now` is bound as UTC epoch milliseconds, not as a
  * `Date`. Drizzle's column-aware serialisation does not apply inside a raw `sql`
  * template, so postgres.js receives the value untranslated and rejects it at Bind
  * with `The "string" argument must be of type string ... Received an instance of
@@ -541,7 +515,7 @@ export async function recomputeArmTotals(
   experimentId: string,
   now = new Date(),
 ): Promise<void> {
-  await db.execute(sql`
+  await db.run(sql`
     update ${thumbnailExperimentArms} as arm
     set
       impressions = totals.impressions,
@@ -550,12 +524,12 @@ export async function recomputeArmTotals(
       ctr = case
         when totals.impressions is null or totals.impressions = 0 then null
         when totals.clicks is null then null
-        else round(totals.clicks::numeric / totals.impressions::numeric, 6)
+        else round(1.0 * totals.clicks / totals.impressions, 6)
       end,
       metrics_source = totals.source,
       observation_days = totals.days,
       last_observed_at = totals.last_date,
-      updated_at = ${now.toISOString()}::timestamptz
+      updated_at = ${now.getTime()}
     from (
       select
         obs.arm_id as arm_id,
@@ -564,7 +538,7 @@ export async function recomputeArmTotals(
         sum(obs.views) as views,
         count(distinct obs.date) as days,
         max(obs.date) as last_date,
-        max(obs.source::text)::analytics_metric_source as source
+        max(obs.source) as source
       from ${thumbnailExperimentObservations} as obs
       where obs.experiment_id = ${experimentId}
         and obs.user_id = ${userId}

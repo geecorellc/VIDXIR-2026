@@ -11,10 +11,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.cloudflare.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run tests/integration",
+    "test:integration": "vitest run tests/cloudflare",
     "verify:worker": "tsx scripts/verify-worker.ts",
     "verify:providers": "tsx scripts/verify-providers.ts",
     "verify:automation": "tsx scripts/verify-automation.ts",
@@ -29,8 +29,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/lib/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "worker": "tsx src/worker/index.ts",
-    "scheduler": "tsx src/scheduler/index.ts",
+    "worker": "node --import tsx src/worker/container.ts",
+    "scheduler": "node --import tsx src/scheduler/index.ts",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "cf:login": "wrangler login",
@@ -41,7 +41,8 @@
     "db:generate:d1": "drizzle-kit generate --config drizzle.d1.config.ts",
     "db:migrate:d1": "wrangler d1 migrations apply vidxir-production --local --config wrangler.native.jsonc",
     "db:migrate:d1:remote": "wrangler d1 migrations apply vidxir-production --remote --config wrangler.native.jsonc",
-    "test:cloudflare": "vitest run tests/cloudflare"
+    "test:cloudflare": "vitest run tests/cloudflare",
+    "cf:backend:deploy": "wrangler deploy --config wrangler.native.jsonc"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.33.1",
@@ -64,6 +65,8 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@cloudflare/containers": "^0.3.7",
+    "@cloudflare/workers-types": "^5.20261007.1",
     "@eslint/eslintrc": "^3.2.0",
     "@opennextjs/cloudflare": "^1.20.9",
     "@types/node": "^22.10.0",

@@ -12,14 +12,8 @@
  * accidentally cross-tenant key visible rather than silent (§34).
  */
 import { createHash, randomUUID } from "node:crypto";
-import {
-  DeleteObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
-  PutObjectCommand,
-  S3Client,
-} from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { nativeBindings } from "@/lib/cloudflare/bindings";
+import { signMedia } from "@/lib/cloudflare/media-token";
 import { env } from "@/lib/env";
 import { StorageError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
@@ -47,28 +41,6 @@ export type StorageFolder =
   | "poster"
   | "reference"
   | "upload";
-
-let client: S3Client | undefined;
-
-function s3(): S3Client {
-  if (client) return client;
-  const e = env();
-  client = new S3Client({
-    region: e.S3_REGION,
-    // Set for MinIO and other S3-compatible endpoints; unset for real AWS.
-    ...(e.S3_ENDPOINT ? { endpoint: e.S3_ENDPOINT } : {}),
-    forcePathStyle: e.S3_FORCE_PATH_STYLE,
-    credentials: {
-      accessKeyId: e.S3_ACCESS_KEY_ID,
-      secretAccessKey: e.S3_SECRET_ACCESS_KEY,
-    },
-  });
-  return client;
-}
-
-function bucket(): string {
-  return env().S3_BUCKET;
-}
 
 /**
  * Build a storage key. Deterministic in shape, random in the leaf, so two
@@ -110,16 +82,10 @@ export async function putObject(options: {
   const checksum = createHash("sha256").update(body).digest("hex");
 
   try {
-    await s3().send(
-      new PutObjectCommand({
-        Bucket: bucket(),
-        Key: options.key,
-        Body: body,
-        ContentType: options.contentType,
-        CacheControl: options.cacheControl ?? "private, max-age=31536000",
-        Metadata: options.metadata,
-      }),
-    );
+    await nativeBindings().MEDIA.put(options.key, body, {
+      httpMetadata: { contentType: options.contentType, cacheControl: options.cacheControl ?? "private, max-age=31536000" },
+      customMetadata: options.metadata,
+    });
   } catch (error) {
     log.error("put_object_failed", { key: options.key, error });
     throw new StorageError(`could not upload ${options.key}`, error);
@@ -131,14 +97,9 @@ export async function putObject(options: {
 /** Stream an object's bytes. Used by workers, never by a request handler. */
 export async function getObjectBuffer(key: string): Promise<Buffer> {
   try {
-    const result = await s3().send(
-      new GetObjectCommand({ Bucket: bucket(), Key: key }),
-    );
-    const body = result.Body;
-    if (!body) throw new Error("empty body");
-    // @aws-sdk/client-s3 returns a web stream in Node 18+.
-    const bytes = await body.transformToByteArray();
-    return Buffer.from(bytes);
+    const object = await nativeBindings().MEDIA.get(key);
+    if (!object) throw new Error("Object not found");
+    return Buffer.from(await object.arrayBuffer());
   } catch (error) {
     log.error("get_object_failed", { key, error });
     throw new StorageError(`could not read ${key}`, error);
@@ -154,26 +115,10 @@ export async function signedReadUrl(
   options: { expiresInSeconds?: number; downloadFilename?: string } = {},
 ): Promise<string> {
   const e = env();
-  try {
-    return await getSignedUrl(
-      s3(),
-      new GetObjectCommand({
-        Bucket: bucket(),
-        Key: key,
-        ...(options.downloadFilename
-          ? {
-              ResponseContentDisposition: `attachment; filename="${sanitiseFilename(
-                options.downloadFilename,
-              )}"`,
-            }
-          : {}),
-      }),
-      { expiresIn: options.expiresInSeconds ?? e.S3_SIGNED_URL_TTL },
-    );
-  } catch (error) {
-    log.error("sign_read_failed", { key, error });
-    throw new StorageError(`could not sign a URL for ${key}`, error);
-  }
+  const token = signMedia({ key, method: "GET", expires: Date.now() + Math.min(options.expiresInSeconds ?? e.S3_SIGNED_URL_TTL, 86400) * 1000,
+    ...(options.downloadFilename ? { filename: sanitiseFilename(options.downloadFilename) } : {}),
+  }, e.SESSION_SECRET);
+  return `${e.APP_URL}/api/media?token=${encodeURIComponent(token)}`;
 }
 
 /** Presigned upload URL, for browser-side uploads of logos and brand assets. */
@@ -182,39 +127,19 @@ export async function signedUploadUrl(options: {
   contentType: string;
   expiresInSeconds?: number;
 }): Promise<string> {
-  try {
-    return await getSignedUrl(
-      s3(),
-      new PutObjectCommand({
-        Bucket: bucket(),
-        Key: options.key,
-        ContentType: options.contentType,
-      }),
-      { expiresIn: options.expiresInSeconds ?? 900 },
-    );
-  } catch (error) {
-    log.error("sign_upload_failed", { key: options.key, error });
-    throw new StorageError(`could not sign an upload for ${options.key}`, error);
-  }
+  const e = env();
+  const token = signMedia({ key: options.key, method: "PUT", contentType: options.contentType,
+    expires: Date.now() + Math.min(options.expiresInSeconds ?? 900, 3600) * 1000 }, e.SESSION_SECRET);
+  return `${e.APP_URL}/api/media?token=${encodeURIComponent(token)}`;
 }
 
 export async function objectExists(key: string): Promise<boolean> {
-  try {
-    await s3().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
-    return true;
-  } catch {
-    return false;
-  }
+  return (await nativeBindings().MEDIA.head(key)) !== null;
 }
 
 export async function deleteObject(key: string): Promise<void> {
-  try {
-    await s3().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
-  } catch (error) {
-    // Deletion failure is logged but not fatal: an orphaned object costs storage,
-    // whereas a thrown error here would fail an otherwise successful cleanup.
-    log.warn("delete_object_failed", { key, error });
-  }
+  try { await nativeBindings().MEDIA.delete(key); }
+  catch (error) { log.warn("delete_object_failed", { key, error }); }
 }
 
 /** Strip anything that could break a Content-Disposition header. */

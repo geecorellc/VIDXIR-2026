@@ -38,25 +38,9 @@
 import { randomUUID } from "node:crypto";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { getRedis } from "@/lib/queue/redis";
+import { coordinate } from "@/lib/cloudflare/coordination";
 
 const log = logger.child({ component: "lock" });
-
-/** Delete only if we still hold it. */
-const RELEASE_SCRIPT = `
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-  return redis.call('DEL', KEYS[1])
-end
-return 0
-`;
-
-/** Extend only if we still hold it, so a heartbeat cannot revive a lost lock. */
-const RENEW_SCRIPT = `
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-  return redis.call('PEXPIRE', KEYS[1], ARGV[2])
-end
-return 0
-`;
 
 function lockKey(name: string): string {
   return `${env().QUEUE_PREFIX}:lock:${name}`;
@@ -97,19 +81,17 @@ export async function acquireLock(
   const key = lockKey(name);
   const owner = randomUUID();
 
-  const redis = getRedis();
-  const result = await redis.set(key, owner, "PX", ttlMs, "NX");
-  if (result !== "OK") {
+  const result = await coordinate<boolean>(key, "acquire", { owner, ttlMs });
+  if (!result) {
     log.debug("lock held elsewhere", { task: name });
     return null;
   }
 
   let released = false;
   const heartbeat = setInterval(() => {
-    void redis
-      .eval(RENEW_SCRIPT, 1, key, owner, String(ttlMs))
+    void coordinate<boolean>(key, "renew", { owner, ttlMs })
       .then((extended) => {
-        if (extended === 0 && !released) {
+        if (!extended && !released) {
           // We lost it — almost certainly because this process stalled past the
           // TTL. Logged loudly: it means the guarantee lapsed, and a second
           // holder may now be running the same task.
@@ -134,7 +116,7 @@ export async function acquireLock(
       released = true;
       clearInterval(heartbeat);
       try {
-        await redis.eval(RELEASE_SCRIPT, 1, key, owner);
+        await coordinate(key, "release", { owner });
       } catch (error) {
         // Not fatal: the TTL releases it shortly regardless. Logged rather than
         // thrown so a Redis blip at the end of a successful pass does not turn
@@ -174,12 +156,10 @@ export async function withLock<T>(
  * read-then-decide race the lock prevents.
  */
 export async function lockHeld(name: string): Promise<boolean> {
-  const value = await getRedis().get(lockKey(name));
-  return value !== null;
+  return (await coordinate<{ held: boolean }>(lockKey(name), "status")).held;
 }
 
 /** Remaining lifetime in ms, or null when not held. Diagnostics only. */
 export async function lockTtlMs(name: string): Promise<number | null> {
-  const ttl = await getRedis().pttl(lockKey(name));
-  return ttl >= 0 ? ttl : null;
+  return (await coordinate<{ ttlMs: number | null }>(lockKey(name), "status")).ttlMs;
 }

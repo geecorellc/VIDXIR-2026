@@ -45,45 +45,23 @@
  * because a vendor was slow, and a price cannot differ between the quote and the
  * charge.
  */
-import { and, desc, eq, gte, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { atomic, type AtomicQuery } from "@/lib/db/atomic";
 import {
   creditBalances,
   creditLedger,
   subscriptions,
 } from "@/lib/db/schema";
 import { InsufficientCreditsError, ValidationError } from "@/lib/errors";
-import { logger } from "@/lib/logger";
 import { planByTier, type PlanTier } from "@/lib/plans";
 import { currentPeriod } from "@/lib/projects/service";
 import { creditCostFor, type CreditOperation } from "@/lib/credits/pricing";
 import type { VideoQuality } from "@/lib/video/quality";
 
-const log = logger.child({ component: "credits" });
 
 /** A database handle or an open transaction. Every write here accepts either. */
-type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-/**
- * The conflict target for `credit_ledger`'s idempotency key.
- *
- * `credit_ledger_idempotency_key` is a **partial** unique index — `WHERE
- * idempotency_key IS NOT NULL`, so unkeyed adjustment rows do not have to collide with
- * each other. Postgres will only infer a partial index for `ON CONFLICT` if the
- * statement repeats the index's predicate, and without it the statement fails outright
- * with `there is no unique or exclusion constraint matching the ON CONFLICT
- * specification`.
- *
- * That is a loud failure rather than a silent one, which is fortunate: the integration
- * suite hit it on the first run. It is defined once here because all three keyed
- * inserts — charge, refund and purchase — need exactly the same clause, and a fourth
- * that forgot it would be a charge path that throws a Postgres error instead of
- * charging.
- */
-const ON_IDEMPOTENCY_KEY = {
-  target: creditLedger.idempotencyKey,
-  where: isNotNull(creditLedger.idempotencyKey),
-} as const;
+type Executor = typeof db;
 
 // ---------------------------------------------------------------------------
 // Reading
@@ -211,74 +189,20 @@ export async function ensureMonthlyGrant(
   const tier = options.tier ?? (await tierOf(userId, executor));
   const credits = planByTier(tier).monthlyCredits;
 
-  const claimed = await executor
-    .insert(creditBalances)
-    .values({
-      userId,
-      granted: credits,
-      purchased: 0,
-      spent: 0,
-      period,
-      grantedForTier: tier,
-    })
-    .onConflictDoUpdate({
-      target: creditBalances.userId,
-      set: {
-        granted: credits,
-        spent: 0,
-        period,
-        grantedForTier: tier,
-        updatedAt: new Date(),
-      },
-      // Strictly older only. Equal means already granted for this period.
-      setWhere: lt(creditBalances.period, period),
-    })
-    .returning({
-      granted: creditBalances.granted,
-      purchased: creditBalances.purchased,
-      spent: creditBalances.spent,
-    });
-
-  const row = claimed[0];
-
-  if (!row) {
-    // Already granted this period. Not an error, and by far the common case.
-    return {
-      granted: false,
-      credits: 0,
-      period,
-      tier,
-      balance: await creditBalanceFor(userId, executor),
-    };
-  }
-
-  /**
-   * The ledger row is written after the balance here, which is the opposite of the
-   * order `chargeCredits` uses — and correct for the same reason. A grant's
-   * idempotency lives on the *balance* row's period, so the balance write is the
-   * thing that must happen at most once; the ledger row is the record of it. A charge's
-   * idempotency lives on the ledger, so there the ledger write goes first.
-   */
-  await executor.insert(creditLedger).values({
-    userId,
-    reason: "monthly_grant",
-    amount: credits,
-    balanceAfter: availableOf(row),
-    period,
-    idempotencyKey: `grant:${userId}:${period}`,
-    description: `${planByTier(tier).name} plan — ${credits.toLocaleString("en-US")} monthly credits`,
-    meta: { tier },
-  });
-
-  log.info("granted monthly credits", { userId, period, credits, tier });
-
-  return {
-    granted: true,
-    credits,
-    period,
-    tier,
-    balance: await creditBalanceFor(userId, executor),
-  };
+  const ledgerId = crypto.randomUUID();
+  const results = await atomic([
+    executor.insert(creditBalances).values({ userId, granted: credits, purchased: 0, spent: 0, period, grantedForTier: tier })
+      .onConflictDoUpdate({ target: creditBalances.userId,
+        set: { granted: credits, spent: 0, period, grantedForTier: tier, updatedAt: new Date() },
+        setWhere: lt(creditBalances.period, period),
+      }),
+    sql`INSERT INTO credit_ledger (id,user_id,reason,amount,balance_after,period,idempotency_key,description,meta)
+      SELECT ${ledgerId},${userId},'monthly_grant',${credits},granted+purchased-spent,${period},${`grant:${userId}:${period}`},
+      ${`${planByTier(tier).name} plan — ${credits.toLocaleString("en-US")} monthly credits`},${JSON.stringify({tier})}
+      FROM credit_balances WHERE user_id=${userId} AND changes()>0`,
+  ]);
+  const granted = (results[0]?.meta.changes ?? 0) > 0;
+  return { granted, credits: granted ? credits : 0, period, tier, balance: await creditBalanceFor(userId, executor) };
 }
 
 /**
@@ -377,156 +301,33 @@ export async function chargeCredits(
 
   const period = currentPeriod();
 
-  return db.transaction(async (tx) => {
-    /**
-     * Grant first, inside the same transaction.
-     *
-     * A user whose period has just rolled over must not be refused for having a stale
-     * zero balance, and doing it here rather than in a scheduled task means the grant
-     * cannot be missed by a worker that ran while the scheduler was down. Idempotent,
-     * so the overwhelmingly common case is a no-op UPDATE that matches nothing.
-     */
-    await ensureMonthlyGrant(request.userId, { period, executor: tx });
-
-    /**
-     * The ledger insert is the idempotency check, and it is first.
-     *
-     * `onConflictDoNothing` against the partial unique index returns no rows for a
-     * replay. Because this precedes the balance update, a replay cannot reach the
-     * `spent` increment at all — which is the property §13 asks for.
-     *
-     * `balanceAfter` is filled in below once the update reports the committed figure.
-     * It is written as a placeholder here because the row has to exist to win or lose
-     * the conflict, and the true post-charge balance is not known until the UPDATE
-     * returns.
-     */
-    const inserted = await tx
-      .insert(creditLedger)
-      .values({
-        userId: request.userId,
-        reason: "spend",
-        amount: -cost,
-        balanceAfter: 0,
-        operation: request.operation,
-        modelId: request.modelId,
-        quality: request.quality,
-        projectId: request.projectId ?? null,
-        idempotencyKey: request.idempotencyKey,
-        period,
-        description: request.description ?? describeSpend(request, cost),
-        meta: request.meta ?? null,
-      })
-      .onConflictDoNothing(ON_IDEMPOTENCY_KEY)
-      .returning({ id: creditLedger.id });
-
-    const ledgerRow = inserted[0];
-
-    if (!ledgerRow) {
-      /**
-       * Already charged. The existing row is read back so the caller gets a real
-       * ledger id and the balance it produced, rather than a bare "nothing happened" —
-       * a retried job needs to be able to log what it paid the first time.
-       */
-      const [existing] = await tx
-        .select({
-          id: creditLedger.id,
-          amount: creditLedger.amount,
-          balanceAfter: creditLedger.balanceAfter,
-        })
-        .from(creditLedger)
-        .where(eq(creditLedger.idempotencyKey, request.idempotencyKey))
-        .limit(1);
-
-      log.info("credit charge already applied; not charging again", {
-        userId: request.userId,
-        operation: request.operation,
-        idempotencyKey: request.idempotencyKey,
-      });
-
-      return {
-        charged: 0,
-        cost: existing ? Math.abs(existing.amount) : cost,
-        alreadyCharged: true,
-        // `existing` is guaranteed by the conflict that brought us here; the fallback
-        // only exists because TypeScript cannot know that.
-        ledgerId: existing?.id ?? "",
-        balanceAfter: existing?.balanceAfter ?? 0,
-      };
+  await ensureMonthlyGrant(request.userId, { period });
+  const ledgerId = crypto.randomUUID();
+  try {
+    await atomic([
+      db.insert(creditLedger).values({ id: ledgerId, userId: request.userId, reason: "spend", amount: -cost,
+        balanceAfter: 0, operation: request.operation, modelId: request.modelId, quality: request.quality,
+        projectId: request.projectId ?? null, idempotencyKey: request.idempotencyKey, period,
+        description: request.description ?? describeSpend(request, cost), meta: request.meta ?? null,
+      }).onConflictDoNothing(),
+      // The CHECK constraint refuses overdraw and rolls back the ledger insert.
+      // A duplicate key did not insert this generated id, so it cannot spend again.
+      db.update(creditBalances).set({ spent: sql`${creditBalances.spent} + ${cost}`, updatedAt: new Date() })
+        .where(and(eq(creditBalances.userId, request.userId), sql`EXISTS (SELECT 1 FROM credit_ledger WHERE id=${ledgerId})`)),
+      sql`UPDATE credit_ledger SET balance_after=(SELECT granted+purchased-spent FROM credit_balances WHERE user_id=${request.userId}) WHERE id=${ledgerId}`,
+    ]);
+  } catch (error) {
+    if (String(error).includes("credit_balances_non_negative")) {
+      const balance = await creditBalanceFor(request.userId);
+      throw new InsufficientCreditsError({ required: cost, available: balance.available, operation: request.operation, modelId: request.modelId });
     }
-
-    /**
-     * The conditional increment. This is the atomic part.
-     *
-     * The predicate is evaluated by Postgres against the locked, committed row, so two
-     * concurrent charges cannot both pass it. The loser's UPDATE matches nothing,
-     * `returning` is empty, and the throw below rolls back — including the ledger row
-     * inserted moments ago, which is why a refused charge leaves no trace.
-     */
-    const updated = await tx
-      .update(creditBalances)
-      .set({
-        spent: sql`${creditBalances.spent} + ${cost}`,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(creditBalances.userId, request.userId),
-          gte(
-            sql`${creditBalances.granted} + ${creditBalances.purchased} - ${creditBalances.spent}`,
-            cost,
-          ),
-        ),
-      )
-      .returning({
-        granted: creditBalances.granted,
-        purchased: creditBalances.purchased,
-        spent: creditBalances.spent,
-      });
-
-    const balanceRow = updated[0];
-
-    if (!balanceRow) {
-      const balance = await creditBalanceFor(request.userId, tx);
-      log.info("credit charge refused: insufficient balance", {
-        userId: request.userId,
-        operation: request.operation,
-        modelId: request.modelId,
-        required: cost,
-        available: balance.available,
-      });
-      throw new InsufficientCreditsError({
-        required: cost,
-        available: balance.available,
-        operation: request.operation,
-        modelId: request.modelId,
-      });
-    }
-
-    const balanceAfter = availableOf(balanceRow);
-
-    // Now that the committed balance is known, record it on the row.
-    await tx
-      .update(creditLedger)
-      .set({ balanceAfter })
-      .where(eq(creditLedger.id, ledgerRow.id));
-
-    log.info("charged credits", {
-      userId: request.userId,
-      operation: request.operation,
-      modelId: request.modelId,
-      quality: request.quality,
-      cost,
-      balanceAfter,
-    });
-
-    return {
-      charged: cost,
-      cost,
-      alreadyCharged: false,
-      ledgerId: ledgerRow.id,
-      balanceAfter,
-    };
-  });
+    throw error;
+  }
+  const [ledger] = await db.select().from(creditLedger)
+    .where(and(eq(creditLedger.idempotencyKey, request.idempotencyKey), eq(creditLedger.userId, request.userId))).limit(1);
+  if (!ledger) throw new ValidationError("Credit charge key does not belong to this account.");
+  const alreadyCharged = ledger.id !== ledgerId;
+  return { charged: alreadyCharged ? 0 : cost, cost: Math.abs(ledger.amount), alreadyCharged, ledgerId: ledger.id, balanceAfter: ledger.balanceAfter };
 }
 
 function describeSpend(request: ChargeRequest, cost: number): string {
@@ -574,113 +375,24 @@ export async function refundCredits(input: {
   const period = currentPeriod();
   const refundKey = `refund:${input.chargeIdempotencyKey}`;
 
-  return db.transaction(async (tx) => {
-    const [charge] = await tx
-      .select({
-        id: creditLedger.id,
-        amount: creditLedger.amount,
-        operation: creditLedger.operation,
-        modelId: creditLedger.modelId,
-        quality: creditLedger.quality,
-        projectId: creditLedger.projectId,
-      })
-      .from(creditLedger)
-      .where(
-        and(
-          eq(creditLedger.idempotencyKey, input.chargeIdempotencyKey),
-          eq(creditLedger.userId, input.userId),
-          eq(creditLedger.reason, "spend"),
-        ),
-      )
-      .limit(1);
-
-    if (!charge) {
-      log.warn("nothing to refund: no matching charge", {
-        userId: input.userId,
-        chargeIdempotencyKey: input.chargeIdempotencyKey,
-      });
-      return { refunded: 0, alreadyRefunded: false, balanceAfter: 0 };
-    }
-
-    const amount = Math.abs(charge.amount);
-
-    const inserted = await tx
-      .insert(creditLedger)
-      .values({
-        userId: input.userId,
-        reason: "refund",
-        amount,
-        balanceAfter: 0,
-        operation: charge.operation,
-        modelId: charge.modelId,
-        quality: charge.quality,
-        projectId: charge.projectId,
-        idempotencyKey: refundKey,
-        period,
-        description: `Refund — ${input.reason}`,
-        meta: { ...input.meta, refundOf: charge.id },
-      })
-      .onConflictDoNothing(ON_IDEMPOTENCY_KEY)
-      .returning({ id: creditLedger.id });
-
-    const refundRow = inserted[0];
-
-    if (!refundRow) {
-      const balance = await creditBalanceFor(input.userId, tx);
-      log.info("refund already applied", {
-        userId: input.userId,
-        chargeIdempotencyKey: input.chargeIdempotencyKey,
-      });
-      return {
-        refunded: 0,
-        alreadyRefunded: true,
-        balanceAfter: balance.available,
-      };
-    }
-
-    /**
-     * A refund reduces `spent` rather than increasing `granted`.
-     *
-     * The distinction matters at the period boundary: `granted` is what the plan gave
-     * and is overwritten by the next grant, so adding a refund to it would inflate the
-     * apparent allowance and then vanish. Reducing `spent` returns the credits to
-     * whichever bucket paid for them, which is what "refund" means.
-     *
-     * `greatest(spent - amount, 0)` rather than a bare subtraction: the check
-     * constraint forbids a negative `spent`, and a refund arriving after a period reset
-     * has zeroed `spent` would otherwise fail the whole transaction — turning a
-     * generous act into an error. Clamping refunds what can be refunded.
-     */
-    const updated = await tx
-      .update(creditBalances)
-      .set({
-        spent: sql`greatest(${creditBalances.spent} - ${amount}, 0)`,
-        updatedAt: new Date(),
-      })
-      .where(eq(creditBalances.userId, input.userId))
-      .returning({
-        granted: creditBalances.granted,
-        purchased: creditBalances.purchased,
-        spent: creditBalances.spent,
-      });
-
-    const balanceRow = updated[0];
-    const balanceAfter = balanceRow ? availableOf(balanceRow) : 0;
-
-    await tx
-      .update(creditLedger)
-      .set({ balanceAfter })
-      .where(eq(creditLedger.id, refundRow.id));
-
-    log.info("refunded credits", {
-      userId: input.userId,
-      amount,
-      refundReason: input.reason,
-      balanceAfter,
-    });
-
-    return { refunded: amount, alreadyRefunded: false, balanceAfter };
-  });
+  const [charge] = await db.select().from(creditLedger).where(and(
+    eq(creditLedger.idempotencyKey, input.chargeIdempotencyKey), eq(creditLedger.userId, input.userId), eq(creditLedger.reason, "spend"),
+  )).limit(1);
+  if (!charge) return { refunded: 0, alreadyRefunded: false, balanceAfter: 0 };
+  const amount = Math.abs(charge.amount);
+  const ledgerId = crypto.randomUUID();
+  await atomic([
+    db.insert(creditLedger).values({ id: ledgerId, userId: input.userId, reason: "refund", amount, balanceAfter: 0,
+      operation: charge.operation, modelId: charge.modelId, quality: charge.quality, projectId: charge.projectId,
+      idempotencyKey: refundKey, period, description: `Refund — ${input.reason}`, meta: { ...input.meta, refundOf: charge.id },
+    }).onConflictDoNothing(),
+    db.update(creditBalances).set({ spent: sql`max(${creditBalances.spent} - ${amount}, 0)`, updatedAt: new Date() })
+      .where(and(eq(creditBalances.userId, input.userId), sql`EXISTS (SELECT 1 FROM credit_ledger WHERE id=${ledgerId})`)),
+    sql`UPDATE credit_ledger SET balance_after=(SELECT granted+purchased-spent FROM credit_balances WHERE user_id=${input.userId}) WHERE id=${ledgerId}`,
+  ]);
+  const [ledger] = await db.select().from(creditLedger).where(and(eq(creditLedger.idempotencyKey, refundKey), eq(creditLedger.userId, input.userId))).limit(1);
+  const alreadyRefunded = ledger?.id !== ledgerId;
+  return { refunded: alreadyRefunded ? 0 : amount, alreadyRefunded, balanceAfter: (await creditBalanceFor(input.userId)).available };
 }
 
 // ---------------------------------------------------------------------------
@@ -700,101 +412,28 @@ export async function refundCredits(input: {
  * be able to disagree.
  */
 export async function addPurchasedCredits(input: {
-  userId: string;
-  credits: number;
-  idempotencyKey: string;
-  description: string;
+  userId: string; credits: number; idempotencyKey: string; description: string;
   meta?: Record<string, unknown>;
-  executor?: Executor;
+  /** Receipt writes join the exact same D1 batch as the balance and ledger. */
+  receiptQueries?: AtomicQuery[];
 }): Promise<{ credited: number; alreadyCredited: boolean; ledgerId: string | null; balanceAfter: number }> {
-  const executor = input.executor ?? db;
+  if (!Number.isInteger(input.credits) || input.credits <= 0) throw new ValidationError("A credit purchase must add a positive whole number of credits.");
   const period = currentPeriod();
-
-  if (!Number.isInteger(input.credits) || input.credits <= 0) {
-    throw new ValidationError("A credit purchase must add a positive whole number of credits.");
-  }
-
-  const inserted = await executor
-    .insert(creditLedger)
-    .values({
-      userId: input.userId,
-      reason: "purchase",
-      amount: input.credits,
-      balanceAfter: 0,
-      idempotencyKey: input.idempotencyKey,
-      period,
-      description: input.description,
-      meta: input.meta ?? null,
-    })
-    .onConflictDoNothing(ON_IDEMPOTENCY_KEY)
-    .returning({ id: creditLedger.id });
-
-  const ledgerRow = inserted[0];
-
-  if (!ledgerRow) {
-    const balance = await creditBalanceFor(input.userId, executor);
-    log.info("credit purchase already applied", {
-      userId: input.userId,
-      idempotencyKey: input.idempotencyKey,
-    });
-    return {
-      credited: 0,
-      alreadyCredited: true,
-      ledgerId: null,
-      balanceAfter: balance.available,
-    };
-  }
-
-  /**
-   * An upsert, not an update.
-   *
-   * A customer can buy credits before anything has granted them a balance row — the
-   * first purchase of a brand-new Starter account, say. Without the insert branch that
-   * purchase would silently update nothing, and the customer would have paid for
-   * credits that were never added.
-   */
-  const updated = await executor
-    .insert(creditBalances)
-    .values({
-      userId: input.userId,
-      granted: 0,
-      purchased: input.credits,
-      spent: 0,
-      period,
-    })
-    .onConflictDoUpdate({
-      target: creditBalances.userId,
-      set: {
-        purchased: sql`${creditBalances.purchased} + ${input.credits}`,
-        updatedAt: new Date(),
-      },
-    })
-    .returning({
-      granted: creditBalances.granted,
-      purchased: creditBalances.purchased,
-      spent: creditBalances.spent,
-    });
-
-  const balanceRow = updated[0];
-  const balanceAfter = balanceRow ? availableOf(balanceRow) : input.credits;
-
-  await executor
-    .update(creditLedger)
-    .set({ balanceAfter })
-    .where(eq(creditLedger.id, ledgerRow.id));
-
-  log.info("added purchased credits", {
-    userId: input.userId,
-    credits: input.credits,
-    balanceAfter,
-  });
-
-  return {
-    credited: input.credits,
-    alreadyCredited: false,
-    ledgerId: ledgerRow.id,
-    balanceAfter,
-  };
+  const ledgerId = crypto.randomUUID();
+  await atomic([
+    db.insert(creditLedger).values({ id: ledgerId, userId: input.userId, reason: "purchase", amount: input.credits,
+      balanceAfter: 0, idempotencyKey: input.idempotencyKey, period, description: input.description, meta: input.meta ?? null,
+    }).onConflictDoNothing(),
+    sql`INSERT INTO credit_balances (user_id,granted,purchased,spent,period)
+      SELECT ${input.userId},0,${input.credits},0,${period} WHERE EXISTS(SELECT 1 FROM credit_ledger WHERE id=${ledgerId})
+      ON CONFLICT(user_id) DO UPDATE SET purchased=purchased+${input.credits},updated_at=${Date.now()}`,
+    sql`UPDATE credit_ledger SET balance_after=(SELECT granted+purchased-spent FROM credit_balances WHERE user_id=${input.userId}) WHERE id=${ledgerId}`,
+    ...(input.receiptQueries ?? []),
+  ]);
+  const [ledger] = await db.select().from(creditLedger).where(and(eq(creditLedger.idempotencyKey, input.idempotencyKey), eq(creditLedger.userId, input.userId))).limit(1);
+  if (!ledger) throw new ValidationError("Credit purchase key does not belong to this account.");
+  const alreadyCredited = ledger.id !== ledgerId;
+  return { credited: alreadyCredited ? 0 : input.credits, alreadyCredited, ledgerId: ledger.id, balanceAfter: ledger.balanceAfter };
 }
 
 // ---------------------------------------------------------------------------
@@ -913,7 +552,7 @@ export async function reconcile(userId: string): Promise<Reconciliation> {
 
   const [sums] = await db
     .select({
-      total: sql<number>`coalesce(sum(${creditLedger.amount}), 0)::int`,
+      total: sql<number>`coalesce(sum(${creditLedger.amount}), 0)`,
     })
     .from(creditLedger)
     .where(

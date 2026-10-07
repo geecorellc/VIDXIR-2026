@@ -47,7 +47,7 @@ import { env, isProduction, realPublishBlocked, usingMockProviders } from "@/lib
 import { asDatabaseError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { blockingMisconfigurations } from "@/lib/providers/config";
-import { getRedis } from "@/lib/queue/redis";
+import { coordinate } from "@/lib/cloudflare/coordination";
 
 const log = logger.child({ component: "health" });
 
@@ -57,7 +57,7 @@ export type ReadinessMode = "web" | "worker" | "full";
 export type CheckStatus = "ok" | "degraded" | "failed" | "skipped";
 
 export interface DependencyCheck {
-  name: "database" | "redis" | "configuration";
+  name: "database" | "coordination" | "configuration";
   status: CheckStatus;
   durationMs: number;
   /**
@@ -138,31 +138,31 @@ async function checkDatabase(): Promise<DependencyCheck> {
       name: "database",
       status: "failed",
       durationMs: Date.now() - start,
-      detail: "Postgres did not answer a health query.",
+      detail: "Cloudflare D1 did not answer a health query.",
     };
   }
 }
 
-async function checkRedis(): Promise<DependencyCheck> {
+async function checkCoordination(): Promise<DependencyCheck> {
   const start = Date.now();
   try {
-    const pong = await withTimeout(() => getRedis().ping(), "redis");
-    if (pong !== "PONG") {
+    const pong = await withTimeout(() => coordinate<boolean>("health", "ping"), "coordination");
+    if (pong !== true) {
       return {
-        name: "redis",
+        name: "coordination",
         status: "failed",
         durationMs: Date.now() - start,
-        detail: "Redis answered unexpectedly.",
+        detail: "Cloudflare coordination answered unexpectedly.",
       };
     }
-    return { name: "redis", status: "ok", durationMs: Date.now() - start };
+    return { name: "coordination", status: "ok", durationMs: Date.now() - start };
   } catch (error) {
-    log.error("readiness: redis unreachable", { error });
+    log.error("readiness: coordination unreachable", { error });
     return {
-      name: "redis",
+      name: "coordination",
       status: "failed",
       durationMs: Date.now() - start,
-      detail: "Redis did not answer PING.",
+      detail: "Cloudflare coordination did not answer.",
     };
   }
 }
@@ -268,23 +268,23 @@ export function resetReadinessCache(): void {
 }
 
 async function runChecks(mode: ReadinessMode): Promise<ReadinessReport> {
-  const needsRedisHard = mode === "worker" || mode === "full";
+  const needsCoordinationHard = mode === "worker" || mode === "full";
 
-  const [database, redis] = await Promise.all([checkDatabase(), checkRedis()]);
+  const [database, coordination] = await Promise.all([checkDatabase(), checkCoordination()]);
   const configuration = checkConfiguration();
 
-  const redisCheck: DependencyCheck =
-    redis.status === "failed" && !needsRedisHard
+  const coordinationCheck: DependencyCheck =
+    coordination.status === "failed" && !needsCoordinationHard
       ? {
-          ...redis,
+          ...coordination,
           status: "degraded",
           detail:
-            "Redis did not answer PING. Rate limiting is failing open and " +
+            "Cloudflare coordination did not answer. Rate limiting is failing open and " +
             "background work is not being queued; page serving is unaffected.",
         }
-      : redis;
+      : coordination;
 
-  const checks = [database, redisCheck, configuration];
+  const checks = [database, coordinationCheck, configuration];
 
   // Only a hard failure drains traffic. `degraded` is reported and served.
   const ready = checks.every((c) => c.status !== "failed");

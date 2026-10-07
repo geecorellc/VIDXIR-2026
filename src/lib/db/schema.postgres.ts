@@ -1,5 +1,5 @@
 /**
- * Cloudflare SQLite relational schema.
+ * Vidxir AI relational schema (§21).
  *
  * Conventions:
  *  - Every user-owned table carries `userId` even when it could be reached
@@ -8,12 +8,11 @@
  *  - No binary media is stored here. Media lives in object storage; these
  *    tables hold storage keys, metadata and provenance (§22).
  *  - Provider credentials are stored as ciphertext produced by lib/crypto.
- *  - Timestamps are UTC epoch milliseconds, decoded to Date objects by Drizzle.
+ *  - Timestamps are `timestamptz`; the app never depends on server local time.
  */
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
-  check,
   char,
   index,
   integer,
@@ -29,7 +28,7 @@ import {
   uuid,
   varchar,
   type AnyPgColumn,
-} from "./sqlite-columns";
+} from "drizzle-orm/pg-core";
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -234,7 +233,7 @@ export const experimentOutcomeEnum = pgEnum("experiment_outcome", [
 export const users = pgTable(
   "users",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     email: varchar("email", { length: 320 }).notNull(),
     /** Lower-cased email used for uniqueness and lookup. */
     emailNormalized: varchar("email_normalized", { length: 320 }).notNull(),
@@ -251,10 +250,10 @@ export const users = pgTable(
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [uniqueIndex("users_email_normalized_key").on(t.emailNormalized)],
 );
@@ -262,7 +261,7 @@ export const users = pgTable(
 export const sessions = pgTable(
   "sessions",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -276,10 +275,10 @@ export const sessions = pgTable(
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("sessions_token_hash_key").on(t.tokenHash),
@@ -292,7 +291,7 @@ export const sessions = pgTable(
 export const emailTokens = pgTable(
   "email_tokens",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -303,7 +302,7 @@ export const emailTokens = pgTable(
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("email_tokens_token_hash_key").on(t.tokenHash),
@@ -336,19 +335,19 @@ export const plans = pgTable("plans", {
   features: jsonb("features")
     .notNull()
     .$type<Record<string, boolean>>()
-    .default(sql`'{}'`),
+    .default(sql`'{}'::jsonb`),
   /** Higher wins in the render queue (§23 priority render queue). */
   queuePriority: integer("queue_priority").notNull().default(1),
   stripePriceId: varchar("stripe_price_id", { length: 128 }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
-    .default(sql`(unixepoch() * 1000)`),
+    .defaultNow(),
 });
 
 export const subscriptions = pgTable(
   "subscriptions",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -374,10 +373,10 @@ export const subscriptions = pgTable(
     lastEventAt: timestamp("last_event_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("subscriptions_user_id_key").on(t.userId),
@@ -404,7 +403,7 @@ export const subscriptions = pgTable(
 export const billingEvents = pgTable(
   "billing_events",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     provider: varchar("provider", { length: 32 }).notNull(),
     /** The provider's event id, e.g. `evt_…`. The idempotency key. */
     providerEventId: varchar("provider_event_id", { length: 128 }).notNull(),
@@ -426,7 +425,7 @@ export const billingEvents = pgTable(
     payload: jsonb("payload").notNull().$type<Record<string, unknown>>(),
     receivedAt: timestamp("received_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("billing_events_provider_event_key").on(
@@ -452,7 +451,7 @@ export const usageCounters = pgTable(
     rendersCompleted: integer("renders_completed").notNull().default(0),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.period] })],
 );
@@ -531,15 +530,12 @@ export const creditBalances = pgTable(
     grantedForTier: planTierEnum("granted_for_tier").notNull().default("starter"),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
-  (t) => [
-    index("credit_balances_period_idx").on(t.period),
-    check("credit_balances_non_negative", sql`${t.granted} >= 0 AND ${t.purchased} >= 0 AND ${t.spent} >= 0 AND ${t.granted} + ${t.purchased} - ${t.spent} >= 0`),
-  ],
+  (t) => [index("credit_balances_period_idx").on(t.period)],
 );
 
 /**
@@ -575,7 +571,7 @@ export const creditBalances = pgTable(
 export const creditLedger = pgTable(
   "credit_ledger",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -617,11 +613,15 @@ export const creditLedger = pgTable(
     meta: jsonb("meta").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
-    check("credit_ledger_sign_matches_reason", sql`(${t.reason} = 'spend' AND ${t.amount} < 0) OR (${t.reason} <> 'spend' AND ${t.amount} > 0)`),
-    uniqueIndex("credit_ledger_idempotency_key").on(t.idempotencyKey).where(sql`${t.idempotencyKey} IS NOT NULL`),
+    /**
+     * Partial unique index, created in the migration rather than here: Drizzle's
+     * `uniqueIndex().where()` emits the predicate, but declaring it here as well
+     * would produce a second, conflicting definition in the generated snapshot. The
+     * index is `credit_ledger_idempotency_key` and the migration is authoritative.
+     */
     index("credit_ledger_user_created_idx").on(t.userId, t.createdAt),
     index("credit_ledger_user_period_idx").on(t.userId, t.period),
     index("credit_ledger_project_idx").on(t.projectId),
@@ -645,7 +645,7 @@ export const creditLedger = pgTable(
 export const creditPurchases = pgTable(
   "credit_purchases",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -673,10 +673,10 @@ export const creditPurchases = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("credit_purchases_session_key").on(t.providerSessionId),
@@ -715,21 +715,21 @@ export const onboardingProfiles = pgTable("onboarding_profiles", {
   publishDays: jsonb("publish_days")
     .notNull()
     .$type<number[]>()
-    .default(sql`'[1,3,5]'`),
+    .default(sql`'[1,3,5]'::jsonb`),
   publishTimes: jsonb("publish_times")
     .notNull()
     .$type<string[]>()
-    .default(sql`'["18:00"]'`),
+    .default(sql`'["18:00"]'::jsonb`),
   timezone: varchar("timezone", { length: 64 }).notNull().default("UTC"),
   /** Furthest step reached, so a refresh resumes rather than restarts (§45). */
   lastStep: integer("last_step").notNull().default(0),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
-    .default(sql`(unixepoch() * 1000)`),
+    .defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
-    .default(sql`(unixepoch() * 1000)`),
+    .defaultNow(),
 });
 
 // ---------------------------------------------------------------------------
@@ -739,7 +739,7 @@ export const onboardingProfiles = pgTable("onboarding_profiles", {
 export const channels = pgTable(
   "channels",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -766,14 +766,14 @@ export const channels = pgTable(
 
     connectedAt: timestamp("connected_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     // A YouTube channel may only be connected once per user.
@@ -813,17 +813,17 @@ export const channelSettings = pgTable(
     competitorChannelIds: jsonb("competitor_channel_ids")
       .notNull()
       .$type<string[]>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     /** Topic keywords seeding research. */
     keywords: jsonb("keywords")
       .notNull()
       .$type<string[]>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     /** Overrides for the §8 opportunity-score weights. */
     scoreWeights: jsonb("score_weights").$type<Record<string, number>>(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [index("channel_settings_user_id_idx").on(t.userId)],
 );
@@ -850,7 +850,7 @@ export const brandKits = pgTable(
     thumbnailStyle: jsonb("thumbnail_style").$type<Record<string, unknown>>(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [index("brand_kits_user_id_idx").on(t.userId)],
 );
@@ -871,12 +871,12 @@ export const automationSettings = pgTable(
     publishDays: jsonb("publish_days")
       .notNull()
       .$type<number[]>()
-      .default(sql`'[1,3,5]'`),
+      .default(sql`'[1,3,5]'::jsonb`),
     /** `HH:MM` in the channel timezone. */
     publishTimes: jsonb("publish_times")
       .notNull()
       .$type<string[]>()
-      .default(sql`'["18:00"]'`),
+      .default(sql`'["18:00"]'::jsonb`),
     timezone: varchar("timezone", { length: 64 }).notNull().default("UTC"),
     videosPerWeek: integer("videos_per_week").notNull().default(3),
     /** Requires the plan's autoPublish feature; re-checked at publish time. */
@@ -886,7 +886,7 @@ export const automationSettings = pgTable(
     nextRunAt: timestamp("next_run_at", { withTimezone: true }),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("automation_settings_user_id_idx").on(t.userId),
@@ -901,7 +901,7 @@ export const automationSettings = pgTable(
 export const researchRuns = pgTable(
   "research_runs",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -964,12 +964,12 @@ export const researchRuns = pgTable(
     keywords: jsonb("keywords")
       .notNull()
       .$type<string[]>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     /** Which signal sources actually responded, for provenance (§29). */
     sources: jsonb("sources")
       .notNull()
       .$type<string[]>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     /** Aggregate search-demand series rendered by the Research chart. */
     demandSeries: jsonb("demand_series").$type<
       Array<{ label: string; value: number }>
@@ -1008,7 +1008,7 @@ export const researchRuns = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("research_runs_channel_created_idx").on(t.channelId, t.createdAt),
@@ -1021,7 +1021,7 @@ export const researchRuns = pgTable(
 export const researchResults = pgTable(
   "research_results",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     runId: uuid("run_id")
       .notNull()
       .references(() => researchRuns.id, { onDelete: "cascade" }),
@@ -1051,7 +1051,7 @@ export const researchResults = pgTable(
     raw: jsonb("raw").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("research_results_run_idx").on(t.runId),
@@ -1064,7 +1064,7 @@ export const researchResults = pgTable(
 export const ideas = pgTable(
   "ideas",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -1101,12 +1101,12 @@ export const ideas = pgTable(
     targetKeywords: jsonb("target_keywords")
       .notNull()
       .$type<string[]>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     /** Research result ids this idea was derived from — provenance for §29. */
     sourceResultIds: jsonb("source_result_ids")
       .notNull()
       .$type<string[]>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
 
     // §8 component scores, 0-100. Vidxir AI-generated, not YouTube metrics.
     trendScore: real("trend_score"),
@@ -1125,10 +1125,10 @@ export const ideas = pgTable(
     generatedBy: varchar("generated_by", { length: 48 }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("ideas_channel_state_idx").on(t.channelId, t.state),
@@ -1144,7 +1144,7 @@ export const ideas = pgTable(
 export const projects = pgTable(
   "projects",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -1231,10 +1231,10 @@ export const projects = pgTable(
 
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("projects_user_status_idx").on(t.userId, t.status),
@@ -1246,7 +1246,7 @@ export const projects = pgTable(
 export const projectEvents = pgTable(
   "project_events",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1260,7 +1260,7 @@ export const projectEvents = pgTable(
     meta: jsonb("meta").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [index("project_events_project_idx").on(t.projectId, t.createdAt)],
 );
@@ -1272,7 +1272,7 @@ export const projectEvents = pgTable(
 export const scripts = pgTable(
   "scripts",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1284,10 +1284,10 @@ export const scripts = pgTable(
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("scripts_project_key").on(t.projectId),
@@ -1298,7 +1298,7 @@ export const scripts = pgTable(
 export const scriptVersions = pgTable(
   "script_versions",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     scriptId: uuid("script_id")
       .notNull()
       .references(() => scripts.id, { onDelete: "cascade" }),
@@ -1312,7 +1312,7 @@ export const scriptVersions = pgTable(
     titleIdeas: jsonb("title_ideas")
       .notNull()
       .$type<string[]>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     hook: text("hook").notNull(),
     introduction: text("introduction"),
     /** Ordered body sections: {heading, body, talkingPoints[], transition}. */
@@ -1326,7 +1326,7 @@ export const scriptVersions = pgTable(
           transition?: string;
         }>
       >()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     conclusion: text("conclusion"),
     cta: text("cta"),
     storyStructure: text("story_structure"),
@@ -1334,7 +1334,7 @@ export const scriptVersions = pgTable(
     references: jsonb("references")
       .notNull()
       .$type<Array<{ label: string; url?: string }>>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     estimatedDurationSeconds: integer("estimated_duration_seconds"),
     wordCount: integer("word_count"),
     /** `ai` | `user_edit` — an edited version is still a version. */
@@ -1345,7 +1345,7 @@ export const scriptVersions = pgTable(
     outputTokens: integer("output_tokens"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("script_versions_script_version_key").on(t.scriptId, t.version),
@@ -1357,7 +1357,7 @@ export const scriptVersions = pgTable(
 export const scenes = pgTable(
   "scenes",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1379,7 +1379,7 @@ export const scenes = pgTable(
     searchTerms: jsonb("search_terms")
       .notNull()
       .$type<string[]>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     onScreenText: text("on_screen_text"),
     startMs: integer("start_ms"),
     durationMs: integer("duration_ms"),
@@ -1418,10 +1418,10 @@ export const scenes = pgTable(
       .default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("scenes_project_index_key").on(t.projectId, t.index),
@@ -1445,7 +1445,7 @@ export const scenes = pgTable(
 export const storyBibles = pgTable(
   "story_bibles",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1460,10 +1460,10 @@ export const storyBibles = pgTable(
     editedByUser: boolean("edited_by_user").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("story_bibles_project_key").on(t.projectId),
@@ -1478,7 +1478,7 @@ export const storyBibles = pgTable(
 export const assets = pgTable(
   "assets",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -1509,7 +1509,7 @@ export const assets = pgTable(
     meta: jsonb("meta").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("assets_project_kind_idx").on(t.projectId, t.kind),
@@ -1520,7 +1520,7 @@ export const assets = pgTable(
 export const voiceovers = pgTable(
   "voiceovers",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1562,7 +1562,7 @@ export const voiceovers = pgTable(
     charactersBilled: integer("characters_billed"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("voiceovers_project_idx").on(t.projectId),
@@ -1573,7 +1573,7 @@ export const voiceovers = pgTable(
 export const musicTracks = pgTable(
   "music_tracks",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1593,7 +1593,7 @@ export const musicTracks = pgTable(
     durationMs: integer("duration_ms"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("music_tracks_project_idx").on(t.projectId),
@@ -1604,7 +1604,7 @@ export const musicTracks = pgTable(
 export const captions = pgTable(
   "captions",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1617,7 +1617,7 @@ export const captions = pgTable(
     cues: jsonb("cues")
       .notNull()
       .$type<Array<{ startMs: number; endMs: number; text: string }>>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     srtAssetId: uuid("srt_asset_id").references(() => assets.id, {
       onDelete: "set null",
     }),
@@ -1627,7 +1627,7 @@ export const captions = pgTable(
     burnedIn: boolean("burned_in").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("captions_project_idx").on(t.projectId),
@@ -1665,7 +1665,7 @@ export const captions = pgTable(
 export const projectEdits = pgTable(
   "project_edits",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1695,10 +1695,10 @@ export const projectEdits = pgTable(
     lastRenderedAt: timestamp("last_rendered_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     // One cut per project. A second row would be a second answer to "what is this
@@ -1715,7 +1715,7 @@ export const projectEdits = pgTable(
 export const renders = pgTable(
   "renders",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1747,7 +1747,7 @@ export const renders = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("renders_project_idx").on(t.projectId, t.createdAt),
@@ -1759,7 +1759,7 @@ export const renders = pgTable(
 export const thumbnails = pgTable(
   "thumbnails",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1771,10 +1771,10 @@ export const thumbnails = pgTable(
     error: text("error"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("thumbnails_project_idx").on(t.projectId),
@@ -1785,7 +1785,7 @@ export const thumbnails = pgTable(
 export const thumbnailVariants = pgTable(
   "thumbnail_variants",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     thumbnailId: uuid("thumbnail_id")
       .notNull()
       .references(() => thumbnails.id, { onDelete: "cascade" }),
@@ -1813,7 +1813,7 @@ export const thumbnailVariants = pgTable(
     ctr: real("ctr"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("thumbnail_variants_thumb_index_key").on(
@@ -1842,15 +1842,15 @@ export const videoMetadata = pgTable(
     tags: jsonb("tags")
       .notNull()
       .$type<string[]>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     hashtags: jsonb("hashtags")
       .notNull()
       .$type<string[]>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     chapters: jsonb("chapters")
       .notNull()
       .$type<Array<{ startMs: number; label: string }>>()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     /** YouTube category id — 28 = Science & Technology. */
     categoryId: varchar("category_id", { length: 8 }).notNull().default("28"),
     defaultLanguage: varchar("default_language", { length: 16 }),
@@ -1860,7 +1860,7 @@ export const videoMetadata = pgTable(
     generatedBy: varchar("generated_by", { length: 48 }),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [index("video_metadata_user_id_idx").on(t.userId)],
 );
@@ -1869,7 +1869,7 @@ export const videoMetadata = pgTable(
 export const qualityChecks = pgTable(
   "quality_checks",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1888,7 +1888,7 @@ export const qualityChecks = pgTable(
           detail?: string;
         }>
       >()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     /** Licence/attribution roll-up for every asset used in the render. */
     assetLicenses: jsonb("asset_licenses")
       .notNull()
@@ -1900,11 +1900,11 @@ export const qualityChecks = pgTable(
           sourceUrl?: string;
         }>
       >()
-      .default(sql`'[]'`),
+      .default(sql`'[]'::jsonb`),
     acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("quality_checks_project_idx").on(t.projectId, t.createdAt),
@@ -1915,7 +1915,7 @@ export const qualityChecks = pgTable(
 export const publishJobs = pgTable(
   "publish_jobs",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1943,10 +1943,10 @@ export const publishJobs = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("publish_jobs_status_sched_idx").on(t.status, t.scheduledFor),
@@ -1962,7 +1962,7 @@ export const publishJobs = pgTable(
 export const publishedVideos = pgTable(
   "published_videos",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -1991,10 +1991,10 @@ export const publishedVideos = pgTable(
     titleUsed: text("title_used"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("published_videos_youtube_id_key").on(t.youtubeVideoId),
@@ -2007,7 +2007,7 @@ export const publishedVideos = pgTable(
 export const analyticsSnapshots = pgTable(
   "analytics_snapshots",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -2078,10 +2078,10 @@ export const analyticsSnapshots = pgTable(
     raw: jsonb("raw").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     /**
@@ -2124,7 +2124,7 @@ export const analyticsSnapshots = pgTable(
 export const thumbnailExperiments = pgTable(
   "thumbnail_experiments",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -2168,10 +2168,10 @@ export const thumbnailExperiments = pgTable(
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     /**
@@ -2197,7 +2197,7 @@ export const thumbnailExperiments = pgTable(
 export const thumbnailExperimentArms = pgTable(
   "thumbnail_experiment_arms",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     experimentId: uuid("experiment_id")
       .notNull()
       .references(() => thumbnailExperiments.id, { onDelete: "cascade" }),
@@ -2228,10 +2228,10 @@ export const thumbnailExperimentArms = pgTable(
     lastObservedAt: timestamp("last_observed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     uniqueIndex("thumbnail_experiment_arms_position_key").on(
@@ -2260,7 +2260,7 @@ export const thumbnailExperimentArms = pgTable(
 export const thumbnailExperimentObservations = pgTable(
   "thumbnail_experiment_observations",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     experimentId: uuid("experiment_id")
       .notNull()
       .references(() => thumbnailExperiments.id, { onDelete: "cascade" }),
@@ -2278,10 +2278,10 @@ export const thumbnailExperimentObservations = pgTable(
     source: analyticsMetricSourceEnum("source").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     /** One row per arm per day — the upsert target that makes ingest idempotent. */
@@ -2309,7 +2309,7 @@ export const thumbnailExperimentObservations = pgTable(
 export const jobs = pgTable(
   "jobs",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -2346,10 +2346,10 @@ export const jobs = pgTable(
     durationMs: integer("duration_ms"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("jobs_project_stage_idx").on(t.projectId, t.stage),
@@ -2363,7 +2363,7 @@ export const jobs = pgTable(
 export const apiUsage = pgTable(
   "api_usage",
   {
-    id: uuid("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
     projectId: uuid("project_id").references(() => projects.id, {
       onDelete: "set null",
@@ -2383,7 +2383,7 @@ export const apiUsage = pgTable(
     traceId: varchar("trace_id", { length: 64 }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
-      .default(sql`(unixepoch() * 1000)`),
+      .defaultNow(),
   },
   (t) => [
     index("api_usage_provider_created_idx").on(t.provider, t.createdAt),
