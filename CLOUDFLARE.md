@@ -142,6 +142,18 @@ The standalone entry point also pruned an expired session through the private br
 A complete live AI generation/render/YouTube publication run still requires
 operator credentials and explicit choice of real providers.
 
+## Automatic deployments
+
+Connect both Workers to the `feat/cloudflare-native` branch with the repository
+root as the build directory. For `vidxir`, use `npm run cf:build` as the build
+command and `npm run cf:deploy` as the deploy command. For `vidxir-backend`, leave
+the build command empty and use `npm run cf:backend:deploy` as the deploy command;
+this explicitly selects `wrangler.native.jsonc`.
+
+After pushing a commit, check the Builds page for each Worker to confirm that
+both deployments succeeded. Configure runtime secrets on each Worker separately
+from any secrets required by the web build.
+
 ## Deployment status
 
 The native backend Worker, FFmpeg Container, five queue consumers, Durable
