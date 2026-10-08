@@ -91,7 +91,9 @@ export async function createSession(
  *
  * Reads are a single indexed lookup on token_hash joined to the user.
  */
-export async function getSession(): Promise<ActiveSession | null> {
+export async function getSession({
+  refresh = false,
+}: { refresh?: boolean } = {}): Promise<ActiveSession | null> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -126,7 +128,9 @@ export async function getSession(): Promise<ActiveSession | null> {
   // Sliding expiry: only write when meaningfully close to expiring, so a busy
   // dashboard does not issue an UPDATE per request.
   const remaining = row.expiresAt.getTime() - Date.now();
-  if (remaining < SESSION_TTL_MS - SESSION_REFRESH_THRESHOLD_MS) {
+  // Server Components expose a read-only cookie store. Route handlers opt in
+  // to renewal so a valid older session never makes page rendering fail.
+  if (refresh && remaining < SESSION_TTL_MS - SESSION_REFRESH_THRESHOLD_MS) {
     const nextExpiry = new Date(Date.now() + SESSION_TTL_MS);
     await db
       .update(sessions)

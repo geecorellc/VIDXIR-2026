@@ -30,7 +30,8 @@ import {
 } from "../../src/lib/admin/mail";
 import type { MailDraft } from "../../src/lib/admin/types";
 vi.mock("../../src/lib/auth/session", () => ({ revokeAllSessions: vi.fn() }));
-describe("Admin workspace on Cloudflare D1", () => {
+// Real D1 calls plus repeated scrypt confirmations need headroom under CI load.
+describe("Admin workspace on Cloudflare D1", { timeout: 20000 }, () => {
   const runtime = new Miniflare(
     convertV4MiniflareOptions({
       modules: true,

@@ -35,7 +35,7 @@ export interface RequestContext {
 
 /** Require a valid session. Throws UnauthenticatedError otherwise. */
 export async function requireUser(): Promise<RequestContext> {
-  const session = await getSession();
+  const session = await getSession({ refresh: true });
   if (!session) throw new UnauthenticatedError();
   const traceId = newTraceId();
   return {

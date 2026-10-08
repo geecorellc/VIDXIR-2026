@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
   return handle(request, async () => {
     if (request.nextUrl.pathname !== "/api/support")
       throw new NotFoundError("Support endpoint not found.");
-    const session = await getSession();
+    const session = await getSession({ refresh: true });
     await enforce(
       { name: "support-create", limit: 5, windowSeconds: 3600 },
       session?.user.id ?? clientIp(request),
