@@ -10,7 +10,6 @@
  * The final step does not ask for a YouTube password (§6). It hands off to the
  * Channels screen, where connecting a channel goes through Google OAuth.
  */
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   ArrowLeft,
@@ -87,7 +86,6 @@ export function OnboardingWizard({
   initialName,
   initialProfile,
 }: OnboardingWizardProps) {
-  const router = useRouter();
 
   const [step, setStep] = useState(() =>
     Math.min(initialProfile.lastStep, ONBOARDING_STEPS.length - 1),
@@ -211,8 +209,9 @@ export function OnboardingWizard({
       if (isLast) {
         await api.post("/api/onboarding");
         // Straight to Channels: the next real step is connecting YouTube.
-        router.push("/dashboard/channels?connect=1");
-        router.refresh();
+        // Replace the wizard in browser history and fetch a fresh server render
+        // after the persisted completion, including fresh session/layout data.
+        window.location.replace("/dashboard/channels?connect=1");
         return;
       }
       setStep(step + 1);

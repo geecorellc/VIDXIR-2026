@@ -23,7 +23,6 @@ import { useEffect } from "react";
 
 export default function GlobalError({
   error,
-  reset,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
@@ -99,7 +98,7 @@ export default function GlobalError({
 
           <button
             type="button"
-            onClick={reset}
+            onClick={() => window.location.reload()}
             style={{
               padding: "11px 20px",
               background: "hsl(3, 74%, 48%)",

@@ -289,9 +289,9 @@ export async function revenueSummary(
       currency: analyticsSnapshots.revenueCurrency,
       days: sql<string>`count(*)`,
       /** `numeric` addition in Postgres — never float arithmetic (§4). */
-      total: sql<string | null>`sum(${analyticsSnapshots.estimatedRevenue})`,
+      total: sql<string | null>`cast(sum(${analyticsSnapshots.estimatedRevenue}) as text)`,
       /** True only when every day in the group is settled. */
-      allFinal: sql<boolean>`bool_and(coalesce(${analyticsSnapshots.revenueFinal}, false))`,
+      allFinal: sql<number>`min(coalesce(${analyticsSnapshots.revenueFinal}, 0))`.mapWith(Boolean),
     })
     .from(analyticsSnapshots)
     .where(
@@ -485,11 +485,11 @@ export async function videoRevenueAttribution(
         end)
       `,
       ctrSource: sql<MetricSource | null>`max(${analyticsSnapshots.ctrSource})`,
-      revenue: sql<string | null>`sum(${analyticsSnapshots.estimatedRevenue})`,
+      revenue: sql<string | null>`cast(sum(${analyticsSnapshots.estimatedRevenue}) as text)`,
       revenueDays: sql<string>`count(${analyticsSnapshots.estimatedRevenue})`,
       revenueCurrency: sql<string | null>`max(${analyticsSnapshots.revenueCurrency})`,
       revenueState: sql<RevenueState | null>`max(${analyticsSnapshots.revenueState})`,
-      revenueFinal: sql<boolean>`bool_and(coalesce(${analyticsSnapshots.revenueFinal}, false))`,
+      revenueFinal: sql<number>`min(coalesce(${analyticsSnapshots.revenueFinal}, 0))`.mapWith(Boolean),
     })
     .from(publishedVideos)
     /**

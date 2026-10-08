@@ -1,31 +1,11 @@
 "use client";
 
-/**
- * Route error boundary (§3, §30).
- *
- * The App Router needs a client error component to render *any* server-side
- * throw below the root layout. Without one, Next falls back to the framework's
- * internal error page — and in development, when that fallback cannot be
- * resolved either, the browser is handed the bare
- * `missing required error components, refreshing...` document, which reveals
- * nothing about what actually failed and reload-loops.
- *
- * This does not swallow anything. `reset()` re-renders the segment, which is the
- * right affordance for the transient class of failure Vidxir AI actually produces
- * (a provider timing out, Redis briefly unreachable); anything structural throws
- * again immediately and lands back here. The real diagnosis stays on the server:
- * a thrown error is already logged there with its stack and trace id, and §33
- * forbids putting provider detail in front of a browser — so what is shown here
- * is the framework-supplied `digest`, which is the handle an operator uses to
- * find that server log line.
- */
-import Link from "next/link";
+/** Reloading starts a fresh server render and clears a failed cached route. */
 import { useEffect } from "react";
 import { color, font, radius } from "@/lib/design/tokens";
 
 export default function RouteError({
   error,
-  reset,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
@@ -95,15 +75,14 @@ export default function RouteError({
             color: color.textDim,
           }}
         >
-          The error has been logged. Trying again is worth a moment — most
-          failures here are a provider or queue being briefly unavailable rather
-          than anything wrong with your project.
+          Try again to reload this page, or return to your dashboard. If the
+          problem continues, share the reference below with support.
         </p>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             type="button"
-            onClick={reset}
+            onClick={() => window.location.reload()}
             style={{
               padding: "11px 20px",
               background: color.accent,
@@ -117,7 +96,7 @@ export default function RouteError({
           >
             Try again
           </button>
-          <Link
+          <a
             href="/dashboard"
             style={{
               padding: "11px 20px",
@@ -131,7 +110,7 @@ export default function RouteError({
             }}
           >
             Back to dashboard
-          </Link>
+          </a>
         </div>
 
         {error.digest ? (
