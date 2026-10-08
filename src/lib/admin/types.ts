@@ -53,6 +53,18 @@ export interface UserDetail extends AdminUser {
     youtube_channel_id: string;
     disconnected_at: number | null;
   }[];
+  publications: {
+    id: string;
+    project_id: string;
+    title: string;
+    channel_title: string;
+    youtube_video_id: string;
+    upload_status: string | null;
+    privacy_status: string | null;
+    published_at: number | null;
+    scheduled_publish_at: number | null;
+    created_at: number;
+  }[];
   actions: {
     id: string;
     actor_id: string;
@@ -115,4 +127,18 @@ export interface Archive {
   media_purged_at: number | null;
   created_at: number;
   snapshot?: Record<string, unknown>;
+}
+
+export interface DispatchSummary extends Omit<
+  DispatchProgress,
+  "failedEmails"
+> {
+  subject: string;
+  actor_name: string;
+  created_at: number;
+}
+export interface DispatchDetail extends DispatchProgress {
+  draft: MailDraft;
+  actor_name: string;
+  created_at: number;
 }

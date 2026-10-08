@@ -18,7 +18,9 @@ import type {
   DispatchProgress,
 } from "@/lib/admin/types";
 import { Alert, Badge, Button, Dialog, Empty, dateTime } from "./ui";
+import { CampaignHistory } from "./CampaignHistory";
 export function MailPanel() {
+  const [reusedDraft, setReusedDraft] = useState<MailDraft | undefined>();
   const [mode, setMode] = useState("inbound"),
     [search, setSearch] = useState(""),
     [page, setPage] = useState(1),
@@ -49,12 +51,12 @@ export function MailPanel() {
     }
   }, [mode, search, page]);
   useEffect(() => {
-    if (mode === "compose") return;
+    if (mode === "compose" || mode === "campaigns") return;
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
   }, [mode, load]);
   useEffect(() => {
-    if (mode === "compose") return;
+    if (mode === "compose" || mode === "campaigns") return;
     const timer = setInterval(() => void load(), 15000);
     return () => clearInterval(timer);
   }, [mode, load]);
@@ -75,16 +77,19 @@ export function MailPanel() {
             Incoming messages, customer updates, and delivery activity.
           </p>
         </div>
-        <Button onClick={() => void load()}>
-          <RefreshCw size={14} />
-          Refresh
-        </Button>
+        {(mode === "inbound" || mode === "outbound") && (
+          <Button onClick={() => void load()}>
+            <RefreshCw size={14} />
+            Refresh
+          </Button>
+        )}
       </div>
       <div className="vx-admin-toolbar">
         {[
           { key: "inbound", name: "Inbox", icon: Mail },
           { key: "outbound", name: "Sent & queued", icon: Send },
           { key: "compose", name: "Compose", icon: Mail },
+          { key: "campaigns", name: "Campaigns", icon: Send },
         ].map((tab) => (
           <Button
             key={tab.key}
@@ -100,7 +105,14 @@ export function MailPanel() {
         ))}
       </div>
       {mode === "compose" ? (
-        <MailComposer />
+        <MailComposer initialDraft={reusedDraft} />
+      ) : mode === "campaigns" ? (
+        <CampaignHistory
+          onCompose={(draft) => {
+            setReusedDraft(draft);
+            setMode("compose");
+          }}
+        />
       ) : (
         <>
           <div className="vx-admin-toolbar">
@@ -289,16 +301,23 @@ export function MailPanel() {
     </section>
   );
 }
-function MailComposer() {
-  const [subject, setSubject] = useState(""),
-    [heading, setHeading] = useState(""),
-    [message, setMessage] = useState(""),
-    [mode, setMode] = useState("filters"),
-    [emails, setEmails] = useState("");
+function MailComposer({ initialDraft }: { initialDraft?: MailDraft }) {
+  const [subject, setSubject] = useState(initialDraft?.subject ?? ""),
+    [heading, setHeading] = useState(initialDraft?.heading ?? ""),
+    [message, setMessage] = useState(initialDraft?.message ?? ""),
+    [mode, setMode] = useState(
+      initialDraft?.audience.specificEmails ? "emails" : "filters",
+    ),
+    [emails, setEmails] = useState(
+      initialDraft?.audience.specificEmails?.join(", ") ?? "",
+    );
   const [audience, setAudience] = useState<Audience>({
-    tiers: [],
-    verification: "any",
+    ...initialDraft?.audience,
+    specificEmails: undefined,
+    tiers: initialDraft?.audience.tiers ?? [],
+    verification: initialDraft?.audience.verification ?? "any",
   });
+
   const [preview, setPreview] = useState<{
       html: string;
       fingerprint: string;

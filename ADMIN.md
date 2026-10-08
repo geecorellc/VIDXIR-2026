@@ -9,6 +9,7 @@ A password change invalidates all existing sessions.
 ## Support
 
 Customers submit requests from `/dashboard/support`; guests use `/support`.
+Both pages include searchable Vidxir help articles and links to relevant flows.
 Administrators can search tickets, read their conversation, change status and
 send an email reply, optionally resolving the ticket. New requests receive a
 queued acknowledgement. Email replies use a ticket-specific support reply-to
@@ -20,6 +21,8 @@ email remains in the mailbox. Customer endpoints enforce ticket ownership.
 
 The user directory supports search, pagination, verified account creation and
 details for credits, plans, channels, projects and administrator actions.
+YouTube publication records show the actual uploaded title, channel, processing
+status, visibility, and published/scheduled date, with a link to the video.
 Password-confirmed actions include verification, promotion, suspension/restore,
 manual plan access, non-expiring credit grants and deletion. Plan overrides
 preserve paid subscription records; removing an override restores normal billing
@@ -48,7 +51,10 @@ date, or an explicit email list. Administrators and suspended accounts are
 excluded. Sending requires a current preview and explicit confirmation. Recipient
 selection is snapshotted in D1; each message has a durable outbox record and a
 stable Resend idempotency key. Progress and recipient failures are recorded.
-Failed recipient addresses can populate a new draft for a targeted retry.
+The **Campaigns** tab keeps a paginated history and lets administrators reopen
+a campaign after navigation or reload to follow delivery progress. Its original
+content can populate a fresh draft; failed recipient addresses can populate a
+new draft for a targeted retry. Every new draft must be previewed and confirmed.
 Individual emails use the same outbox and preview flow.
 
 The maintenance queue sends email directly from `vidxir-backend`. Cron recovers

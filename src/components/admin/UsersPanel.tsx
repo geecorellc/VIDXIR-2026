@@ -318,6 +318,53 @@ export function UsersPanel() {
             ) : (
               <p className="dim">No projects yet.</p>
             )}
+            <h3 style={{ marginTop: 20 }}>Latest YouTube publications</h3>
+            {selected.publications.length ? (
+              <div className="vx-admin-table-wrap">
+                <table className="vx-admin-table">
+                  <thead>
+                    <tr>
+                      <th>Video</th>
+                      <th>Channel</th>
+                      <th>Status</th>
+                      <th>Published / scheduled</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selected.publications.map((video) => (
+                      <tr key={video.id}>
+                        <td>
+                          <a
+                            href={`https://www.youtube.com/watch?v=${encodeURIComponent(video.youtube_video_id)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {video.title}
+                          </a>
+                        </td>
+                        <td>{video.channel_title}</td>
+                        <td>
+                          <Badge>{video.upload_status ?? "Unknown"}</Badge>
+                          <p className="dim">
+                            {video.privacy_status ?? "Privacy not reported"}
+                          </p>
+                        </td>
+                        <td className="dim">
+                          {dateTime(
+                            video.published_at ?? video.scheduled_publish_at,
+                          )}
+                          {!video.published_at && video.scheduled_publish_at
+                            ? " · Scheduled"
+                            : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="dim">No YouTube publications yet.</p>
+            )}
           </div>
           <div className="vx-admin-section">
             <h3>Action history</h3>

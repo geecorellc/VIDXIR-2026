@@ -12,6 +12,7 @@ import { api, messageOf } from "@/services/api-client";
 import type { Ticket, TicketThread, TicketStatus } from "@/lib/admin/types";
 import { Alert, Badge, Button, Dialog, Empty, dateTime } from "./ui";
 import "./admin.css";
+import { SupportFaq } from "@/components/support/SupportFaq";
 export function SupportInbox({
   admin = false,
   guest = false,
@@ -128,6 +129,7 @@ export function SupportInbox({
   }
   return (
     <section>
+      {!admin && <SupportFaq />}
       <div className="vx-admin-heading" style={{ marginTop: 0 }}>
         <div>
           <h2>{admin ? "Support inbox" : "How can we help?"}</h2>

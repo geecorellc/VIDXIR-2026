@@ -4,7 +4,7 @@ import { handle, parseJson, requireUser, clientIp } from "@/lib/api/guard";
 import { enforce } from "@/lib/api/rate-limit";
 import { getSession } from "@/lib/auth/session";
 import { createTicket, listTickets, ticketThread } from "@/lib/admin/service";
-import { NotFoundError } from "@/lib/errors";
+import { NotFoundError, ValidationError } from "@/lib/errors";
 export async function GET(request: NextRequest) {
   return handle(request, async () => {
     const { user } = await requireUser();
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       }),
     );
     const email = session?.user.email ?? body.email;
-    if (!email) throw new NotFoundError("Enter an email address.");
+    if (!email) throw new ValidationError("Enter an email address.");
     return createTicket({
       userId: session?.user.id,
       email: email.toLowerCase(),

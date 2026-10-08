@@ -203,6 +203,52 @@ describe("Admin workspace on Cloudflare D1", () => {
     expect(restored.suspended_at).toBeNull();
     expect(restored.subscription_status).toBe("active");
   });
+  it("shows only the selected user's real publication records, including private and scheduled videos", async () => {
+    const owner = await account(),
+      other = await account();
+    const now = Date.now();
+    for (const id of [owner, other]) {
+      await db
+        .prepare(
+          "INSERT INTO channels(id,user_id,youtube_channel_id,title,access_token_enc) VALUES (?,?,?,'Publication channel','private-token')",
+        )
+        .bind(`channel-${id}`, id, `yt-${id}`)
+        .run();
+      await db
+        .prepare(
+          "INSERT INTO projects(id,user_id,channel_id,title) VALUES (?,?,?,'Original title')",
+        )
+        .bind(`project-${id}`, id, `channel-${id}`)
+        .run();
+      await db
+        .prepare(
+          "INSERT INTO published_videos(id,project_id,user_id,channel_id,youtube_video_id,url,title_used,upload_status,privacy_status,scheduled_publish_at) VALUES (?,?,?,?,?,'https://youtube.com','Published title','processed','private',?)",
+        )
+        .bind(
+          `publication-${id}`,
+          `project-${id}`,
+          id,
+          `channel-${id}`,
+          `video-${id}`,
+          now + 86400000,
+        )
+        .run();
+    }
+    const detail = await admin.userDetail(owner);
+    expect(detail.publications).toHaveLength(1);
+    expect(detail.publications[0]).toMatchObject({
+      id: `publication-${owner}`,
+      title: "Published title",
+      upload_status: "processed",
+      privacy_status: "private",
+      scheduled_publish_at: now + 86400000,
+      published_at: null,
+    });
+    expect(JSON.stringify(detail)).not.toContain("private-token");
+    expect((await admin.userDetail(other)).publications[0]?.id).toBe(
+      `publication-${other}`,
+    );
+  });
   it("archives and deletes atomically, excludes credentials, and retains media for 60 days", async () => {
     const id = await account(),
       detail = await admin.userDetail(id);
@@ -268,6 +314,18 @@ describe("Admin workspace on Cloudflare D1", () => {
     expect(thread.status).toBe("Resolved");
     expect(thread.messages).toHaveLength(2);
     expect(send).toHaveBeenCalled();
+    await db
+      .prepare(
+        "UPDATE subscriptions SET tier='studio',status='canceled' WHERE user_id=?",
+      )
+      .bind(id)
+      .run();
+    expect((await admin.listTickets(id)).items[0]?.tier).toBe("starter");
+    await db
+      .prepare("UPDATE users SET plan_override='scale' WHERE id=?")
+      .bind(id)
+      .run();
+    expect((await admin.listTickets(id)).items[0]?.tier).toBe("scale");
   });
   it("receives support emails once, reopens valid replies, and keeps spoofed senders out of the thread", async () => {
     const id = await account(),
@@ -283,16 +341,14 @@ describe("Admin workspace on Cloudflare D1", () => {
     await admin.updateTicket(ticket.id, "Resolved");
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockImplementation(async () =>
-          Response.json({
-            from: user.email,
-            to: [`support+ticket-${ticket.id}@vidxir.com`],
-            subject: "Re: Support",
-            text: "More details",
-          }),
-        ),
+      vi.fn().mockImplementation(async () =>
+        Response.json({
+          from: user.email,
+          to: [`support+ticket-${ticket.id}@vidxir.com`],
+          subject: "Re: Support",
+          text: "More details",
+        }),
+      ),
     );
     const emailId = crypto.randomUUID();
     await Promise.all([1, 2].map(() => receiveEmail(mailRuntime, emailId)));
@@ -302,16 +358,14 @@ describe("Admin workspace on Cloudflare D1", () => {
     expect(thread.unread).toBe(1);
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          Response.json({
-            from: "intruder@example.invalid",
-            to: [`support+ticket-${ticket.id}@vidxir.com`],
-            subject: "Reply",
-            text: "Fake",
-          }),
-        ),
+      vi.fn().mockResolvedValue(
+        Response.json({
+          from: "intruder@example.invalid",
+          to: [`support+ticket-${ticket.id}@vidxir.com`],
+          subject: "Reply",
+          text: "Fake",
+        }),
+      ),
     );
     await receiveEmail(mailRuntime, crypto.randomUUID());
     expect((await admin.ticketThread(ticket.id)).messages).toHaveLength(2);
@@ -320,17 +374,15 @@ describe("Admin workspace on Cloudflare D1", () => {
     const emailId = crypto.randomUUID();
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockImplementation(async () =>
-          Response.json({
-            from: "guest@example.invalid",
-            to: ["support@vidxir.com"],
-            subject: "New help",
-            text: "Question",
-            attachments: [{ id: "attachment", filename: "report.pdf" }],
-          }),
-        ),
+      vi.fn().mockImplementation(async () =>
+        Response.json({
+          from: "guest@example.invalid",
+          to: ["support@vidxir.com"],
+          subject: "New help",
+          text: "Question",
+          attachments: [{ id: "attachment", filename: "report.pdf" }],
+        }),
+      ),
     );
     await Promise.all([1, 2].map(() => receiveEmail(mailRuntime, emailId)));
     const row = await db
@@ -394,6 +446,37 @@ describe("Admin workspace on Cloudflare D1", () => {
       ).results,
     ).toHaveLength(1);
     expect(await admin.userDetail(target)).toBeTruthy();
+    const saved = await admin.dispatchDetail(dispatchId);
+    expect(saved.draft).toEqual(draft);
+    expect(saved.actor_name).toBe("Admin");
+    expect(saved.status).toBe("queued");
+    expect(
+      (await admin.listDispatches(1)).items.find(
+        (item) => item.id === dispatchId,
+      ),
+    ).toMatchObject({
+      recipientCount: 1,
+      processedCount: 0,
+      sentCount: 0,
+      failedCount: 0,
+      status: "queued",
+    });
+    await db
+      .prepare(
+        "UPDATE admin_emails SET status='failed',error='Recipient rejected' WHERE dispatch_id=?",
+      )
+      .bind(dispatchId)
+      .run();
+    expect(await admin.dispatchDetail(dispatchId)).toMatchObject({
+      status: "completed",
+      failedCount: 1,
+      failedEmails: ["campaign@example.invalid"],
+    });
+    expect(
+      (await admin.listDispatches(1)).items.find(
+        (item) => item.id === dispatchId,
+      ),
+    ).toMatchObject({ status: "completed", failedCount: 1, processedCount: 1 });
   });
   it("retries provider failures using stable idempotency keys and stores failed delivery progress", async () => {
     const id = await account(),

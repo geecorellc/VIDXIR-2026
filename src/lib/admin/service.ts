@@ -20,6 +20,8 @@ import type {
   AdminUser,
   Archive,
   DispatchProgress,
+  DispatchSummary,
+  DispatchDetail,
   MailDraft,
   MailRow,
   Ticket,
@@ -122,32 +124,43 @@ export async function userDetail(id: string): Promise<UserDetail> {
     .bind(id)
     .first<AdminUser>();
   if (!user) throw new NotFoundError("User not found.");
-  const [credits, projects, channels, actions] = await Promise.all([
-    creditBalanceFor(id),
-    database()
-      .prepare(
-        "SELECT id,title,status,created_at FROM projects WHERE user_id=? ORDER BY created_at DESC LIMIT 100",
-      )
-      .bind(id)
-      .all<UserDetail["projects"][number]>(),
-    database()
-      .prepare(
-        "SELECT id,title,youtube_channel_id,disconnected_at FROM channels WHERE user_id=?",
-      )
-      .bind(id)
-      .all<UserDetail["channels"][number]>(),
-    database()
-      .prepare(
-        "SELECT id,actor_id,action,detail,created_at FROM admin_actions WHERE target_id=? ORDER BY created_at DESC LIMIT 50",
-      )
-      .bind(id)
-      .all<UserDetail["actions"][number]>(),
-  ]);
+  const [credits, projects, channels, publications, actions] =
+    await Promise.all([
+      creditBalanceFor(id),
+      database()
+        .prepare(
+          "SELECT id,title,status,created_at FROM projects WHERE user_id=? ORDER BY created_at DESC LIMIT 100",
+        )
+        .bind(id)
+        .all<UserDetail["projects"][number]>(),
+      database()
+        .prepare(
+          "SELECT id,title,youtube_channel_id,disconnected_at FROM channels WHERE user_id=?",
+        )
+        .bind(id)
+        .all<UserDetail["channels"][number]>(),
+      database()
+        .prepare(
+          `SELECT v.id,v.project_id,COALESCE(v.title_used,p.title) AS title,c.title AS channel_title,
+        v.youtube_video_id,v.upload_status,v.privacy_status,v.published_at,v.scheduled_publish_at,v.created_at
+        FROM published_videos v JOIN projects p ON p.id=v.project_id JOIN channels c ON c.id=v.channel_id
+        WHERE v.user_id=? ORDER BY v.created_at DESC,v.id LIMIT 100`,
+        )
+        .bind(id)
+        .all<UserDetail["publications"][number]>(),
+      database()
+        .prepare(
+          "SELECT id,actor_id,action,detail,created_at FROM admin_actions WHERE target_id=? ORDER BY created_at DESC LIMIT 50",
+        )
+        .bind(id)
+        .all<UserDetail["actions"][number]>(),
+    ]);
   return {
     ...user,
     credits,
     projects: projects.results,
     channels: channels.results,
+    publications: publications.results,
     actions: actions.results,
   };
 }
@@ -433,7 +446,7 @@ export async function archives(
 export async function listTickets(userId?: string, search = "", status = "") {
   const { results } = await database()
     .prepare(
-      `SELECT t.*,COALESCE(u.plan_override,s.tier,'starter') AS tier FROM support_tickets t
+      `SELECT t.*,COALESCE(u.plan_override,CASE WHEN s.status IN ('active','trialing') THEN s.tier END,'starter') AS tier FROM support_tickets t
     LEFT JOIN users u ON u.id=t.user_id LEFT JOIN subscriptions s ON s.user_id=t.user_id
     WHERE (? IS NULL OR t.user_id=?) AND (?='' OR t.status=?) AND (t.subject LIKE ? OR t.requester_email LIKE ?)
     ORDER BY t.updated_at DESC LIMIT 200`,
@@ -882,4 +895,52 @@ export async function mailDetail(id: string) {
     .bind(row.provider_id)
     .all<{ id: string; type: string; occurred_at: number }>();
   return { ...row, events: events.results };
+}
+
+/** Campaign history survives reloads and is shared by authorized administrators. */
+export async function listDispatches(page: number) {
+  const { results } = await database()
+    .prepare(
+      `SELECT d.id,d.subject,d.created_at,COALESCE(u.name,'Former administrator') AS actor_name,
+    COUNT(m.id) AS recipientCount,COALESCE(SUM(m.status IN ('sent','failed','cancelled')),0) AS processedCount,
+    COALESCE(SUM(m.status='sent'),0) AS sentCount,COALESCE(SUM(m.status IN ('failed','cancelled')),0) AS failedCount,
+    CASE WHEN COUNT(m.id)=COALESCE(SUM(m.status IN ('sent','failed','cancelled')),0) THEN 'completed'
+      WHEN COALESCE(SUM(m.status='sending'),0)>0 THEN 'sending' ELSE 'queued' END AS status
+    FROM mail_dispatches d LEFT JOIN users u ON u.id=d.actor_id LEFT JOIN admin_emails m ON m.dispatch_id=d.id
+    GROUP BY d.id ORDER BY d.created_at DESC,d.id LIMIT 20 OFFSET ?`,
+    )
+    .bind((page - 1) * 20)
+    .all<DispatchSummary>();
+  const count = await database()
+    .prepare("SELECT COUNT(*) AS total FROM mail_dispatches")
+    .first<{ total: number }>();
+  return { items: results, total: count?.total ?? 0, page };
+}
+export async function dispatchDetail(id: string): Promise<DispatchDetail> {
+  const row = await database()
+    .prepare(
+      `SELECT d.*,COALESCE(u.name,'Former administrator') AS actor_name FROM mail_dispatches d
+    LEFT JOIN users u ON u.id=d.actor_id WHERE d.id=?`,
+    )
+    .bind(id)
+    .first<{
+      subject: string;
+      heading: string;
+      body: string;
+      audience: string;
+      actor_name: string;
+      created_at: number;
+    }>();
+  if (!row) throw new NotFoundError("Mail dispatch not found.");
+  return {
+    ...(await dispatchProgress(id)),
+    draft: {
+      subject: row.subject,
+      heading: row.heading,
+      message: row.body,
+      audience: JSON.parse(row.audience) as MailDraft["audience"],
+    },
+    actor_name: row.actor_name,
+    created_at: row.created_at,
+  };
 }

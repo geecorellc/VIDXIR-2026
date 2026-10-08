@@ -216,8 +216,12 @@ async function route(request: NextRequest) {
       }
     }
     if (area === "mail") {
-      if (method === "GET" && id === "dispatches" && operation)
-        return admin.dispatchProgress(operation);
+      if (method === "GET" && id === "dispatches")
+        return operation
+          ? admin.dispatchDetail(operation)
+          : admin.listDispatches(
+              positive(request.nextUrl.searchParams.get("page"), 1, 1000000),
+            );
       if (method === "GET" && id && operation === "attachment") {
         const message = await admin.mailDetail(id),
           attachmentId = request.nextUrl.searchParams.get("id") ?? "";
