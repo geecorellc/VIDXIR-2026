@@ -62,6 +62,23 @@ describe("Application services on real Cloudflare D1", () => {
     expect(spends).toHaveLength(1);
   });
 
+  it("only operator-assigned admins have unlimited credits, without charging on retries or minting refunds", async () => {
+    const userId = await account();
+    const [ordinary] = await db.select().from(users).where(eq(users.id, userId));
+    expect(ordinary?.role).toBe("user");
+    expect((await creditBalanceFor(userId)).unlimited).toBeUndefined();
+    await db.update(users).set({ role: "admin" }).where(eq(users.id, userId));
+    const key = `admin:${userId}`;
+    const results = await Promise.all([1, 2, 3].map(() => charge(userId, key, 600000)));
+    expect(results.every((r) => r.charged === 0 && r.cost > 100)).toBe(true);
+    expect(await creditBalanceFor(userId)).toMatchObject({ unlimited: true, spent: 0 });
+    expect(await db.select().from(creditLedger).where(eq(creditLedger.userId, userId))).toHaveLength(0);
+    expect((await refundCredits({ userId, chargeIdempotencyKey: key, reason: "Failed test generation" })).refunded).toBe(0);
+    await db.update(users).set({ role: "user" }).where(eq(users.id, userId));
+    await expect(charge(userId, `revoked:${userId}`, 600000)).rejects.toThrow();
+    expect((await creditBalanceFor(userId)).unlimited).toBeUndefined();
+  });
+
   it("refund and purchased-credit replays are idempotent", async () => {
     const userId = await account();
     const key = `refund-test:${userId}`;

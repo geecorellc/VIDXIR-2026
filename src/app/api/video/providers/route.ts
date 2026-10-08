@@ -96,6 +96,7 @@ export async function GET(request: NextRequest) {
        * worse of the two mistakes.
        */
       credits: {
+        unlimited: balance.unlimited,
         available: balance.available,
         period: balance.period,
         canTopUp: canBuyCredits(),

@@ -52,6 +52,7 @@ import {
   creditBalances,
   creditLedger,
   subscriptions,
+  users,
 } from "@/lib/db/schema";
 import { InsufficientCreditsError, ValidationError } from "@/lib/errors";
 import { planByTier, type PlanTier } from "@/lib/plans";
@@ -68,6 +69,8 @@ type Executor = typeof db;
 // ---------------------------------------------------------------------------
 
 export interface CreditBalance {
+  /** Admin testing accounts are exempt from generation credit charges. */
+  unlimited?: boolean;
   /** Spendable right now: `granted + purchased - spent`, never negative. */
   available: number;
   /** This period's plan allowance, as granted. */
@@ -106,6 +109,11 @@ export async function creditBalanceFor(
   userId: string,
   executor: Executor = db,
 ): Promise<CreditBalance> {
+  if (await hasUnlimitedCredits(userId, executor)) {
+    // Infinity becomes null in JSON. Keep numeric consumers compatible and expose
+    // the explicit flag so the UI can display the actual entitlement.
+    return { ...EMPTY_BALANCE(currentPeriod()), available: Number.MAX_SAFE_INTEGER, unlimited: true };
+  }
   const [row] = await executor
     .select()
     .from(creditBalances)
@@ -122,6 +130,12 @@ export async function creditBalanceFor(
     period: row.period,
     grantedForTier: row.grantedForTier,
   };
+}
+
+async function hasUnlimitedCredits(userId: string, executor: Executor = db): Promise<boolean> {
+  const [user] = await executor.select({ role: users.role }).from(users)
+    .where(eq(users.id, userId)).limit(1);
+  return user?.role === "admin";
 }
 
 function availableOf(row: {
@@ -187,6 +201,9 @@ export async function ensureMonthlyGrant(
   const executor = options.executor ?? db;
   const period = options.period ?? currentPeriod();
   const tier = options.tier ?? (await tierOf(userId, executor));
+  if (await hasUnlimitedCredits(userId, executor)) {
+    return { granted: false, credits: 0, period, tier, balance: await creditBalanceFor(userId, executor) };
+  }
   const credits = planByTier(tier).monthlyCredits;
 
   const ledgerId = crypto.randomUUID();
@@ -300,6 +317,12 @@ export async function chargeCredits(
   });
 
   const period = currentPeriod();
+
+  if (await hasUnlimitedCredits(request.userId)) {
+    // No money moves for an exempt account, so there is no charge to record or
+    // refund. Repeated calls remain free without affecting the paid ledger.
+    return { charged: 0, cost, alreadyCharged: false, ledgerId: "", balanceAfter: Number.MAX_SAFE_INTEGER };
+  }
 
   await ensureMonthlyGrant(request.userId, { period });
   const ledgerId = crypto.randomUUID();

@@ -154,6 +154,13 @@ After pushing a commit, check the Builds page for each Worker to confirm that
 both deployments succeeded. Configure runtime secrets on each Worker separately
 from any secrets required by the web build.
 
+## Admin testing credits
+
+Operator-assigned `users.role = 'admin'` accounts have unlimited generation
+credits. Public signup always creates a normal user. Admin generations bypass
+credit deductions and refunds; the UI displays Unlimited. Subscription feature
+and project quotas still apply. Apply D1 migrations before deploying schema changes.
+
 ## Deployment status
 
 The native backend Worker, FFmpeg Container, five queue consumers, Durable

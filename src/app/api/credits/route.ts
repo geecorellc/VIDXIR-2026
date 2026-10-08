@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
       balance,
       history,
       purchases,
-      topUpsAvailable: canBuyCredits(),
+      topUpsAvailable: !balance.unlimited && canBuyCredits(),
       /**
        * `centsPerCredit` is computed server-side rather than left to the client so the
        * "best value" comparison cannot disagree between the two.

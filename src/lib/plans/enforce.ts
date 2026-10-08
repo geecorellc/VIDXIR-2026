@@ -70,6 +70,7 @@ export interface Entitlements {
    * for display, and is stale the moment it is read.
    */
   credits: {
+    unlimited?: boolean;
     available: number;
     granted: number;
     purchased: number;
@@ -129,6 +130,7 @@ export async function entitlementsFor(
       videosPublishedThisMonth: counter[0]?.videosPublished ?? 0,
     },
     credits: {
+      unlimited: credits.unlimited,
       available: credits.available,
       granted: credits.granted,
       purchased: credits.purchased,

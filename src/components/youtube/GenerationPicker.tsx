@@ -69,6 +69,7 @@ interface ProviderReadiness {
  * charge path will use.
  */
 interface CreditSummary {
+  unlimited?: boolean;
   available: number;
   period: string;
   /** Whether this deployment can actually open a top-up checkout. */
@@ -609,8 +610,10 @@ function CostLine({
         comparison honest: the number below can change between now and then, in
         either direction, and the charge is what settles it.
       */}
-      {creditWord(balance.available)} available. Credits are charged when generation
-      starts, per scene.
+      {balance.unlimited ? "Unlimited credits available for admin testing." : <>
+        {creditWord(balance.available)} available. Credits are charged when generation
+        starts, per scene.
+      </>}
       {short && (
         <>
           {" "}

@@ -34,6 +34,7 @@ import { api, messageOf } from "@/services/api-client";
 
 /** `CreditBalance` from `lib/credits/service`, over the wire. */
 interface Balance {
+  unlimited?: boolean;
   available: number;
   granted: number;
   purchased: number;
@@ -188,7 +189,7 @@ export function CreditPanel() {
                 color={balance.available === 0 ? color.warning : color.accent}
                 aria-hidden="true"
               />
-              {balance.available.toLocaleString()}
+              {balance.unlimited ? "Unlimited" : balance.available.toLocaleString()}
             </div>
             <p
               style={{
@@ -204,9 +205,11 @@ export function CreditPanel() {
                 purchased credits survive the monthly reset is invisible unless the two
                 pools are shown apart.
               */}
-              {balance.granted.toLocaleString()} included with your plan this period,{" "}
-              {balance.purchased.toLocaleString()} purchased,{" "}
-              {balance.spent.toLocaleString()} spent. Purchased credits do not expire at
+              {balance.unlimited ? "Admin testing account — generation credits are not deducted." : <>
+                {balance.granted.toLocaleString()} included with your plan this period,{" "}
+                {balance.purchased.toLocaleString()} purchased,{" "}
+                {balance.spent.toLocaleString()} spent.
+              </>} Purchased credits do not expire at
               the end of the period.
             </p>
           </div>
@@ -230,7 +233,7 @@ export function CreditPanel() {
           <Figure label={`Included · ${balance.period}`} value={balance.granted} />
           <Figure label="Purchased" value={balance.purchased} />
           <Figure label={`Spent · ${balance.period}`} value={balance.spent} />
-          <Figure label="Available" value={balance.available} accent />
+          <Figure label="Available" value={balance.unlimited ? "Unlimited" : balance.available} accent />
         </div>
       </Card>
 
@@ -487,7 +490,7 @@ function Figure({
   accent = false,
 }: {
   label: string;
-  value: number;
+  value: number | string;
   accent?: boolean;
 }) {
   return (
