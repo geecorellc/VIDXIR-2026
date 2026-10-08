@@ -31,9 +31,9 @@ describe("Cloudflare durable queue delivery", () => {
         return Response.json({outcome});
       } };
     `, resolveDir: process.cwd(), loader: "ts" }, bundle: true, write: false,
-      format: "esm", platform: "browser", external: ["cloudflare:workers"] });
+      format: "esm", platform: "browser", external: ["cloudflare:workers", "node:*"] });
     runtime = new Miniflare(convertV4MiniflareOptions({ modules: true, script: output.outputFiles![0]!.text,
-      compatibilityDate: "2026-10-07", d1Databases: { DB: "delivery-test" },
+      compatibilityDate: "2026-10-07", compatibilityFlags: ["nodejs_compat"], d1Databases: { DB: "delivery-test" },
       bindings: { ENCRYPTION_KEY: "0".repeat(64), SESSION_SECRET: "1".repeat(64) },
       durableObjects: { RUNNERS: { className: "TestRunner", useSQLite: true }, COORDINATION: { className: "Coordination", useSQLite: true } },
     }));

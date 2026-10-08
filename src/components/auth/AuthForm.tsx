@@ -25,11 +25,12 @@ export type AuthMode = "login" | "signup";
 interface AuthResponse {
   userId: string;
   /** Where the server says this account should go next. */
-  nextStep: "plan" | "onboarding" | "dashboard";
+  nextStep: "plan" | "onboarding" | "dashboard" | "admin";
 }
 
 /** Server-chosen destinations. The client never picks these itself. */
 const NEXT_STEP_PATHS: Record<AuthResponse["nextStep"], string> = {
+  admin: "/admin",
   plan: "/plan",
   onboarding: "/onboarding",
   dashboard: "/dashboard",

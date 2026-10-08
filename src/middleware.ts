@@ -13,7 +13,7 @@ import { NextResponse, type NextRequest } from "next/server";
 const SESSION_COOKIE = "vidxir_session";
 
 /** Paths that require a session cookie to be present. */
-const PROTECTED_PREFIXES = ["/dashboard", "/onboarding", "/plan"];
+const PROTECTED_PREFIXES = ["/dashboard", "/onboarding", "/plan", "/admin"];
 
 /** Auth pages a signed-in user should not see. */
 const AUTH_PAGES = ["/login", "/signup", "/forgot-password"];

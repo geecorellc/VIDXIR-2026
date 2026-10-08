@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
       emailVerified: result.emailVerified,
       // Login skips plan selection and goes straight to the dashboard, matching
       // the prototype's VidxirApp flow — unless onboarding was never finished.
-      nextStep: result.onboarded ? ("dashboard" as const) : ("onboarding" as const),
+      nextStep: result.role === "admin" ? ("admin" as const) : result.onboarded ? ("dashboard" as const) : ("onboarding" as const),
     };
   });
 }

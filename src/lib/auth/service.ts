@@ -128,6 +128,7 @@ export async function signup(input: SignupInput): Promise<{ userId: string }> {
 
 export interface LoginResult {
   userId: string;
+  role?: "user" | "admin";
   emailVerified: boolean;
   onboarded: boolean;
 }
@@ -147,6 +148,8 @@ export async function login(
       lockedUntil: users.lockedUntil,
       emailVerifiedAt: users.emailVerifiedAt,
       onboardedAt: users.onboardedAt,
+      role: users.role,
+      suspendedAt: users.suspendedAt,
     })
     .from(users)
     .where(eq(users.emailNormalized, email))
@@ -188,6 +191,8 @@ export async function login(
     throw new UnauthenticatedError("Incorrect email or password.");
   }
 
+  if (user.suspendedAt) throw new UnauthenticatedError("Your account is suspended. Contact support.");
+
   await db
     .update(users)
     .set({
@@ -202,6 +207,7 @@ export async function login(
 
   return {
     userId: user.id,
+    role: user.role,
     emailVerified: user.emailVerifiedAt !== null,
     onboarded: user.onboardedAt !== null,
   };

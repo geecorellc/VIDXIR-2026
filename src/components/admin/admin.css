@@ -1,0 +1,399 @@
+.vx-admin {
+  color: var(--vx-text);
+  max-width: 1480px;
+  margin: auto;
+  padding: 28px clamp(18px, 4vw, 56px) 64px;
+}
+.vx-admin * {
+  box-sizing: border-box;
+}
+.vx-admin-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--vx-border);
+}
+.vx-admin-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin: 30px 0 22px;
+}
+.vx-admin h1 {
+  margin: 8px 0;
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.8px;
+}
+.vx-admin h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.vx-admin h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.vx-admin p {
+  line-height: 1.7;
+}
+.vx-admin .dim {
+  color: var(--vx-text-dim);
+  font-size: 13px;
+}
+.vx-admin .eyebrow {
+  font-size: 10px;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--vx-accent);
+  font-weight: 650;
+}
+.vx-admin-nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--vx-border);
+  padding-bottom: 16px;
+  margin-bottom: 28px;
+}
+.vx-admin-nav a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--vx-text-dim);
+  text-decoration: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+.vx-admin-nav a[aria-current="page"] {
+  background: var(--vx-accent-bg-soft);
+  border-color: var(--vx-border);
+  color: var(--vx-accent);
+}
+.vx-admin a {
+  color: var(--vx-accent);
+}
+.vx-admin-panel {
+  border: 1px solid var(--vx-border);
+  background: var(--vx-card);
+  border-radius: 12px;
+  padding: 22px;
+}
+.vx-admin-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.vx-admin-toolbar > input {
+  flex: 1;
+  min-width: 180px;
+}
+.vx-admin input,
+.vx-admin select,
+.vx-admin textarea {
+  width: 100%;
+  background: var(--vx-input-bg);
+  border: 1px solid var(--vx-border);
+  color: var(--vx-text);
+  border-radius: 7px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+}
+.vx-admin select {
+  width: auto;
+}
+.vx-admin textarea {
+  resize: vertical;
+  min-height: 125px;
+  line-height: 1.7;
+}
+.vx-admin input:focus-visible,
+.vx-admin select:focus-visible,
+.vx-admin textarea:focus-visible,
+.vx-admin button:focus-visible,
+.vx-admin a:focus-visible {
+  outline: 2px solid var(--vx-accent);
+  outline-offset: 3px;
+}
+.vx-admin label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--vx-text-dim);
+}
+.vx-admin button {
+  cursor: pointer;
+  font: inherit;
+}
+.vx-admin button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+.vx-admin-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--vx-border);
+  border-radius: 7px;
+  padding: 9px 13px;
+  color: var(--vx-text);
+  background: var(--vx-subtle);
+  font-size: 12px;
+  text-decoration: none;
+}
+.vx-admin-button.primary {
+  color: var(--vx-on-accent);
+  background: var(--vx-accent);
+  border-color: var(--vx-accent);
+}
+.vx-admin-button.danger {
+  color: var(--vx-danger);
+  background: var(--vx-danger-bg);
+  border-color: var(--vx-danger-border);
+}
+.vx-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr));
+  gap: 14px;
+}
+.vx-admin-person {
+  text-align: left;
+  color: var(--vx-text);
+  border: 1px solid var(--vx-border);
+  border-radius: 10px;
+  background: var(--vx-card);
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+  width: 100%;
+}
+.vx-admin-person:hover {
+  border-color: var(--vx-accent);
+}
+.vx-admin-initial {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--vx-accent-bg-soft);
+  color: var(--vx-accent);
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  font-weight: 650;
+}
+.vx-admin-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.vx-admin-row.between {
+  justify-content: space-between;
+}
+.vx-admin-badge {
+  border: 1px solid var(--vx-border);
+  border-radius: 99px;
+  padding: 4px 9px;
+  font-size: 10px;
+  color: var(--vx-text-dim);
+  white-space: nowrap;
+}
+.vx-admin-badge.accent {
+  color: var(--vx-accent);
+  background: var(--vx-accent-bg-soft);
+}
+.vx-admin-badge.positive {
+  color: var(--vx-positive);
+  background: var(--vx-positive-bg);
+  border-color: var(--vx-positive-border);
+}
+.vx-admin-badge.warning {
+  color: var(--vx-warning);
+  background: var(--vx-warning-bg);
+  border-color: var(--vx-warning-border);
+}
+.vx-admin-empty {
+  text-align: center;
+  padding: 60px 24px;
+  color: var(--vx-text-dim);
+}
+.vx-admin-error {
+  background: var(--vx-danger-bg);
+  border: 1px solid var(--vx-danger-border);
+  color: var(--vx-danger);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 13px;
+}
+.vx-admin-success {
+  background: var(--vx-positive-bg);
+  border: 1px solid var(--vx-positive-border);
+  color: var(--vx-positive);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 13px;
+}
+.vx-admin-split {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.5fr);
+  gap: 20px;
+}
+.vx-admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 640px;
+  overflow: auto;
+}
+.vx-admin-ticket {
+  text-align: left;
+  width: 100%;
+  background: var(--vx-card);
+  border: 1px solid var(--vx-border);
+  border-radius: 8px;
+  padding: 16px;
+  color: var(--vx-text);
+}
+.vx-admin-ticket.selected {
+  background: var(--vx-accent-bg-soft);
+  border-color: var(--vx-accent);
+}
+.vx-admin-ticket .subject {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 7px;
+}
+.vx-admin-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 0;
+  max-height: 450px;
+  overflow: auto;
+}
+.vx-admin-message {
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--vx-input-bg);
+  border: 1px solid var(--vx-border);
+}
+.vx-admin-message.admin {
+  background: var(--vx-accent-bg-soft);
+  margin-left: 24px;
+}
+.vx-admin-message p {
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 10px 0 0;
+}
+.vx-admin dialog {
+  max-width: 800px;
+  width: calc(100vw - 36px);
+  max-height: 88vh;
+  overflow: auto;
+  background: var(--vx-card);
+  color: var(--vx-text);
+  border: 1px solid var(--vx-border);
+  border-radius: 14px;
+  padding: 26px;
+  box-shadow: 0 24px 70px var(--vx-scrim);
+}
+.vx-admin dialog::backdrop {
+  background: var(--vx-scrim);
+}
+.vx-admin-section {
+  border-top: 1px solid var(--vx-border);
+  margin-top: 22px;
+  padding-top: 20px;
+}
+.vx-admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.vx-admin-table th {
+  color: var(--vx-text-faint);
+  font-weight: 500;
+  text-align: left;
+  padding: 12px 10px;
+}
+.vx-admin-table td {
+  border-top: 1px solid var(--vx-border);
+  padding: 14px 10px;
+  vertical-align: top;
+}
+.vx-admin-table-wrap {
+  overflow: auto;
+}
+.vx-admin-table td p {
+  margin: 3px 0;
+}
+.vx-admin-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.vx-admin-stat strong {
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.7px;
+}
+.vx-admin-preview {
+  width: 100%;
+  border: 1px solid var(--vx-border);
+  border-radius: 8px;
+  min-height: 320px;
+  background: var(--vx-input-bg);
+}
+.vx-admin-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 20px;
+}
+.vx-admin pre {
+  font-size: 11px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 45vh;
+  overflow: auto;
+  padding: 16px;
+  background: var(--vx-input-bg);
+  border-radius: 8px;
+}
+@media (max-width: 800px) {
+  .vx-admin-split {
+    grid-template-columns: 1fr;
+  }
+  .vx-admin h1 {
+    font-size: 26px;
+  }
+  .vx-admin-panel {
+    padding: 16px;
+  }
+  .vx-admin-list {
+    max-height: 320px;
+  }
+  .vx-admin-nav a {
+    padding: 9px 12px;
+  }
+}

@@ -20,6 +20,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   BarChart3,
+  LifeBuoy,
+  ShieldCheck,
   Clapperboard,
   CreditCard,
   FileText,
@@ -42,6 +44,8 @@ import { api } from "@/services/api-client";
 
 const ICONS: Record<string, LucideIcon> = {
   BarChart3,
+  LifeBuoy,
+  ShieldCheck,
   LayoutDashboard,
   Search,
   FileText,
@@ -56,6 +60,7 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 export interface SidebarProps {
+  isAdmin?: boolean;
   planName: string;
   /** Whether the user has any channel connected — gates every content stage. */
   hasChannel: boolean;
@@ -69,6 +74,7 @@ const REACH_ORDER = { none: 0, idea: 1, script: 2, video: 3 } as const;
 
 export function Sidebar({
   planName,
+  isAdmin,
   hasChannel,
   projectReach,
   onNavigate,
@@ -150,6 +156,7 @@ export function Sidebar({
           }}
         />
 
+        {isAdmin && <NavLink item={{segment:"admin",href:"/admin",label:"Administration",icon:"ShieldCheck"}} active={false} pending={false} onNavigate={onNavigate}/>}
         {SECONDARY_NAV.map((item) => (
           <NavLink
             key={item.href}

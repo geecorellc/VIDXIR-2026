@@ -39,6 +39,7 @@ import {
   channels,
   ideas,
   projects,
+  users,
 } from "@/lib/db/schema";
 import { isAppError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
@@ -126,9 +127,11 @@ export async function dueChannels(
     })
     .from(automationSettings)
     .innerJoin(channels, eq(channels.id, automationSettings.channelId))
+    .innerJoin(users, eq(users.id, automationSettings.userId))
     .where(
       and(
         eq(automationSettings.enabled, true),
+        isNull(users.suspendedAt),
         // Both predicates on the join: the settings row's own tenant column and
         // the channel's. They cannot disagree, and requiring both means a future
         // bug that made them disagree fails closed.

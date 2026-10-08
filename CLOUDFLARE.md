@@ -43,7 +43,8 @@ Dashboard → Workers & Pages → each Worker → Settings → Variables and Sec
 | --- | --- | --- |
 | `ENCRYPTION_KEY` | Required | Required; use the identical value |
 | `SESSION_SECRET` | Required | Required; use the identical value |
-| `RESEND_API_KEY` | Required for signup/verification/reset emails | Set when email is needed by background work |
+| `RESEND_API_KEY` | Required for auth email and reading received email | Required for queued support replies and admin campaigns |
+| `RESEND_WEBHOOK_SECRET` | Required for signed incoming/delivery webhooks | Not needed |
 | AI/provider credentials | Required for enabled features | Same credentials for background generation |
 | Google OAuth credentials | Required for channel linking | Same credentials for channel jobs |
 | Stripe credentials | Required only when billing is enabled | Set for any background billing use |
@@ -181,3 +182,14 @@ Released versions on 2026-10-07:
 
 - Web: `4e720240-5f13-428f-990d-7c94e2fc08d9`.
 - Backend: `eaf0578c-6a2b-4f7d-a0aa-9f5fffcdeee4`.
+
+## Administration and incoming email
+
+See [ADMIN.md](ADMIN.md) for admin permissions, support, account archives and mail.
+Support replies and campaigns use a durable D1 outbox and the maintenance queue;
+the backend sends them directly without starting a paid video Container. The
+five-minute cron recovers pending messages and purges expired archived media.
+Apply migration `0002_first_living_mummy.sql` before deploying these features.
+
+Configure the Resend webhook and signing secret as described in ADMIN.md.
+Receiving DNS alone does not populate the application inbox.

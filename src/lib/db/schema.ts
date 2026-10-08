@@ -243,6 +243,8 @@ export const users = pgTable(
     name: varchar("name", { length: 120 }).notNull(),
     /** Operator-assigned only; public signup cannot set this role. */
     role: text("role", { enum: ["user", "admin"] }).notNull().default("user"),
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    planOverride: text("plan_override", { enum: ["starter", "studio", "scale"] }),
     emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
     /** Set once §5 onboarding is finished; gates the dashboard. */
     onboardedAt: timestamp("onboarded_at", { withTimezone: true }),
@@ -2555,3 +2557,5 @@ export const thumbnailExperimentObservationsRelations = relations(
     }),
   }),
 );
+
+export * from "./schema.admin";

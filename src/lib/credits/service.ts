@@ -233,6 +233,8 @@ export async function ensureMonthlyGrant(
  * written twice.
  */
 async function tierOf(userId: string, executor: Executor): Promise<PlanTier> {
+  const [account] = await executor.select({ planOverride: users.planOverride }).from(users).where(eq(users.id, userId)).limit(1);
+  if (account?.planOverride) return account.planOverride;
   const [row] = await executor
     .select({ tier: subscriptions.tier, status: subscriptions.status })
     .from(subscriptions)

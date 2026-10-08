@@ -24,7 +24,7 @@ export default async function DashboardLayout({
 }) {
   const session = await getSession();
   if (!session) redirect("/login?next=%2Fdashboard");
-  if (!session.user.onboardedAt) redirect("/onboarding");
+  if (!session.user.onboardedAt) redirect(session.user.role === "admin" ? "/admin" : "/onboarding");
 
   const [tier, connected, reach] = await Promise.all([
     currentTier(session.user.id),
@@ -42,6 +42,7 @@ export default async function DashboardLayout({
 
   return (
     <DashboardShell
+      isAdmin={session.user.role === "admin"}
       planName={planByTier(tier).name}
       hasChannel={connected.length > 0}
       projectReach={reach}

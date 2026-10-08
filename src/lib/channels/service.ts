@@ -22,7 +22,7 @@
  */
 import { and, eq, isNull, lt, or } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { channels } from "@/lib/db/schema";
+import { channels, users } from "@/lib/db/schema";
 import {
   decryptNullable,
   encryptNullable,
@@ -659,8 +659,10 @@ export async function channelsNeedingStatsRefresh(
   return db
     .select({ id: channels.id, userId: channels.userId })
     .from(channels)
+    .innerJoin(users, eq(users.id, channels.userId))
     .where(
       and(
+        isNull(users.suspendedAt),
         isNull(channels.disconnectedAt),
         isNull(channels.reauthRequiredAt),
         or(

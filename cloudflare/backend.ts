@@ -1,4 +1,5 @@
 import { bridge, type BackendEnv } from "./bridge";
+import { processMail, recoverMail, purgeArchivedMedia, type MailRuntime } from "../src/lib/admin/mail";
 import type { JobMessage } from "./job-runner";
 export { JobRunner } from "./job-runner";
 export { Coordination } from "./coordination";
@@ -27,6 +28,12 @@ export default {
       if (!configured(env)) { message.retry({ delaySeconds: 300 }); continue; }
       try {
         const body = message.body;
+        const mail = body as unknown as {kind?:string;id?:string};
+        if (mail.kind === "admin-mail" && mail.id) {
+          await processMail(env as unknown as MailRuntime,mail.id);
+          message.ack();
+          continue;
+        }
         if (!body.jobId || !body.name || !body.queue) { message.ack(); continue; }
         const runner = env.RUNNERS.get(env.RUNNERS.idFromName(body.jobId));
         const response = await runner.fetch("https://runner/run", { method: "POST", body: JSON.stringify(body) });
@@ -38,6 +45,8 @@ export default {
   async scheduled(event: ScheduledController, env: BackendEnv) {
     // Do not start paid Containers until the operator supplies runtime secrets.
     if (!configured(env)) { console.warn("Scheduled work paused: runtime secrets are missing."); return; }
+    await recoverMail(env as unknown as MailRuntime);
+    await purgeArchivedMedia(env as unknown as MailRuntime);
     const tick = Math.floor(event.scheduledTime / 300_000);
     const tasks = ["automation", ...(tick % 6 === 0 ? ["refresh-channel-stats"] : []),
       ...(tick % 12 === 0 ? ["prune-sessions"] : []), ...(tick % 72 === 0 ? ["ingest-analytics"] : [])];

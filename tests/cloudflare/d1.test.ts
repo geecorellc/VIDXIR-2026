@@ -43,7 +43,7 @@ describe("Cloudflare D1 migration", () => {
 
   it("creates all application tables and the authoritative plan catalogue", async () => {
     const tables = await binding.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_cf_%'").all();
-    expect(tables.results).toHaveLength(43); // 42 application tables plus the batch guard.
+    expect(tables.results).toHaveLength(50); // 49 application tables plus the batch guard.
     const plans = await db.select().from(schema.plans);
     expect(plans.map((p) => p.tier).sort()).toEqual(["scale", "starter", "studio"]);
     for (const expected of PLAN_CATALOG) {

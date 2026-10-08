@@ -15,6 +15,13 @@
       "when": 1791469741664,
       "tag": "0001_known_ares",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791471017804,
+      "tag": "0002_first_living_mummy",
+      "breakpoints": true
     }
   ]
 }

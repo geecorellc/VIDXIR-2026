@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { installContainerBindings } from "@/lib/cloudflare/container-bindings";
 import { db } from "@/lib/db";
-import { jobs } from "@/lib/db/schema";
+import { jobs, users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { HANDLERS } from "./registry";
 import { runJob, shouldRetry } from "./runner";
@@ -24,7 +24,12 @@ async function execute(message: RunMessage) {
       await withLock(`scheduler:${task.name}`, task.run, { ttlMs: task.lockTtlMs });
     } else {
       const [row] = await db.select().from(jobs).where(eq(jobs.id, message.jobId)).limit(1);
-      if (!row) throw new Error("Durable job not found.");
+      if (!row) { outcomes.set(message.jobId, { status: "succeeded" }); return; }
+      const [owner] = await db.select({ suspendedAt: users.suspendedAt }).from(users).where(eq(users.id, row.userId)).limit(1);
+      if (!owner || owner.suspendedAt) {
+        await db.update(jobs).set({ status: "cancelled", statusMessage: "Account access suspended", updatedAt: new Date() }).where(eq(jobs.id, row.id));
+        outcomes.set(message.jobId, { status: "succeeded" }); return;
+      }
       if (!["succeeded", "failed", "blocked_not_configured", "cancelled"].includes(row.status)) {
         let discarded = false;
         try {

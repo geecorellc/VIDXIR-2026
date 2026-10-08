@@ -30,6 +30,7 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
+  role?: "user" | "admin";
   emailVerifiedAt: Date | null;
   onboardedAt: Date | null;
 }
@@ -104,6 +105,8 @@ export async function getSession(): Promise<ActiveSession | null> {
       userId: users.id,
       email: users.email,
       name: users.name,
+      role: users.role,
+      suspendedAt: users.suspendedAt,
       emailVerifiedAt: users.emailVerifiedAt,
       onboardedAt: users.onboardedAt,
       userEpoch: users.sessionEpoch,
@@ -115,7 +118,7 @@ export async function getSession(): Promise<ActiveSession | null> {
 
   const row = rows[0];
   if (!row) return null;
-  if (row.revokedAt) return null;
+  if (row.revokedAt || row.suspendedAt) return null;
   if (row.expiresAt.getTime() <= Date.now()) return null;
   // Password changed since this session was issued.
   if (row.sessionEpoch !== row.userEpoch) return null;
@@ -138,6 +141,7 @@ export async function getSession(): Promise<ActiveSession | null> {
       id: row.userId,
       email: row.email,
       name: row.name,
+      role: row.role,
       emailVerifiedAt: row.emailVerifiedAt,
       onboardedAt: row.onboardedAt,
     },

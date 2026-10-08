@@ -81,6 +81,8 @@ const schema = z.object({
   EMAIL_PROVIDER: z.enum(["console", "resend"]).default("console"),
   EMAIL_FROM: z.string().default("Vidxir AI <no-reply@vidxir.com>"),
   RESEND_API_KEY: z.string().optional(),
+  RESEND_WEBHOOK_SECRET: z.string().optional(),
+  SUPPORT_EMAIL: z.string().email().default("support@vidxir.com"),
 
   /**
    * Which surface Claude is reached through (§32).

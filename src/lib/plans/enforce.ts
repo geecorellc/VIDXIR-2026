@@ -11,7 +11,7 @@
  */
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { channels, subscriptions, usageCounters } from "@/lib/db/schema";
+import { channels, subscriptions, usageCounters, users } from "@/lib/db/schema";
 import { FeatureNotInPlanError, PlanLimitError } from "@/lib/errors";
 import { isPlanTier, planByTier, type FeatureKey, type PlanTier } from "@/lib/plans";
 import { currentPeriod } from "@/lib/projects/service";
@@ -30,6 +30,9 @@ import { creditBalanceFor } from "@/lib/credits/service";
  * re-exports this so route code keeps its single import.
  */
 export async function currentTier(userId: string): Promise<PlanTier> {
+  const [account] = await db.select({ planOverride: users.planOverride, suspendedAt: users.suspendedAt }).from(users).where(eq(users.id, userId)).limit(1);
+  if (account?.suspendedAt) return "starter";
+  if (account?.planOverride) return account.planOverride;
   const rows = await db
     .select({ tier: subscriptions.tier, status: subscriptions.status })
     .from(subscriptions)

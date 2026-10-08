@@ -105,5 +105,6 @@ export const SECONDARY_NAV: readonly NavItem[] = [
     icon: "BarChart3",
   },
   { segment: "settings", href: "/dashboard/settings", label: "Settings", icon: "Settings" },
+  { segment: "support", href: "/dashboard/support", label: "Support", icon: "LifeBuoy" },
   { segment: "billing", href: "/dashboard/billing", label: "Plan & billing", icon: "CreditCard" },
 ] as const;

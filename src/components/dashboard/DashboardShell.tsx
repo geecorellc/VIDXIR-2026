@@ -16,6 +16,7 @@ import { VidxirLogo } from "@/components/ui/VidxirLogo";
 import { color, font, shadow } from "@/lib/design/tokens";
 
 export interface DashboardShellProps {
+  isAdmin?: boolean;
   planName: string;
   hasChannel: boolean;
   projectReach: "none" | "idea" | "script" | "video";
@@ -26,6 +27,7 @@ export interface DashboardShellProps {
 
 export function DashboardShell({
   planName,
+  isAdmin,
   hasChannel,
   projectReach,
   userName,
@@ -58,6 +60,7 @@ export function DashboardShell({
 
   const sidebar = (
     <Sidebar
+      isAdmin={isAdmin}
       planName={planName}
       hasChannel={hasChannel}
       projectReach={projectReach}

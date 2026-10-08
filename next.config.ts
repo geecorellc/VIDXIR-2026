@@ -116,7 +116,8 @@ function contentSecurityPolicy(): string {
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    "frame-src 'none'",
+    // Sandboxed srcDoc mail previews use about: documents; external frames stay blocked.
+    "frame-src 'self' about:",
   ];
 
   if (isProduction) directives.push("upgrade-insecure-requests");
