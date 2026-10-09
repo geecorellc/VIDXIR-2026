@@ -29,6 +29,7 @@ import {
   type MailRuntime,
 } from "../../src/lib/admin/mail";
 import type { MailDraft } from "../../src/lib/admin/types";
+import { queueJvConfirmation } from "../../src/lib/marketing/jv-confirmation";
 vi.mock("../../src/lib/auth/session", () => ({ revokeAllSessions: vi.fn() }));
 // Real D1 calls plus repeated scrypt confirmations need headroom under CI load.
 describe("Admin workspace on Cloudflare D1", { timeout: 20000 }, () => {
@@ -95,6 +96,62 @@ describe("Admin workspace on Cloudflare D1", { timeout: 20000 }, () => {
   });
   afterAll(async () => {
     await runtime.dispose();
+  });
+  it("sends one JV confirmation per address with the shared template and team signoff", async () => {
+    await queueJvConfirmation(mailRuntime, {
+      name: "Alex <Partner>",
+      email: "JV-Partner@example.invalid",
+    });
+    await queueJvConfirmation(mailRuntime, {
+      name: "Alex",
+      email: "jv-partner@example.invalid",
+    });
+    const rows = await db
+      .prepare(
+        "SELECT * FROM admin_emails WHERE to_address='jv-partner@example.invalid'",
+      )
+      .all();
+    expect(rows.results).toHaveLength(1);
+    const row = rows.results[0]!;
+    expect(row).toMatchObject({
+      status: "queued",
+      subject: "You’re on the Vidxir AI JV list",
+      reply_to: "support@vidxir.com",
+    });
+    expect(row.html).toContain("max-width:520px");
+    expect(row.html).toContain('<meta charset="utf-8">');
+    expect(row.html).toContain("Alex &lt;Partner&gt;");
+    expect(row.html).toContain("The Vidxir AI team");
+    expect(row.html).toContain("https://vidxir.com/partners/");
+    const request = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: "jv-confirmation-provider-id" }), {
+          status: 200,
+        }),
+      );
+    vi.stubGlobal("fetch", request);
+    await processMail(mailRuntime, row.id as string);
+    await processMail(mailRuntime, row.id as string);
+    expect(request).toHaveBeenCalledTimes(1);
+    const message = JSON.parse(request.mock.calls[0]![1].body);
+    expect(message.to).toEqual(["jv-partner@example.invalid"]);
+    expect(message.text).toMatch(/The Vidxir AI team$/);
+    expect(message.html).toBe(row.html);
+  });
+  it("keeps a JV confirmation in the outbox when queue scheduling fails", async () => {
+    send.mockRejectedValueOnce(new Error("Queue unavailable"));
+    await queueJvConfirmation(mailRuntime, {
+      name: "Jordan",
+      email: "jv-recovery@example.invalid",
+    });
+    expect(
+      await db
+        .prepare(
+          "SELECT status FROM admin_emails WHERE to_address='jv-recovery@example.invalid'",
+        )
+        .first(),
+    ).toMatchObject({ status: "queued" });
   });
   async function account(
     email = `${crypto.randomUUID()}@example.invalid`,

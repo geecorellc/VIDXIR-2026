@@ -5,6 +5,8 @@ import { clientIp } from "@/lib/api/guard";
 import { enforce } from "@/lib/api/rate-limit";
 import { isAppError } from "@/lib/errors";
 import { allowedJvOrigin, subscribeJv } from "@/lib/marketing/jv-list";
+import { queueJvConfirmation } from "@/lib/marketing/jv-confirmation";
+import { mailRuntime } from "@/lib/admin/service";
 
 const schema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -66,6 +68,7 @@ export async function POST(request: NextRequest) {
     if (!key)
       return reply({ error: "Signup is temporarily unavailable." }, 503);
     await subscribeJv(key, parsed.data);
+    await queueJvConfirmation(mailRuntime(), parsed.data);
     return reply({ ok: true });
   } catch (error) {
     if (isAppError(error)) return reply({ error: error.message }, error.status);

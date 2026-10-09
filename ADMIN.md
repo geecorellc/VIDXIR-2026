@@ -99,8 +99,12 @@ Worker's existing full-access `RESEND_API_KEY` to look up and reuse the exact
 segment **Lyrixsa – JV Launch Updates**. It never creates a segment. Both
 products' JV contacts therefore share that mailing list; take care when
 selecting recipients for broadcasts. Existing contacts keep their other
-memberships and unsubscribe preferences. No confirmation email is sent by
-this endpoint.
+memberships and unsubscribe preferences. After Resend saves the contact, the
+endpoint persists a confirmation email in the existing durable outbox. It uses
+the shared account email template, links to the JV page, and signs off with
+"The Vidxir AI team". Duplicate submissions get one confirmation per address;
+queue failures are recovered by the existing mail scheduler. Confirmation
+delivery is visible in **Admin → Mail → Outgoing**.
 
 Allowed form origins include `https://vidxir.com`, `https://www.vidxir.com`,
 `https://jv.vidxir.com`, `https://vidxir-jv.pages.dev`,
