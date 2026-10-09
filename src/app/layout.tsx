@@ -7,6 +7,13 @@ export const metadata: Metadata = {
   description:
     "Vidxir AI researches trends, writes original scripts, produces the video and publishes to YouTube on your schedule.",
   applicationName: "Vidxir AI",
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon.ico", sizes: "32x32", type: "image/x-icon" },
+    ],
+    apple: { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+  },
   robots: { index: true, follow: true },
 };
 
