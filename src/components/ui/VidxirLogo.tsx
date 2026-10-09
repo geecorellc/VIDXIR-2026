@@ -1,5 +1,5 @@
 /**
- * Vidxir wordmark — the pulsing radial-gradient dot plus "Vidxir".
+ * Vidxir wordmark — the pulsing gradient circle with a white center plus "Vidxir".
  * Ported from the prototype's VidxirLogo (props: size, label).
  */
 import { accentGradient, color, font } from "@/lib/design/tokens";
@@ -23,6 +23,9 @@ export function VidxirLogo({ size = 14, label = true, still = false }: VidxirLog
         style={{
           width: size,
           height: size,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
           borderRadius: "50%",
           background: accentGradient,
           // `accentGlow` rather than `${accent}66`: the token is a var(), so
@@ -31,7 +34,18 @@ export function VidxirLogo({ size = 14, label = true, still = false }: VidxirLog
           animation: still ? undefined : "vidxir-pulse 2.4s ease-in-out infinite",
           flexShrink: 0,
         }}
-      />
+      >
+        <span
+          style={{
+            // Match the favicon's center: 10px inside a 48px brand circle.
+            width: size * (5 / 24),
+            height: size * (5 / 24),
+            borderRadius: "50%",
+            background: color.onAccent,
+            flexShrink: 0,
+          }}
+        />
+      </span>
       {label && (
         <span
           style={{
