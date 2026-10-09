@@ -66,11 +66,7 @@
   }
   nav{display:flex;align-items:center;justify-content:space-between;height:70px}
   .logo{display:flex;align-items:center;gap:10px;font-weight:900;font-size:21px;letter-spacing:-.03em}
-  .play{
-    width:34px;height:24px;background:var(--red);border-radius:7px;
-    display:grid;place-items:center;flex:none
-  }
-  .play::after{content:"";width:0;height:0;border-left:9px solid #fff;border-top:5.5px solid transparent;border-bottom:5.5px solid transparent;margin-left:2px}
+  .logo-mark{width:40px;height:40px;display:block;flex:none}
   .nav-links{display:flex;gap:30px;align-items:center}
   .nav-links a{color:var(--gray);text-decoration:none;font-size:14px;font-weight:500}
   .nav-links a:hover{color:var(--red)}
@@ -351,7 +347,7 @@
 <header>
   <div class="wrap">
     <nav>
-      <div class="logo"><span class="play"></span>Vidxir AI<span style="color:var(--red)">AI</span></div>
+      <div class="logo"><img class="logo-mark" src="favicon.svg" width="40" height="40" alt="">Vidxir<span style="color:var(--red)">AI</span></div>
       <div class="nav-links">
         <a href="#dates">Dates</a>
         <a href="#product">Product</a>
@@ -986,7 +982,7 @@
 <footer>
   <div class="wrap">
     <div class="center">
-      <div class="logo" style="justify-content:center;margin-bottom:12px"><span class="play"></span>Vidxir AI<span style="color:var(--red)">AI</span></div>
+      <div class="logo" style="justify-content:center;margin-bottom:12px"><img class="logo-mark" src="favicon.svg" width="40" height="40" alt="">Vidxir<span style="color:var(--red)">AI</span></div>
       <p style="font-size:13.5px;max-width:560px;margin:0 auto">
         AI YouTube automation — research a niche, write the script, generate the video, publish the channel.
         Vidxir AI is a product of <b style="color:var(--ink)">Geecore Limited</b>.

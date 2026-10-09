@@ -40,13 +40,7 @@
   .shell{max-width:1000px;margin:0 auto;padding:30px 24px 60px}
   .top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:34px}
   .logo{display:flex;align-items:center;gap:9px;font-weight:900;font-size:21px;letter-spacing:-.02em;text-decoration:none;color:var(--ink)}
-  .play{
-    width:30px;height:21px;background:var(--red);border-radius:6px;position:relative;flex:none
-  }
-  .play::after{
-    content:"";position:absolute;top:50%;left:50%;transform:translate(-45%,-50%);
-    border-left:8px solid #fff;border-top:5px solid transparent;border-bottom:5px solid transparent
-  }
+  .logo-mark{width:36px;height:36px;display:block;flex:none}
   .back{font-size:14px;font-weight:600;text-decoration:none;color:var(--gray)}
   .back:hover{color:var(--ink)}
 
@@ -153,7 +147,7 @@
 <div class="shell">
 
   <div class="top">
-    <a class="logo" href="index.html"><span class="play"></span>Vidxir AI<span style="color:var(--red)">AI</span></a>
+    <a class="logo" href="index.html"><img class="logo-mark" src="favicon.svg" width="36" height="36" alt="">Vidxir<span style="color:var(--red)">AI</span></a>
     <a class="back" href="index.html">← Back to the JV page</a>
   </div>
 
