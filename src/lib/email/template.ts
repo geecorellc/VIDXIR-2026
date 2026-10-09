@@ -14,7 +14,7 @@ export function renderEmailTemplate(
   cta?: { label: string; url: string },
 ) {
   return `<!doctype html>
-<html><body style="margin:0;background:#0B0A0C;font-family:Inter,system-ui,sans-serif;color:#F5F3F1;padding:32px">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;background:#0B0A0C;font-family:Inter,system-ui,sans-serif;color:#F5F3F1;padding:32px">
   <div style="max-width:520px;margin:0 auto;background:#141216;border:1px solid #241F22;border-radius:12px;padding:28px">
     <div style="font-family:Oswald,Arial Narrow,sans-serif;text-transform:uppercase;letter-spacing:1.5px;font-size:13px;color:#E8332B;margin-bottom:18px">Vidxir AI</div>
     <h1 style="font-family:Oswald,Arial Narrow,sans-serif;text-transform:uppercase;font-size:22px;margin:0 0 14px">${escapeHtml(heading)}</h1>

@@ -3,6 +3,12 @@ import { renderEmailTemplate } from "./template";
 import { renderMail } from "../admin/mail";
 
 describe("shared outgoing email styling", () => {
+  it("declares UTF-8 and preserves international text and punctuation", () => {
+    const html = renderMail("We’re here to help", "Hi José — your video is ready… 🎬\nThanks, Vidxir AI");
+    expect(html).toContain('<meta charset="utf-8">');
+    expect(html).toContain("We’re here to help");
+    expect(html).toContain("Hi José — your video is ready… 🎬<br>Thanks, Vidxir AI");
+  });
   it("uses the account email shell for support and campaign messages", () => {
     const html = renderMail("Support reply", "Hi Alex,\n\nWe’re here to help.");
     expect(html).toBe(renderEmailTemplate("Support reply", "Hi Alex,<br><br>We’re here to help."));
