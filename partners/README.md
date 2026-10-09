@@ -26,3 +26,7 @@ submissions do not send duplicate confirmation emails.
 Existing contacts retain their unsubscribe preference. Sharing this segment
 means Lyrixa and Vidxir JV contacts use the same broadcast recipient list.
 When changing the Pages project name/domain, update the API's origin allowlist.
+
+Both pages also load `livechat.js` and `livechat.css` for LiveChat license
+**19969473**, anchored at the bottom right on desktop and mobile. Keep these
+assets in sync with the app branch's `public/livechat.js` and `public/livechat.css`.

@@ -1,0 +1,29 @@
+/* Keep the vendor's responsive sizing and visibility; anchor it on the right. */
+#chat-widget-container {
+  position: fixed !important;
+  left: auto !important;
+  right: 16px !important;
+  bottom: 16px !important;
+}
+.livechat-fallback {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 100;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #141216;
+  color: #f5f3f1;
+  font:
+    13px/1.5 Arial,
+    sans-serif;
+}
+.livechat-fallback a {
+  color: inherit;
+}
+@media (max-width: 480px) {
+  #chat-widget-container {
+    right: 0 !important;
+    bottom: 0 !important;
+  }
+}
