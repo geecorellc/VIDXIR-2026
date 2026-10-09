@@ -251,13 +251,6 @@
 
   </div>
 
-  <p style="margin-top:26px;font-size:13px">
-    <span class="todo">TO CONFIRM</span>
-    &nbsp;This form has no endpoint yet. It validates and shows the success state, but
-    <b>nothing is stored and no email is sent</b> — wire <code>SUBSCRIBE_ENDPOINT</code> in the
-    script below to your list provider before sending traffic here.
-  </p>
-
   <footer>
     <p>
       <b>JVZoo disclaimer.</b> Vidxir AI is sold through JVZoo, an online marketplace platform. JVZoo is
@@ -287,12 +280,7 @@
 </div>
 
 <script>
-  /* Set this to your list provider's endpoint and the form POSTs for real.
-     Left null deliberately: a hard-coded placeholder URL would fail silently at
-     the one moment a partner is handing over their email, and a success screen
-     over a failed POST is worse than no form at all. While it is null the form
-     validates, shows the success state, and says so on the page. */
-  var SUBSCRIBE_ENDPOINT = null;
+  var SUBSCRIBE_ENDPOINT = "https://app.vidxir.com/api/subscribe";
 
   var form = document.getElementById("jvform");
 
@@ -349,16 +337,16 @@
 
     function succeed() { busy(false); form.classList.add("done"); }
 
-    if (!SUBSCRIBE_ENDPOINT) { busy(true); setTimeout(succeed, 600); return; }
-
     busy(true);
     fetch(SUBSCRIBE_ENDPOINT, {
       method: "POST",
+      credentials: "omit",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: name.value.trim(),
         email: email.value.trim(),
-        list: "vidxir-jv-launch"
+        list: "vidxir-jv-launch",
+        company: document.getElementById("company").value
       })
     }).then(function (res) {
       if (!res.ok) throw new Error("HTTP " + res.status);
