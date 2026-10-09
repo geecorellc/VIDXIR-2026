@@ -65,6 +65,11 @@ included in this implementation.
 
 ## Resend setup
 
+Outgoing mail uses **Goodluck Efe @Vidxir AI <support@vidxir.com>** as
+`EMAIL_FROM` on both Workers. Account and JV emails accept replies at
+`support@vidxir.com`; support-ticket emails keep their ticket-specific Reply-To
+address so replies return to the correct conversation.
+
 1. Keep the verified sending domain and receiving MX records configured in
    Resend. If receiving is enabled on another subdomain, set `SUPPORT_EMAIL` on
    both Workers to a mailbox on that receiving domain. The default is

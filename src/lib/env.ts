@@ -41,7 +41,9 @@ const csv = z
   );
 
 const schema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  NODE_ENV: z
+    .enum(["development", "test", "production"])
+    .default("development"),
   APP_URL: z.string().url().default("http://localhost:3000"),
 
   VIDXIR_USE_MOCK_PROVIDERS: bool.default("false"),
@@ -79,7 +81,9 @@ const schema = z.object({
   SESSION_SECRET: hex32,
 
   EMAIL_PROVIDER: z.enum(["console", "resend"]).default("console"),
-  EMAIL_FROM: z.string().default("Vidxir AI <no-reply@vidxir.com>"),
+  EMAIL_FROM: z
+    .string()
+    .default('"Goodluck Efe @Vidxir AI" <support@vidxir.com>'),
   RESEND_API_KEY: z.string().optional(),
   RESEND_WEBHOOK_SECRET: z.string().optional(),
   SUPPORT_EMAIL: z.string().email().default("support@vidxir.com"),
@@ -215,7 +219,9 @@ const schema = z.object({
    */
   SEEDANCE_API_KEY: z.string().optional(),
   /** Ark API host. */
-  SEEDANCE_BASE_URL: z.string().default("https://ark.ap-southeast.volces.com/api/v3"),
+  SEEDANCE_BASE_URL: z
+    .string()
+    .default("https://ark.ap-southeast.volces.com/api/v3"),
   /**
    * Seedance model id. Ark versions these, so it is configurable.
    *
@@ -504,7 +510,9 @@ export function bedrockRegion(): string | undefined {
     process.env["AWS_REGION"],
     process.env["AWS_DEFAULT_REGION"],
   ];
-  return candidates.find((v) => typeof v === "string" && v.trim().length > 0)?.trim();
+  return candidates
+    .find((v) => typeof v === "string" && v.trim().length > 0)
+    ?.trim();
 }
 
 /** True when mock providers are active (development/test only). */

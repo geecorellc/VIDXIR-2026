@@ -73,7 +73,7 @@ describe("Admin workspace on Cloudflare D1", { timeout: 20000 }, () => {
     mailRuntime = {
       ...bindings,
       RESEND_API_KEY: "test-key",
-      EMAIL_FROM: "Vidxir AI <no-reply@vidxir.com>",
+      EMAIL_FROM: '"Goodluck Efe @Vidxir AI" <support@vidxir.com>',
       SUPPORT_EMAIL: "support@vidxir.com",
     };
     await db
@@ -123,18 +123,17 @@ describe("Admin workspace on Cloudflare D1", { timeout: 20000 }, () => {
     expect(row.html).toContain("Alex &lt;Partner&gt;");
     expect(row.html).toContain("The Vidxir AI team");
     expect(row.html).toContain("https://vidxir.com/partners/");
-    const request = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ id: "jv-confirmation-provider-id" }), {
-          status: 200,
-        }),
-      );
+    const request = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "jv-confirmation-provider-id" }), {
+        status: 200,
+      }),
+    );
     vi.stubGlobal("fetch", request);
     await processMail(mailRuntime, row.id as string);
     await processMail(mailRuntime, row.id as string);
     expect(request).toHaveBeenCalledTimes(1);
     const message = JSON.parse(request.mock.calls[0]![1].body);
+    expect(message.from).toBe('"Goodluck Efe @Vidxir AI" <support@vidxir.com>');
     expect(message.to).toEqual(["jv-partner@example.invalid"]);
     expect(message.text).toMatch(/The Vidxir AI team$/);
     expect(message.html).toBe(row.html);

@@ -58,6 +58,7 @@ class ResendEmailProvider implements EmailProvider {
       },
       body: JSON.stringify({
         from: env().EMAIL_FROM,
+        reply_to: env().SUPPORT_EMAIL,
         to: [message.to],
         subject: message.subject,
         text: message.text,

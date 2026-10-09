@@ -127,7 +127,7 @@
   },
   "vars": {
     "APP_URL": "https://app.vidxir.com",
-    "EMAIL_FROM": "Vidxir AI <no-reply@vidxir.com>",
+    "EMAIL_FROM": "\"Goodluck Efe @Vidxir AI\" <support@vidxir.com>",
     "EMAIL_PROVIDER": "resend",
     "GOOGLE_CLIENT_ID": "1091078203513-ucbo1aun3bbs44k5ier7t48m1osvsv25.apps.googleusercontent.com",
     "LOG_LEVEL": "info",
