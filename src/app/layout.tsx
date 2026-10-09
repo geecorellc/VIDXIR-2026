@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { GlobalStyle } from "@/components/ui/GlobalStyle";
 import { ThemeScript } from "@/components/ui/ThemeScript";
+import "../../public/livechat.css";
 
 export const metadata: Metadata = {
   title: "Vidxir AI — One studio. Every stage of the video.",
@@ -12,7 +14,11 @@ export const metadata: Metadata = {
       { url: "/favicon.svg", type: "image/svg+xml" },
       { url: "/favicon.ico", sizes: "32x32", type: "image/x-icon" },
     ],
-    apple: { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    apple: {
+      url: "/apple-touch-icon.png",
+      sizes: "180x180",
+      type: "image/png",
+    },
   },
   robots: { index: true, follow: true },
 };
@@ -62,7 +68,32 @@ export default function RootLayout({
         <ThemeScript />
         <GlobalStyle />
       </head>
-      <body className="vidxir-root">{children}</body>
+      <body className="vidxir-root">
+        {children}
+        <Script
+          id="vidxir-livechat"
+          src="/livechat.js"
+          strategy="afterInteractive"
+        />
+        <noscript>
+          <div className="livechat-fallback">
+            <a
+              href="https://www.livechat.com/chat-with/19969473/"
+              rel="nofollow"
+            >
+              Chat with us
+            </a>
+            {", powered by "}
+            <a
+              href="https://www.livechat.com/?welcome"
+              rel="noopener nofollow"
+              target="_blank"
+            >
+              LiveChat
+            </a>
+          </div>
+        </noscript>
+      </body>
     </html>
   );
 }

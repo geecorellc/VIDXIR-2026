@@ -70,7 +70,7 @@ function imageOrigins(): string[] {
  *    and therefore makes every route dynamic — a real change to the application's
  *    caching behaviour, which §20 says not to make speculatively and §2 does not
  *    put in scope. So this directive is not an XSS defence, and is not claimed as
- *    one; what it does do is confine script loading to our own origin, so an
+ *    one; what it does do is confine script loading to our own and LiveChat's origins, so an
  *    injected `<script src="//evil/x.js">` is still refused.
  *  - `style-src` includes `'unsafe-inline'` for two structural reasons: the UI is
  *    styled with React inline style objects throughout (ported from the
@@ -84,8 +84,8 @@ function imageOrigins(): string[] {
  *    another origin.
  *  - `frame-ancestors 'none'` is the modern clickjacking control and supersedes
  *    `X-Frame-Options`, which is kept alongside it for older browsers.
- *  - `connect-src 'self'` — every fetch this app makes is to its own API. Provider
- *    calls all happen server-side, which is why no provider host appears here.
+ *  - Provider calls happen server-side. LiveChat is the browser-side exception:
+ *    its chat widget needs its HTTPS and WebSocket service origins.
  *  - `upgrade-insecure-requests` in production only; in development the app is
  *    served over http and the directive would break every asset.
  */
@@ -95,9 +95,9 @@ function contentSecurityPolicy(): string {
   const directives: string[] = [
     "default-src 'self'",
     // 'unsafe-eval' is required by React Fast Refresh, and only in development.
-    `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"}`,
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "font-src 'self' https://fonts.gstatic.com data:",
+    `script-src 'self' 'unsafe-inline' https://*.livechatinc.com https://*.livechat-static.com${isProduction ? "" : " 'unsafe-eval'"}`,
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.livechatinc.com",
+    "font-src 'self' https://fonts.gstatic.com https://*.livechatinc.com https://*.livechat-static.com data:",
     /**
      * YouTube's hosts are added to `img-src` only, not to `media-src`.
      *
@@ -106,18 +106,18 @@ function contentSecurityPolicy(): string {
      * nothing in the app creates, and §22's line is that source media is never
      * fetched — so the narrower directive is the one that matches what the code does.
      */
-    `img-src 'self' data: blob: ${[...imageOrigins(), ...YOUTUBE_IMAGE_ORIGINS].join(" ")}`,
+    `img-src 'self' data: blob: https://*.livechatinc.com https://*.livechat-static.com https://*.livechat-files.com https://*.files-text.com ${[...imageOrigins(), ...YOUTUBE_IMAGE_ORIGINS].join(" ")}`,
     // blob: covers the rendered-video preview element.
-    `media-src 'self' blob: ${imageOrigins().join(" ")}`,
-    "connect-src 'self'",
+    `media-src 'self' blob: https://*.livechatinc.com https://*.livechat-static.com ${imageOrigins().join(" ")}`,
+    "connect-src 'self' https://*.livechatinc.com wss://*.livechatinc.com https://*.text.com wss://*.text.com",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    // Sandboxed srcDoc mail previews use about: documents; external frames stay blocked.
-    "frame-src 'self' about:",
+    // Sandboxed mail previews and the LiveChat widget are the allowed frames.
+    "frame-src 'self' about: https://*.livechatinc.com https://*.livechat-static.com",
   ];
 
   if (isProduction) directives.push("upgrade-insecure-requests");
@@ -176,9 +176,7 @@ const nextConfig: NextConfig = {
          * instance in rotation.
          */
         source: "/api/:path(health|ready)",
-        headers: [
-          { key: "Cache-Control", value: "no-store, max-age=0" },
-        ],
+        headers: [{ key: "Cache-Control", value: "no-store, max-age=0" }],
       },
     ];
   },

@@ -96,6 +96,15 @@ are not automatically backfilled: the integration processes new webhook events.
 
 ## Deployment
 
+### LiveChat
+
+The app's root layout loads `/livechat.js` once after hydration for LiveChat
+license **19969473**. The JV landing and join pages load the matching script.
+Both use `livechat.css` to keep the widget at the bottom right, including mobile.
+The app's CSP permits the LiveChat script, frame, assets, and chat connections.
+LiveChat agent availability and chat content are managed in the LiveChat account;
+there are no additional Worker secrets for this integration.
+
 ### JV mailing list
 
 The static `partners/join.html` form posts to
