@@ -19,7 +19,10 @@ form. It reuses the existing Resend segment **Lyrixsa – JV Launch Updates**;
 no new segment or API key on this static site is required. The app Worker
 needs a full-access `RESEND_API_KEY` in the same Resend account as that segment.
 
-The form displays success only after the API confirms the contact was saved.
+The form displays success only after the API confirms the contact was saved
+and a welcome email was added to the durable outbox. The email uses the app's
+shared account template and signs off with "The Vidxir AI team". Repeated
+submissions do not send duplicate confirmation emails.
 Existing contacts retain their unsubscribe preference. Sharing this segment
 means Lyrixa and Vidxir JV contacts use the same broadcast recipient list.
 When changing the Pages project name/domain, update the API's origin allowlist.
