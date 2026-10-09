@@ -12,9 +12,12 @@
 import type { ComponentType, InputHTMLAttributes, ReactNode } from "react";
 import { useId } from "react";
 import { color, font, radius } from "@/lib/design/tokens";
+import { PasswordInput } from "./PasswordInput";
 
-export interface FieldProps
-  extends Omit<InputHTMLAttributes<HTMLInputElement>, "style" | "id"> {
+export interface FieldProps extends Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  "style" | "id"
+> {
   label: string;
   /** A lucide icon component, e.g. Mail. */
   icon?: ComponentType<{ size?: number; color?: string }>;
@@ -33,6 +36,8 @@ export function Field({
 }: FieldProps) {
   const id = useId();
   const describedBy = error ? `${id}-error` : hint ? `${id}-hint` : undefined;
+  const Input = inputProps.type === "password" ? PasswordInput : "input";
+  const { type, ...attributes } = inputProps;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -62,8 +67,9 @@ export function Field({
         }}
       >
         {Icon && <Icon size={15} color={color.textFaint} />}
-        <input
-          {...inputProps}
+        <Input
+          {...attributes}
+          {...(type === "password" ? {} : { type })}
           id={id}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
@@ -90,7 +96,10 @@ export function Field({
           {error}
         </span>
       ) : hint ? (
-        <span id={`${id}-hint`} style={{ fontSize: 12, color: color.textFaint }}>
+        <span
+          id={`${id}-hint`}
+          style={{ fontSize: 12, color: color.textFaint }}
+        >
           {hint}
         </span>
       ) : null}
@@ -161,11 +170,18 @@ export function TextAreaField({
         }}
       />
       {error ? (
-        <span id={`${id}-error`} role="alert" style={{ fontSize: 12, color: color.rose }}>
+        <span
+          id={`${id}-error`}
+          role="alert"
+          style={{ fontSize: 12, color: color.rose }}
+        >
           {error}
         </span>
       ) : hint ? (
-        <span id={`${id}-hint`} style={{ fontSize: 12, color: color.textFaint }}>
+        <span
+          id={`${id}-hint`}
+          style={{ fontSize: 12, color: color.textFaint }}
+        >
           {hint}
         </span>
       ) : null}
@@ -234,11 +250,18 @@ export function SelectField({
         ))}
       </select>
       {error ? (
-        <span id={`${id}-error`} role="alert" style={{ fontSize: 12, color: color.rose }}>
+        <span
+          id={`${id}-error`}
+          role="alert"
+          style={{ fontSize: 12, color: color.rose }}
+        >
           {error}
         </span>
       ) : hint ? (
-        <span id={`${id}-hint`} style={{ fontSize: 12, color: color.textFaint }}>
+        <span
+          id={`${id}-hint`}
+          style={{ fontSize: 12, color: color.textFaint }}
+        >
           {hint}
         </span>
       ) : null}

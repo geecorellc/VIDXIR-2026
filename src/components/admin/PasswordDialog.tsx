@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import { api, messageOf } from "@/services/api-client";
 import { Alert, Button, Dialog } from "./ui";
 export function PasswordDialog({ onClose }: { onClose: () => void }) {
@@ -43,9 +44,8 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
         </p>
         <label>
           Current password
-          <input
+          <PasswordInput
             required
-            type="password"
             autoComplete="current-password"
             value={current}
             onChange={(e) => setCurrent(e.target.value)}
@@ -53,9 +53,8 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
         </label>
         <label>
           New password
-          <input
+          <PasswordInput
             required
-            type="password"
             minLength={10}
             maxLength={200}
             autoComplete="new-password"
@@ -65,9 +64,8 @@ export function PasswordDialog({ onClose }: { onClose: () => void }) {
         </label>
         <label>
           Confirm new password
-          <input
+          <PasswordInput
             required
-            type="password"
             minLength={10}
             maxLength={200}
             autoComplete="new-password"

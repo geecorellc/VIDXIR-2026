@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { PasswordInput } from "@/components/ui/PasswordInput";
 import {
   ArrowLeft,
   ArrowRight,
@@ -539,8 +540,7 @@ function ActionDialog({
         )}
         <label>
           Your current administrator password
-          <input
-            type="password"
+          <PasswordInput
             required
             autoComplete="current-password"
             value={password}
@@ -625,8 +625,7 @@ function CreateUser({
         </label>
         <label>
           Initial password
-          <input
-            type="password"
+          <PasswordInput
             required
             minLength={10}
             maxLength={200}
@@ -637,8 +636,7 @@ function CreateUser({
         </label>
         <label>
           Your administrator password
-          <input
-            type="password"
+          <PasswordInput
             required
             autoComplete="current-password"
             value={adminPassword}
