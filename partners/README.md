@@ -2,8 +2,10 @@
 
 Deploy this folder as a separate Cloudflare Pages project named `vidxir-jv`,
 using production branch `feat/jv-partners-page`, root directory `partners`,
-build command `exit 0`, and output directory `.`. The planned custom domain is
-`jv.vidxir.com`. Do not deploy the repository root's app Worker for this site.
+build command `exit 0`, and output directory `.`. The live join page is
+`https://vidxir.com/partners/join`. The API allows the `vidxir.com` and
+`www.vidxir.com` origins as well as the optional `jv.vidxir.com` domain.
+Do not deploy the repository root's app Worker for this site.
 
 Preview locally with:
 
