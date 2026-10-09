@@ -91,6 +91,24 @@ are not automatically backfilled: the integration processes new webhook events.
 
 ## Deployment
 
+### JV mailing list
+
+The static `partners/join.html` form posts to
+`https://app.vidxir.com/api/subscribe`. This public endpoint uses the web
+Worker's existing full-access `RESEND_API_KEY` to look up and reuse the exact
+segment **Lyrixsa – JV Launch Updates**. It never creates a segment. Both
+products' JV contacts therefore share that mailing list; take care when
+selecting recipients for broadcasts. Existing contacts keep their other
+memberships and unsubscribe preferences. No confirmation email is sent by
+this endpoint.
+
+Allowed form origins are `https://jv.vidxir.com`, `https://vidxir-jv.pages.dev`,
+that Pages project's preview subdomains, `https://app.vidxir.com`, and the local
+preview on `http://localhost:3002` / `http://127.0.0.1:3002`. If the Pages project
+or custom domain changes, update `allowedJvOrigin` in
+`src/lib/marketing/jv-list.ts`. Provider failures return an error so the form
+can offer a retry instead of displaying a false success.
+
 Apply D1 migrations before releasing either Worker:
 
 ```sh
