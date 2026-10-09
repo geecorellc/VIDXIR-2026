@@ -135,7 +135,7 @@ export function MailPanel() {
                 <Mail size={28} />
                 <p>
                   {mode === "inbound"
-                    ? "Incoming emails will appear here when the Resend webhook is connected."
+                    ? "No incoming emails yet. New emails will appear here once received."
                     : "No outgoing mail yet."}
                 </p>
               </Empty>
