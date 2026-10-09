@@ -102,7 +102,8 @@ selecting recipients for broadcasts. Existing contacts keep their other
 memberships and unsubscribe preferences. No confirmation email is sent by
 this endpoint.
 
-Allowed form origins are `https://jv.vidxir.com`, `https://vidxir-jv.pages.dev`,
+Allowed form origins include `https://vidxir.com`, `https://www.vidxir.com`,
+`https://jv.vidxir.com`, `https://vidxir-jv.pages.dev`,
 that Pages project's preview subdomains, `https://app.vidxir.com`, and the local
 preview on `http://localhost:3002` / `http://127.0.0.1:3002`. If the Pages project
 or custom domain changes, update `allowedJvOrigin` in

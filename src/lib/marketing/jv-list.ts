@@ -5,6 +5,8 @@ export function allowedJvOrigin(origin: string): boolean {
   if (
     [
       "https://app.vidxir.com",
+      "https://vidxir.com",
+      "https://www.vidxir.com",
       "https://jv.vidxir.com",
       "https://vidxir-jv.pages.dev",
     ].includes(origin)

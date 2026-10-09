@@ -88,6 +88,8 @@ describe("JV lead capture", () => {
   });
   it("only allows the JV site, its previews, and the local preview", () => {
     for (const origin of [
+      "https://vidxir.com",
+      "https://www.vidxir.com",
       "https://jv.vidxir.com",
       "https://vidxir-jv.pages.dev",
       "https://abc123.vidxir-jv.pages.dev",
@@ -95,6 +97,8 @@ describe("JV lead capture", () => {
     ])
       expect(allowedJvOrigin(origin)).toBe(true);
     for (const origin of [
+      "https://vidxir.com.evil.com",
+      "http://vidxir.com",
       "https://evil.com",
       "https://vidxir-jv.pages.dev.evil.com",
       "https://other.pages.dev",
