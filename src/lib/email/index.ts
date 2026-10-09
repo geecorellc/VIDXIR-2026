@@ -7,6 +7,7 @@
  * one: the token in the log genuinely works. Production refuses `console`
  * (enforced in lib/env).
  */
+import { renderEmailTemplate as wrap, escapeHtml } from "./template";
 import { env } from "@/lib/env";
 import { NotConfiguredError, ProviderError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
@@ -67,10 +68,14 @@ class ResendEmailProvider implements EmailProvider {
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new ProviderError("resend", `${response.status} ${detail.slice(0, 300)}`, {
-        // 4xx other than 429 will not succeed on retry.
-        retryable: response.status >= 500 || response.status === 429,
-      });
+      throw new ProviderError(
+        "resend",
+        `${response.status} ${detail.slice(0, 300)}`,
+        {
+          // 4xx other than 429 will not succeed on retry.
+          retryable: response.status >= 500 || response.status === 429,
+        },
+      );
     }
   }
 }
@@ -100,24 +105,6 @@ function appUrl(path: string): string {
   return `${env().APP_URL.replace(/\/$/, "")}${path}`;
 }
 
-/** Minimal dark-themed shell matching the Vidxir AI palette. */
-function wrap(heading: string, body: string, cta?: { label: string; url: string }) {
-  return `<!doctype html>
-<html><body style="margin:0;background:#0B0A0C;font-family:Inter,system-ui,sans-serif;color:#F5F3F1;padding:32px">
-  <div style="max-width:520px;margin:0 auto;background:#141216;border:1px solid #241F22;border-radius:12px;padding:28px">
-    <div style="font-family:Oswald,Arial Narrow,sans-serif;text-transform:uppercase;letter-spacing:1.5px;font-size:13px;color:#E8332B;margin-bottom:18px">Vidxir AI</div>
-    <h1 style="font-family:Oswald,Arial Narrow,sans-serif;text-transform:uppercase;font-size:22px;margin:0 0 14px">${heading}</h1>
-    <div style="font-size:14px;line-height:1.6;color:#B5AEB1">${body}</div>
-    ${
-      cta
-        ? `<a href="${cta.url}" style="display:inline-block;margin-top:22px;background:#E8332B;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-size:14px;font-weight:600">${cta.label}</a>
-    <p style="font-size:12px;color:#6E666A;margin-top:20px;word-break:break-all">Or paste this link into your browser:<br>${cta.url}</p>`
-        : ""
-    }
-  </div>
-</body></html>`;
-}
-
 export async function sendVerificationEmail(params: {
   to: string;
   name: string;
@@ -130,7 +117,7 @@ export async function sendVerificationEmail(params: {
     text: `Hi ${params.name},\n\nConfirm your email to finish setting up Vidxir AI:\n${url}\n\nThis link expires in 24 hours.`,
     html: wrap(
       "Confirm your email",
-      `Hi ${params.name}, confirm your email address to finish setting up your Vidxir AI studio. This link expires in 24 hours.`,
+      `Hi ${escapeHtml(params.name)}, confirm your email address to finish setting up your Vidxir AI studio. This link expires in 24 hours.`,
       { label: "Confirm email", url },
     ),
   });
@@ -142,14 +129,16 @@ export async function sendPasswordResetEmail(params: {
   name: string;
   token: string;
 }): Promise<void> {
-  const url = appUrl(`/reset-password?token=${encodeURIComponent(params.token)}`);
+  const url = appUrl(
+    `/reset-password?token=${encodeURIComponent(params.token)}`,
+  );
   await emailProvider().send({
     to: params.to,
     subject: "Reset your Vidxir AI password",
     text: `Hi ${params.name},\n\nReset your Vidxir AI password:\n${url}\n\nThis link expires in 1 hour. If you did not request it, you can ignore this email.`,
     html: wrap(
       "Reset your password",
-      `Hi ${params.name}, use the button below to choose a new password. This link expires in 1 hour. If you did not request a reset, you can safely ignore this email.`,
+      `Hi ${escapeHtml(params.name)}, use the button below to choose a new password. This link expires in 1 hour. If you did not request a reset, you can safely ignore this email.`,
       { label: "Reset password", url },
     ),
   });
@@ -170,7 +159,7 @@ export async function sendPublishNotificationEmail(params: {
     text: `Hi ${params.name},\n\nVidxir AI published "${params.videoTitle}" to ${params.channelTitle}.\n${params.videoUrl}`,
     html: wrap(
       "Video published",
-      `Vidxir AI published <strong style="color:#F5F3F1">${params.videoTitle}</strong> to ${params.channelTitle}.`,
+      `Vidxir AI published <strong style="color:#F5F3F1">${escapeHtml(params.videoTitle)}</strong> to ${escapeHtml(params.channelTitle)}.`,
       { label: "View on YouTube", url: params.videoUrl },
     ),
   });
@@ -191,7 +180,7 @@ export async function sendJobFailureEmail(params: {
     text: `Hi ${params.name},\n\n"${params.projectTitle}" failed at the ${params.stage} stage.\n\n${params.message}\n\nRetry or review it here: ${params.projectUrl}`,
     html: wrap(
       "A video needs your attention",
-      `<strong style="color:#F5F3F1">${params.projectTitle}</strong> failed at the ${params.stage} stage.<br><br>${params.message}`,
+      `<strong style="color:#F5F3F1">${escapeHtml(params.projectTitle)}</strong> failed at the ${escapeHtml(params.stage)} stage.<br><br>${escapeHtml(params.message)}`,
       { label: "Review project", url: params.projectUrl },
     ),
   });

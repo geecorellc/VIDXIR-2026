@@ -1,4 +1,6 @@
 /** Durable Resend outbox. No Next.js imports: the backend Worker runs this directly. */
+import { renderEmailTemplate, escapeHtml } from "../email/template";
+export { escapeHtml } from "../email/template";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { D1Database, Queue, R2Bucket } from "@cloudflare/workers-types";
 import type { MailRow, Ticket, TicketMessage } from "./types";
@@ -10,15 +12,11 @@ export interface MailRuntime {
   EMAIL_FROM?: string;
   SUPPORT_EMAIL?: string;
 }
-export const escapeHtml = (v: string) =>
-  v
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 export function renderMail(heading: string, message: string): string {
-  return `<!doctype html><html><body style="margin:0;background:#0B0A0C;color:#F5F3F1;font-family:Inter,Arial,sans-serif"><div style="max-width:600px;margin:auto;padding:40px 28px"><p style="font-size:12px;letter-spacing:3px;color:#E8332B">VIDXIR AI</p><h1 style="font-size:25px">${escapeHtml(heading)}</h1><div style="line-height:1.8;white-space:pre-wrap">${escapeHtml(message)}</div><hr style="border:0;border-top:1px solid #333;margin-top:36px"><p style="font-size:12px;color:#aaa">Vidxir AI · Your video creation studio</p></div></body></html>`;
+  return renderEmailTemplate(
+    heading,
+    escapeHtml(message).replace(/\r?\n/g, "<br>"),
+  );
 }
 export function mailbox(value: string): string {
   return (value.match(/<([^>]+)>/)?.[1] ?? value).trim().toLowerCase();
