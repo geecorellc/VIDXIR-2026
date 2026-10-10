@@ -1,5 +1,8 @@
 # Cloudflare deployment
 
+For the remaining AI/media provider keys and model selectors, see
+[PRODUCTION_ENV.md](PRODUCTION_ENV.md).
+
 The public app uses **https://app.vidxir.com**. Cloudflare Custom Domains manage
 its DNS and TLS. Wrangler is authenticated on this machine; on another machine,
 run `npm run cf:login`, then `npm run cf:whoami`.
