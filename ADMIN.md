@@ -65,8 +65,10 @@ included in this implementation.
 
 ## Resend setup
 
-Outgoing mail uses **Goodluck Efe @Vidxir AI <support@vidxir.com>** as
-`EMAIL_FROM` on both Workers. Account and JV emails accept replies at
+App mail uses **Vidxir AI Support <support@vidxir.com>** as `EMAIL_FROM` on both
+Workers. Confirmations requested from the static JV pages use
+**Goodluck Efe @Vidxir AI <support@vidxir.com>**, configured as `JV_EMAIL_FROM`.
+Account and JV emails accept replies at
 `support@vidxir.com`; support-ticket emails keep their ticket-specific Reply-To
 address so replies return to the correct conversation.
 

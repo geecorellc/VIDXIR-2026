@@ -23,7 +23,7 @@ export async function queueJvConfirmation(
   )
     .bind(
       id,
-      runtime.EMAIL_FROM ?? '"Goodluck Efe @Vidxir AI" <support@vidxir.com>',
+      runtime.JV_EMAIL_FROM ?? '"Goodluck Efe @Vidxir AI" <support@vidxir.com>',
       email,
       subject,
       body,

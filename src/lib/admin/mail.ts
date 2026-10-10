@@ -10,6 +10,7 @@ export interface MailRuntime {
   MAINTENANCE_QUEUE: Queue;
   RESEND_API_KEY?: string;
   EMAIL_FROM?: string;
+  JV_EMAIL_FROM?: string;
   SUPPORT_EMAIL?: string;
 }
 export function renderMail(heading: string, message: string): string {

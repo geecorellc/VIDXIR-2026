@@ -73,7 +73,8 @@ describe("Admin workspace on Cloudflare D1", { timeout: 20000 }, () => {
     mailRuntime = {
       ...bindings,
       RESEND_API_KEY: "test-key",
-      EMAIL_FROM: '"Goodluck Efe @Vidxir AI" <support@vidxir.com>',
+      EMAIL_FROM: "Vidxir AI Support <support@vidxir.com>",
+      JV_EMAIL_FROM: '"Goodluck Efe @Vidxir AI" <support@vidxir.com>',
       SUPPORT_EMAIL: "support@vidxir.com",
     };
     await db
@@ -151,6 +152,21 @@ describe("Admin workspace on Cloudflare D1", { timeout: 20000 }, () => {
         )
         .first(),
     ).toMatchObject({ status: "queued" });
+  });
+  it("uses the app support sender when a list confirmation is requested from the app", async () => {
+    await queueJvConfirmation(
+      { ...mailRuntime, JV_EMAIL_FROM: mailRuntime.EMAIL_FROM },
+      { name: "App User", email: "app-list@example.invalid" },
+    );
+    expect(
+      await db
+        .prepare(
+          "SELECT from_address FROM admin_emails WHERE to_address='app-list@example.invalid'",
+        )
+        .first(),
+    ).toMatchObject({
+      from_address: "Vidxir AI Support <support@vidxir.com>",
+    });
   });
   async function account(
     email = `${crypto.randomUUID()}@example.invalid`,

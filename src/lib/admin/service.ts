@@ -36,6 +36,7 @@ export function mailRuntime(): MailRuntime {
     ...nativeBindings(),
     RESEND_API_KEY: config.RESEND_API_KEY,
     EMAIL_FROM: config.EMAIL_FROM,
+    JV_EMAIL_FROM: config.JV_EMAIL_FROM,
     SUPPORT_EMAIL: config.SUPPORT_EMAIL,
   };
 }
@@ -554,7 +555,7 @@ function mailInsert(
     input.ticketId ?? null,
     input.dispatchId ?? null,
     input.actorId ?? null,
-    runtime.EMAIL_FROM ?? '"Goodluck Efe @Vidxir AI" <support@vidxir.com>',
+    runtime.EMAIL_FROM ?? "Vidxir AI Support <support@vidxir.com>",
     input.to,
     input.subject,
     input.body,
@@ -735,7 +736,7 @@ export async function dispatchMail(
         id,
         id,
         actorId,
-        runtime.EMAIL_FROM ?? '"Goodluck Efe @Vidxir AI" <support@vidxir.com>',
+        runtime.EMAIL_FROM ?? "Vidxir AI Support <support@vidxir.com>",
         draft.subject,
         draft.message,
         renderMail(draft.heading, draft.message),

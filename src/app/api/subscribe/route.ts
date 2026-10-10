@@ -68,7 +68,11 @@ export async function POST(request: NextRequest) {
     if (!key)
       return reply({ error: "Signup is temporarily unavailable." }, 503);
     await subscribeJv(key, parsed.data);
-    await queueJvConfirmation(mailRuntime(), parsed.data);
+    const runtime = mailRuntime();
+    // The app uses its support identity; static marketing pages use the JV sender.
+    if (request.headers.get("origin") === new URL(env().APP_URL).origin)
+      runtime.JV_EMAIL_FROM = runtime.EMAIL_FROM;
+    await queueJvConfirmation(runtime, parsed.data);
     return reply({ ok: true });
   } catch (error) {
     if (isAppError(error)) return reply({ error: error.message }, error.status);

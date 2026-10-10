@@ -81,7 +81,8 @@ const schema = z.object({
   SESSION_SECRET: hex32,
 
   EMAIL_PROVIDER: z.enum(["console", "resend"]).default("console"),
-  EMAIL_FROM: z
+  EMAIL_FROM: z.string().default("Vidxir AI Support <support@vidxir.com>"),
+  JV_EMAIL_FROM: z
     .string()
     .default('"Goodluck Efe @Vidxir AI" <support@vidxir.com>'),
   RESEND_API_KEY: z.string().optional(),
