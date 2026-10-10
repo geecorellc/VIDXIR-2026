@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { nativeBindings } from "@/lib/cloudflare/bindings";
 import { env } from "@/lib/env";
+import { supportTicketAcknowledgement } from "@/lib/email/support-ticket";
 import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { assertPasswordAcceptable } from "@/lib/auth/service";
 import { creditBalanceFor, ensureMonthlyGrant } from "@/lib/credits/service";
@@ -500,7 +501,7 @@ export async function createTicket(input: {
     mailId = crypto.randomUUID(),
     now = Date.now(),
     runtime = mailRuntime();
-  const text = `Hi ${input.name},\n\nYour support ticket is open. Reply to this email to add more detail to the same thread.\n\n${input.message}`;
+  const acknowledgement = supportTicketAcknowledgement(input);
   await database().batch([
     database()
       .prepare(
@@ -526,7 +527,8 @@ export async function createTicket(input: {
       to: input.email,
       subject: `Support ticket ${id} — ${input.subject}`,
       heading: "Your support ticket is open",
-      body: text,
+      body: acknowledgement.text,
+      html: acknowledgement.html,
       replyTo: supportReplyAddress(id, runtime.SUPPORT_EMAIL),
     }),
   ]);
@@ -544,6 +546,7 @@ function mailInsert(
     subject: string;
     heading: string;
     body: string;
+    html?: string;
     replyTo?: string;
   },
 ) {
@@ -559,7 +562,7 @@ function mailInsert(
     input.to,
     input.subject,
     input.body,
-    renderMail(input.heading, input.body),
+    input.html ?? renderMail(input.heading, input.body),
     input.replyTo ?? runtime.SUPPORT_EMAIL ?? "support@vidxir.com",
   );
 }
